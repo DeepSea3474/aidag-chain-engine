@@ -1,0 +1,39 @@
+
+# Editor/OS
+# Rust derleme ciktisi
+# Yerel ortam / secret dosyalari (asla commit edilmez)
+**/target
+*.env
+*.key
+*.log
+*.pem
+*.swp
+.DS_Store
+.env
+/target
+/tmp/
+aidag-data-*.log
+aidag-key-*.bin
+nodeA.log
+nodeB.log
+secrets/
+wallets/
+__pycache__/
+*.pyc
+aidag_inspect.txt
+*.YEDEK*
+aidag-data-*.GUVENLI-YEDEK
+*.GUVENLI-YEDEK
+aidag-key-*
+aidag-data-*.log
+aidag-data-*.log.BOZUK*
+
+# Is/strateji belgeleri (repo disi)
+ON_SATIS_PLANI.md
+*_On_Satis_*.md
+avm-sozlesmeler/*.bin
+
+# ERC-20 uyumluluk testi icin gerekli (include_str! ile teste gomulu)
+!avm-sozlesmeler/Token.bin
+!avm-sozlesmeler/Token.sol
+avm-sozlesmeler/token-cikti/

@@ -1,0 +1,36 @@
+[package]
+name = "lsc-engine"
+version = "0.1.0"
+edition = "2021"
+authors = ["AIDAG Chain Contributors"]
+description = "LSC (Light Soulware Chain) - AI destekli, DAG tabanli L1 konsensus motoru."
+license = "Apache-2.0"
+
+[dependencies]
+blake3 = "=1.5.5"
+ed25519-dalek = { version = "=2.1.1", default-features = false, features = ["std", "zeroize"] }
+revm = "41.0.0"
+thiserror = "=1.0.69"
+# secp256k1 (Ethereum/EVM cuzdan uyumu): imza dogrulama. revm zaten k256 kullaniyor.
+k256 = { version = "=0.13.4", features = ["ecdsa"] }
+# keccak256: Ethereum tarzi 0x adres turetme. alloy zaten sha3 0.11 kullaniyor.
+sha3 = "=0.11.0"
+# k256 feature: imzadan gonderen kurtarma (recover_signer) icin gerekli.
+alloy-consensus = { version = "2.1.0", features = ["k256"] }
+alloy-eips = "2.1.0"
+
+[dev-dependencies]
+rayon = "=1.10.0"
+rand = "=0.8.5"
+hex = "=0.4.3"
+# Sadece small-order guard izolasyon testi icin (identity pk + R=[s]B forgery).
+# ed25519-dalek 2.1.1 ile ayni curve25519-dalek 4.1.x surumunu kullanir.
+curve25519-dalek = "=4.1.3"
+# eth_sendRawTransaction testi: imzali Ethereum tx uretmek icin (sadece test).
+alloy-signer = "1.0"
+alloy-signer-local = "1.0"
+alloy-primitives = "1.0"
+
+# Konsensus-kritik kripto bagimliliklari icin kesin surumler.
+# Cargo.lock REPO'YA COMMIT EDILMELI (reproducible builds).
+# CI: cargo audit ve cargo deny check zorunlu.

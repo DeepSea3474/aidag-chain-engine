@@ -1,0 +1,3 @@
+/target
+# Cargo.lock konsensüs-kritik bir crate olduğu için REPO'YA COMMIT EDİLİR.
+# (Library defaults bunu gitignore eder; biz binary/protocol gibi davranıyoruz.)

@@ -1,0 +1,8 @@
+[2m2026-06-16T09:49:21.219228Z[0m [32m INFO[0m [2mlsc_node[0m[2m:[0m Kalici veri dosyasi: "aidag-data-40001.log"
+[2m2026-06-16T09:49:21.219406Z[0m [32m INFO[0m [2mlsc_node[0m[2m:[0m Kalici kimlik anahtari: "aidag-key-40001.bin"
+[2m2026-06-16T09:49:21.223356Z[0m [32m INFO[0m [2mlibp2p_swarm[0m[2m:[0m [3mlocal_peer_id[0m[2m=[0m12D3KooWQpYwCb6Byuqcp7ieuHBzdGXtTCZbfAf9UrBcc5k5P4By
+[2m2026-06-16T09:49:21.223698Z[0m [32m INFO[0m [2mlsc_net[0m[2m:[0m Faucet owner ayarlandi: fe4a9447e513e175a3d1f52a110f01689e80007a
+[2m2026-06-16T09:49:21.223875Z[0m [32m INFO[0m [2mlsc_net[0m[2m:[0m DAG state kuruldu: network_id=1, vertex_sayisi=0, genesis=None
+[2m2026-06-16T09:49:21.224124Z[0m [32m INFO[0m [2mlsc_net[0m[2m:[0m Gossipsub topic'ine abone olundu: lsc-vertices
+[2m2026-06-16T09:49:21.224866Z[0m [32m INFO[0m [2mlsc_net::rpc[0m[2m:[0m RPC sunucusu dinliyor: http://0.0.0.0:8645  (GET /health, /status)
+[2m2026-06-16T09:49:21.230068Z[0m [32m INFO[0m [2mlsc_net[0m[2m:[0m Kalici kimlik diskten yuklendi (ed25519): "aidag-key-40001.bin"

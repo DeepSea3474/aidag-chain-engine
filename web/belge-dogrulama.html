@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Belge Dogrulama - AIDAG-Chain Pilot (DEMO/TESTNET)</title>
+<style>
+  :root{--lacivert:#0f2747;--lacivert2:#1a3a63;--altin:#c8a44d;--kagit:#f7f5f0;
+    --metin:#1c2530;--gri:#5d6b7a;--cizgi:#d9d4c8;--yesil:#1f7a4d;--kirmizi:#a8341f;--uyari:#8a6d1f}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--kagit);color:var(--metin);line-height:1.55}
+  .testnet-bar{background:var(--uyari);color:#fff;text-align:center;padding:8px 16px;font-size:13px;font-weight:600}
+  header{background:linear-gradient(135deg,var(--lacivert),var(--lacivert2));color:#fff;padding:34px 24px 30px}
+  .wrap{max-width:760px;margin:0 auto;padding:0 20px}
+  .kurum{display:flex;align-items:center;gap:14px}
+  .arma{width:52px;height:52px;border:2px solid var(--altin);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;color:var(--altin);flex-shrink:0}
+  header h1{font-size:21px;font-weight:600}
+  header .alt{color:#b9c6d8;font-size:13.5px;margin-top:2px}
+  .net{margin-top:18px;font-size:13px;color:#cdd8e6;display:flex;align-items:center;gap:7px}
+  .dot{width:8px;height:8px;border-radius:50%;background:#7a8aa0}
+  .dot.ok{background:#4ade80}
+  main{padding:28px 0 60px}
+  .kart{background:#fff;border:1px solid var(--cizgi);border-radius:10px;padding:24px;margin-bottom:20px}
+  .kart h2{font-size:16px;color:var(--lacivert);margin-bottom:4px}
+  .kart .aciklama{font-size:13.5px;color:var(--gri);margin-bottom:18px}
+  label{display:block;font-size:13px;font-weight:600;margin-bottom:6px;margin-top:14px}
+  textarea{width:100%;border:1px solid var(--cizgi);border-radius:7px;padding:11px 13px;font-size:14px;font-family:inherit;background:#fcfbf8;resize:vertical;min-height:90px}
+  textarea:focus{outline:none;border-color:var(--lacivert2)}
+  .btn{border:none;border-radius:7px;padding:11px 20px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;transition:.15s}
+  .btn-ana{background:var(--lacivert);color:#fff;margin-top:18px}
+  .btn-ana:hover{background:var(--lacivert2)}
+  .btn-onay{background:var(--yesil);color:#fff}
+  .btn-iptal{background:#fff;color:var(--gri);border:1px solid var(--cizgi)}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .onay-kutu{margin-top:18px;border:1px solid var(--altin);background:#fbf7ec;border-radius:9px;padding:18px;display:none}
+  .onay-kutu .baslik{font-weight:700;color:var(--lacivert);font-size:14px;margin-bottom:10px}
+  .onay-kutu .satir{font-size:13.5px;margin:7px 0}
+  .onay-kutu .ozet{font-family:ui-monospace,monospace;font-size:12px;background:#fff;border:1px solid var(--cizgi);border-radius:5px;padding:8px 10px;word-break:break-all;color:var(--gri)}
+  .onay-btns{display:flex;gap:10px;margin-top:16px}
+  .sonuc{margin-top:16px;padding:14px 16px;border-radius:8px;font-size:14px;display:none}
+  .sonuc.ok{background:#eaf6ef;border:1px solid #b8dcc6;color:var(--yesil);display:block}
+  .sonuc.yok{background:#fdeeea;border:1px solid #f0c9bf;color:var(--kirmizi);display:block}
+  .sonuc.bilgi{background:#eef3fa;border:1px solid #c9d8ec;color:var(--lacivert);display:block}
+  .sonuc b{display:block;margin-bottom:4px}
+  .sonuc .detay{font-family:ui-monospace,monospace;font-size:12px;margin-top:6px;color:var(--gri);word-break:break-all}
+  footer{border-top:1px solid var(--cizgi);padding:22px 0;font-size:12px;color:var(--gri);text-align:center}
+  .rozet{display:inline-block;background:#eef3fa;color:var(--lacivert);font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;margin-left:8px}
+</style>
+</head>
+<body>
+<div class="testnet-bar">DEMO / TESTNET - Bu bir pilot calismadir. Lutfen GERCEK veya hassas belge yuklemeyin; ornek verilerle test edin.</div>
+<header><div class="wrap">
+  <div class="kurum"><div class="arma">*</div><div>
+    <h1>Belge Dogrulama Sistemi <span class="rozet">PILOT</span></h1>
+    <div class="alt">AIDAG-Chain blok zinciri uzerinde belge butunlugu dogrulama denemesi</div>
+  </div></div>
+  <div class="net"><span class="dot" id="netdot"></span><span id="netstat">aga baglaniliyor...</span></div>
+</div></header>
+<main class="wrap">
+  <div class="kart">
+    <h2>1) Belge Kaydet <span style="font-weight:400;font-size:13px;color:var(--gri)">(kurum tarafi)</span></h2>
+    <div class="aciklama">Bir belgenin degismez parmak izini (ozet/hash) zincire yazar. Belgenin kendisi <b>asla</b> aga gonderilmez - yalnizca matematiksel ozeti. Icerik gizli kalir, butunluk kanitlanir.</div>
+    <label for="belgeMetin">Belge icerigi (ornek metin)</label>
+    <textarea id="belgeMetin" placeholder="Orn: Diploma No 2026-12345 - Ad Soyad - Bilgisayar Muhendisligi - 2026"></textarea>
+    <button class="btn btn-ana" id="hazirlaBtn">Islemi Hazirla</button>
+    <div class="onay-kutu" id="onayKutu">
+      <div class="baslik">Onayiniz bekleniyor - ne olacagini inceleyin</div>
+      <div class="satir"><b>Islem:</b> Belgenin parmak izi zincire kalici olarak kaydedilecek.</div>
+      <div class="satir"><b>Gizlilik:</b> Belge metni gonderilmez; yalnizca asagidaki ozet gonderilir.</div>
+      <div class="satir"><b>Geri alma:</b> Onaylamadan iptal edebilirsiniz. Onay sonrasi kayit kalicidir.</div>
+      <label style="margin-top:12px">Zincire gidecek ozet (hash):</label>
+      <div class="ozet" id="ozetGoster">-</div>
+      <div class="onay-btns">
+        <button class="btn btn-onay" id="onaylaBtn">Islemi Onayla</button>
+        <button class="btn btn-iptal" id="iptalBtn">Iptal Et</button>
+      </div>
+    </div>
+    <div class="sonuc" id="kayitSonuc"></div>
+  </div>
+  <div class="kart">
+    <h2>2) Belge Dogrula <span style="font-weight:400;font-size:13px;color:var(--gri)">(herkes)</span></h2>
+    <div class="aciklama">Bir belgenin daha once zincire kaydedilip kaydedilmedigini kontrol eder. Belge bir harf bile degismisse parmak izi tutmaz ve dogrulama basarisiz olur (sahtecilik tespiti).</div>
+    <label for="dogrulaMetin">Dogrulanacak belge icerigi</label>
+    <textarea id="dogrulaMetin" placeholder="Dogrulamak istediginiz belgeyi buraya yapistirin"></textarea>
+    <button class="btn btn-ana" id="dogrulaBtn">Zincirde Dogrula</button>
+    <div class="sonuc" id="dogrulaSonuc"></div>
+  </div>
+</main>
+<footer class="wrap">
+  AIDAG-Chain - Belge Dogrulama Pilotu - Testnet - bagimsiz denetim ve canli ag oncesi kavram kanitidir.<br>
+  Belge icerikleri tarayicinizdan cikmaz; zincire yalnizca geri dondurulemez ozet (hash) yazilir.
+</footer>
+<script src="/lib/blake3.js"></script>
+<script src="/lib/nacl.min.js"></script>
+<script>
+const RPC=location.origin+"/rpc", NETWORK_ID=1;
+const DOMAIN_TAG=new TextEncoder().encode("AIDAG-vertex-v1\u0000");
+const FORMAT_VERSION=1,WIRE_VERSION=1,TX_RECORD=1;
+let SEED=null,PK=null,SK64=null,ADDR=null,bekleyenHash=null;
+const hex=b=>[...b].map(x=>x.toString(16).padStart(2,"0")).join("");
+const unhex=s=>{s=s.replace(/^0x/,"").trim();const a=new Uint8Array(s.length/2);for(let i=0;i<a.length;i++)a[i]=parseInt(s.substr(i*2,2),16);return a;};
+function leU32(n){const b=new Uint8Array(4);new DataView(b.buffer).setUint32(0,n,true);return b;}
+function leU64(n){const b=new Uint8Array(8);new DataView(b.buffer).setBigUint64(0,BigInt(n),true);return b;}
+function cat(...a){let n=0;for(const x of a)n+=x.length;const o=new Uint8Array(n);let i=0;for(const x of a){o.set(x,i);i+=x.length;}return o;}
+const enc=s=>new TextEncoder().encode(s);
+function hashId(parents,ts,payload){
+  const parts=[DOMAIN_TAG,new Uint8Array([FORMAT_VERSION]),leU32(NETWORK_ID),PK,leU64(parents.length)];
+  for(const p of parents)parts.push(p);
+  parts.push(leU64(ts),leU64(payload.length),payload);
+  return blake3hash(cat(...parts));
+}
+function vertexOlustur(parents,payload,ts){
+  parents=parents.slice().sort((a,b)=>hex(a)<hex(b)?-1:1);
+  const vid=hashId(parents,ts,payload);
+  const sig=nacl.sign.detached(vid,SK64);
+  const parts=[new Uint8Array([WIRE_VERSION]),leU32(NETWORK_ID),leU64(parents.length)];
+  for(const p of parents)parts.push(p);
+  parts.push(leU64(ts),leU64(payload.length),PK,sig,payload);
+  return cat(...parts);
+}
+function recordPayload(hash32){return cat(new Uint8Array([TX_RECORD]),hash32);}
+async function rpcGet(p){const r=await fetch(RPC+p);return r.json();}
+async function rpcPost(p,b){const r=await fetch(RPC+p,{method:"POST",body:hex(b)});return r.json();}
+async function ping(){
+  try{const s=await rpcGet("/status");
+    document.getElementById("netdot").classList.add("ok");
+    document.getElementById("netstat").textContent="zincire bagli - "+s.vertex_count+" blok";
+  }catch(e){document.getElementById("netstat").textContent="aga baglanilamadi";}
+}
+function demoWallet(){
+  let seed;const saved=(()=>{try{return localStorage.getItem("aidag_demo_seed")}catch(e){return null}})();
+  if(saved){seed=unhex(saved);}else{seed=nacl.randomBytes(32);try{localStorage.setItem("aidag_demo_seed",hex(seed))}catch(e){}}
+  SEED=seed;const kp=nacl.sign.keyPair.fromSeed(SEED);PK=kp.publicKey;SK64=kp.secretKey;ADDR=blake3hash(PK).slice(0,20);
+}
+document.getElementById("hazirlaBtn").onclick=()=>{
+  const metin=document.getElementById("belgeMetin").value.trim();
+  const sonuc=document.getElementById("kayitSonuc");sonuc.className="sonuc";
+  if(!metin){sonuc.className="sonuc yok";sonuc.innerHTML="<b>Belge bos</b>Lutfen kaydedilecek icerigi girin.";return;}
+  bekleyenHash=blake3hash(enc(metin));
+  document.getElementById("ozetGoster").textContent=hex(bekleyenHash);
+  document.getElementById("onayKutu").style.display="block";
+};
+document.getElementById("iptalBtn").onclick=()=>{
+  bekleyenHash=null;document.getElementById("onayKutu").style.display="none";
+  const sonuc=document.getElementById("kayitSonuc");sonuc.className="sonuc bilgi";
+  sonuc.innerHTML="<b>Islem iptal edildi</b>Zincire hicbir sey yazilmadi.";
+};
+document.getElementById("onaylaBtn").onclick=async()=>{
+  if(!bekleyenHash)return;const sonuc=document.getElementById("kayitSonuc");
+  document.getElementById("onaylaBtn").disabled=true;
+  try{
+    const tipsR=await rpcGet("/tips");const tips=(tipsR.tips||[]).map(unhex);
+    const ts=Math.floor(Date.now()/1000);
+    const wire=vertexOlustur(tips,recordPayload(bekleyenHash),ts);
+    await rpcPost("/submit",wire);
+    document.getElementById("onayKutu").style.display="none";
+    sonuc.className="sonuc ok";
+    sonuc.innerHTML="<b>Belge zincire kaydedildi</b>Parmak izi kalici olarak yazildi. Artik dogrulanabilir.<div class='detay'>ozet: "+hex(bekleyenHash)+"</div>";
+    bekleyenHash=null;
+  }catch(e){sonuc.className="sonuc yok";sonuc.innerHTML="<b>Kayit basarisiz</b>"+String(e);}
+  finally{document.getElementById("onaylaBtn").disabled=false;}
+  ping();
+};
+document.getElementById("dogrulaBtn").onclick=async()=>{
+  const metin=document.getElementById("dogrulaMetin").value.trim();
+  const sonuc=document.getElementById("dogrulaSonuc");sonuc.className="sonuc";
+  if(!metin){sonuc.className="sonuc yok";sonuc.innerHTML="<b>Belge bos</b>Dogrulanacak icerigi girin.";return;}
+  const h=hex(blake3hash(enc(metin)));
+  try{
+    const r=await rpcGet("/belge/"+h);
+    if(r.kayitli){
+      const tarih=new Date(Number(r.zaman)*1000).toLocaleString("tr-TR");
+      sonuc.className="sonuc ok";
+      sonuc.innerHTML="<b>Belge dogrulandi - zincirde kayitli</b>Bu belge daha once kaydedilmis ve degistirilmemis.<div class='detay'>kayit zamani: "+tarih+"<br>ozet: "+h+"</div>";
+    }else{
+      sonuc.className="sonuc yok";
+      sonuc.innerHTML="<b>Belge bulunamadi</b>Bu icerik zincirde kayitli degil - ya hic kaydedilmedi ya da icerik degistirildi.";
+    }
+  }catch(e){sonuc.className="sonuc yok";sonuc.innerHTML="<b>Sorgu basarisiz</b>"+String(e);}
+};
+demoWallet();ping();setInterval(ping,15000);
+</script>
+</body>
+</html>

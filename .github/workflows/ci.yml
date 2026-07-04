@@ -1,0 +1,50 @@
+# AIDAG-Chain / LSC — Surekli Entegrasyon (CI)
+#
+# Her push ve pull request'te calisir. Uc kapi (hepsi gecmek ZORUNDA):
+#   1) Bicim   — cargo fmt --check  (tutarli kod bicimi)
+#   2) Lint    — cargo clippy -D warnings  (sifir uyari; uyari=hata)
+#   3) Test    — cargo test  (tum birim + entegrasyon testleri)
+#
+# Herhangi biri kirmizi yanarsa PR birlesemez (branch protection ile birlikte).
+# Bu, "her elini sallayanin main'i bozmasini" engelleyen ilk savunma hattidir.
+
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+# Ayni dal/PR'a yeni push gelirse onceki kosmayi iptal et (kaynak tasarrufu).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  quality:
+    name: Bicim + Lint + Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kodu checkout et
+        uses: actions/checkout@v4
+
+      - name: Rust toolchain (stable + rustfmt + clippy)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Bagimliliklari cache'le (hizli kosma)
+        uses: Swatinem/rust-cache@v2
+
+      - name: 1) Bicim kontrolu (cargo fmt --check)
+        run: cargo fmt --all -- --check
+
+      - name: 2) Lint (cargo clippy, uyari = hata)
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: 3) Testler (cargo test)
+        run: cargo test --all --verbose
