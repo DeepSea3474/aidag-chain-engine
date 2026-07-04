@@ -776,18 +776,17 @@ pub fn router(
         .route("/on-satis-ozet", get(on_satis_ozet))
         .route("/on-satis-adres/:adres", get(on_satis_adres));
 
-    // TEHLIKELI UCLAR: sadece GELISTIRME modunda (LSC_PRODUCTION ayarli DEGILSE).
-    // test_bakiye/faucet = bedava para basma -> production'da ASLA acik olmamali
-    // (aksi halde herkes sinirsiz AIDAG/LSC basar, on satis + ekonomi anlamsizlasir).
+    // FAUCET: anti-spam korumali (bakiye limitli), production da dahil ACIK.
+    // test_bakiye/lsc_test_bakiye: sinirsiz basma -> sadece GELISTIRME modunda.
+    let router = router.route("/faucet/:adres", get(faucet));
     let router = if std::env::var("LSC_PRODUCTION").is_ok() {
-        tracing::warn!("PRODUCTION MODU: test_bakiye/lsc_test_bakiye/faucet uclari KAPALI.");
+        tracing::warn!("PRODUCTION MODU: faucet ACIK (limitli), test_bakiye KAPALI.");
         router
     } else {
-        tracing::info!("GELISTIRME MODU: test uclari (test_bakiye/faucet) ACIK. Production'da LSC_PRODUCTION=1 ayarla.");
+        tracing::info!("GELISTIRME MODU: tum test uclari ACIK.");
         router
             .route("/test_bakiye", post(test_bakiye))
             .route("/lsc_test_bakiye", post(lsc_test_bakiye))
-            .route("/faucet/:adres", get(faucet))
     };
 
     router.with_state(state)
