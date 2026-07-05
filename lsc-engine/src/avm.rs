@@ -200,7 +200,7 @@ pub const GELISTIRME_HAVUZU: [u8; 20] = [
     0x1a, 0x2b, 0x3c, 0x4d,
 ];
 
-pub const GAS_FIYATI_LSC: u64 = 1; // 1 LSC / gas birimi (sabit, mainnette dinamik olacak).
+pub const GAS_FIYATI_LSC: u64 = 1_000_000_000; // 1 gwei/gas (gercek zincir seviyesi; mainnette dinamik).
 
 /// Gas ucretini hesapla. gas_used -> toplam LSC ucreti.
 pub fn gas_ucreti_hesapla(gas_used: u64) -> u64 {
@@ -557,13 +557,13 @@ mod tests {
     // KOPRU 3 KANIT: gas -> LSC ucreti -> %50 yak + %50 gelistirme.
     #[test]
     fn kopru3_gas_ucreti_ve_bolme() {
-        // 21000 gas, fiyat=1 -> 21000 LSC ucret
+        // 21000 gas, fiyat=1gwei -> 21_000_000_000_000 LSC
         let ucret = gas_ucreti_hesapla(21_000);
-        assert_eq!(ucret, 21_000);
+        assert_eq!(ucret, 21_000_000_000_000);
         // %50 yak + %50 gelistirme
         let (yak, gelistirme) = gas_ucreti_bol(ucret);
-        assert_eq!(yak, 10_500);
-        assert_eq!(gelistirme, 10_500);
+        assert_eq!(yak, 10_500_000_000_000);
+        assert_eq!(gelistirme, 10_500_000_000_000);
         assert_eq!(yak + gelistirme, ucret); // KAYIP YOK (kapali)
         println!(
             "AVM Kopru3: 21000 gas -> {} LSC -> yak={} gelistirme={}",
@@ -588,7 +588,7 @@ mod tests {
     fn kopru3_gas_gercek_kesinti_ve_dagitim() {
         let isleyen: [u8; 20] = [0xAA; 20];
         let mut db = AidagDatabase::yeni();
-        db.lsc_koy(isleyen, 100_000); // isleyende 100.000 LSC
+        db.lsc_koy(isleyen, 100_000_000_000_000); // 100.000 LSC olcekli
 
         // 21.000 gas'lik islem -> 21.000 LSC kesilmeli
         let (yakilan, gelistirme) = db
@@ -596,21 +596,21 @@ mod tests {
             .expect("kesinti basarili");
 
         // isleyende 79.000 kalmali
-        assert_eq!(db.lsc_bakiye(&isleyen), 79_000);
+        assert_eq!(db.lsc_bakiye(&isleyen), 79_000_000_000_000);
         // %50 yak + %50 gelistirme
-        assert_eq!(yakilan, 10_500);
-        assert_eq!(gelistirme, 10_500);
+        assert_eq!(yakilan, 10_500_000_000_000);
+        assert_eq!(gelistirme, 10_500_000_000_000);
         // YAKIM_ADRESI'nde 10.500, GELISTIRME_HAVUZU'nda 10.500
-        assert_eq!(db.lsc_bakiye(&YAKIM_ADRESI), 10_500);
-        assert_eq!(db.lsc_bakiye(&GELISTIRME_HAVUZU), 10_500);
+        assert_eq!(db.lsc_bakiye(&YAKIM_ADRESI), 10_500_000_000_000);
+        assert_eq!(db.lsc_bakiye(&GELISTIRME_HAVUZU), 10_500_000_000_000);
         // KAPALI: kesilen (21000) = yakilan + gelistirme (kayip yok)
-        assert_eq!(yakilan + gelistirme, 21_000);
+        assert_eq!(yakilan + gelistirme, 21_000_000_000_000);
         // KAPALI: toplam korundu -> 79000 + 10500 + 10500 = 100000
         assert_eq!(
             db.lsc_bakiye(&isleyen)
                 + db.lsc_bakiye(&YAKIM_ADRESI)
                 + db.lsc_bakiye(&GELISTIRME_HAVUZU),
-            100_000
+            100_000_000_000_000
         );
         println!("AVM Kopru3-gercek: 21000 gas -> isleyen=79000, yak=10500, gelistirme=10500 (toplam korundu)");
     }
@@ -905,14 +905,14 @@ mod tests {
         use crate::registry::NonceRegistry;
         let isleyen: [u8; 20] = [0xCC; 20];
         let mut db = AidagDatabase::yeni();
-        db.lsc_koy(isleyen, 100_000);
+        db.lsc_koy(isleyen, 100_000_000_000_000);
         let mut nreg = NonceRegistry::yeni();
 
         // 1) Ilk islem: nonce=0 -> basarili, nonce 1'e ilerler.
         let r1 = islem_nonce_korumali(&mut db, &mut nreg, &isleyen, 0, 21_000);
         assert!(r1.is_ok(), "ilk islem (nonce=0) basarili olmali");
         assert_eq!(nreg.beklenen(&isleyen), 1, "nonce 1'e ilerlemeli");
-        assert_eq!(db.lsc_bakiye(&isleyen), 79_000, "gas kesilmis olmali");
+        assert_eq!(db.lsc_bakiye(&isleyen), 79_000_000_000_000, "gas kesilmis olmali");
 
         // 2) REPLAY: ayni nonce=0 tekrar -> REDDEDILMELI.
         let r2 = islem_nonce_korumali(&mut db, &mut nreg, &isleyen, 0, 21_000);
@@ -920,7 +920,7 @@ mod tests {
         // bakiye DEGISMEMELI (reddedilen islem gas kesmez)
         assert_eq!(
             db.lsc_bakiye(&isleyen),
-            79_000,
+            79_000_000_000_000,
             "replay bakiyeyi degistirmemeli"
         );
 

@@ -2006,7 +2006,7 @@ mod tests {
         let sk5 = SigningKey::from_bytes(&[5u8; 32]);
         let gonderen = public_key_to_adres(&sk5.verifying_key().to_bytes());
         let hedef = [0xEE; 20];
-        node.lsc_test_bakiye_ekle(gonderen, 1_000_000);
+        node.lsc_test_bakiye_ekle(gonderen, 1_000_000_000_000_000);
         let arz_basta = node.lsc_toplam_arzi();
 
         // AVM cagrisi: hedefe 1000 LSC, nonce=0. Gas = 21000 LSC (10500 yak + 10500 havuz).
@@ -2019,16 +2019,16 @@ mod tests {
         // deger hedefe ulasti
         assert_eq!(node.lsc_bakiye(&hedef), 1000, "hedef 1000 LSC almali");
         // gas yakildi + havuza gitti
-        assert_eq!(node.lsc_bakiye(&yakim), 10_500, "10500 LSC yakildi");
+        assert_eq!(node.lsc_bakiye(&yakim), 10_500_000_000_000, "10500 LSC yakildi");
         assert_eq!(
             node.lsc_bakiye(&havuz),
-            10_500,
+            10_500_000_000_000,
             "10500 LSC gelistirme havuzunda"
         );
         // gonderen: 1_000_000 - 1000 - 21000 = 978_000
         assert_eq!(
             node.lsc_bakiye(&gonderen),
-            978_000,
+            978_999_999_999_000,
             "gonderen bakiyesi dogru dustu"
         );
         // nonce ilerledi
@@ -2050,7 +2050,7 @@ mod tests {
 
         let sk = SigningKey::from_bytes(&[11u8; 32]);
         let gonderen = public_key_to_adres(&sk.verifying_key().to_bytes());
-        node.lsc_test_bakiye_ekle(gonderen, 100_000_000);
+        node.lsc_test_bakiye_ekle(gonderen, 100_000_000_000_000_000);
         let arz_basta = node.lsc_toplam_arzi();
         let bakiye_basta = node.lsc_bakiye(&gonderen);
 
@@ -2077,13 +2077,13 @@ mod tests {
         // KANIT 2: gas kesildi (21000 LSC: yakim + havuz)
         assert_eq!(
             node.lsc_bakiye(&gonderen),
-            bakiye_basta - 21_000,
+            bakiye_basta - 21_000_000_000_000,
             "gas kesilmis olmali"
         );
-        assert_eq!(node.lsc_bakiye(&[0u8; 20]), 10_500, "10500 yakildi");
+        assert_eq!(node.lsc_bakiye(&[0u8; 20]), 10_500_000_000_000, "10500 yakildi");
         assert_eq!(
             node.lsc_bakiye(&crate::avm::GELISTIRME_HAVUZU),
-            10_500,
+            10_500_000_000_000,
             "10500 havuz"
         );
         // KANIT 3: toplam arz korundu
@@ -2105,7 +2105,7 @@ mod tests {
         src.ingest_networked(&gen, now);
         let sk = SigningKey::from_bytes(&[12u8; 32]);
         let gonderen = public_key_to_adres(&sk.verifying_key().to_bytes());
-        src.lsc_test_bakiye_ekle(gonderen, 100_000_000);
+        src.lsc_test_bakiye_ekle(gonderen, 100_000_000_000_000_000);
 
         let bin_hex =
             include_str!("../../avm-sozlesmeler/BelgeDamgasi_sol_BelgeDamgasi.bin").trim();
@@ -2128,7 +2128,7 @@ mod tests {
         let exported = src.export_vertices();
         let mut dst = NodeState::new_devnet(NET);
         // LSC bakiyesi test_bakiye ile eklenmisti; replay'de gas icin gonderene LSC lazim.
-        dst.lsc_test_bakiye_ekle(gonderen, 100_000_000);
+        dst.lsc_test_bakiye_ekle(gonderen, 100_000_000_000_000_000);
         for bytes in &exported {
             dst.ingest_networked(bytes, now);
         }
@@ -2291,7 +2291,7 @@ mod tests {
 
         let sk = SigningKey::from_bytes(&[13u8; 32]);
         let gonderen = public_key_to_adres(&sk.verifying_key().to_bytes());
-        node.lsc_test_bakiye_ekle(gonderen, 100_000_000);
+        node.lsc_test_bakiye_ekle(gonderen, 100_000_000_000_000_000);
 
         // 1) DEPLOY (nonce=0)
         let bin_hex =
@@ -2330,7 +2330,7 @@ mod tests {
         );
         assert_eq!(
             node.lsc_bakiye(&gonderen),
-            bakiye_call_oncesi - 21_000,
+            bakiye_call_oncesi - 21_000_000_000_000,
             "call gas kesildi"
         );
     }
@@ -2356,7 +2356,7 @@ mod tests {
 
         let sk = SigningKey::from_bytes(&[14u8; 32]);
         let gonderen = public_key_to_adres(&sk.verifying_key().to_bytes());
-        node.lsc_test_bakiye_ekle(gonderen, 100_000_000);
+        node.lsc_test_bakiye_ekle(gonderen, 100_000_000_000_000_000);
         let arz_basta = node.lsc_toplam_arzi();
 
         // hedef: kod-suz siradan adres (EVM value transferi basarili olur)
@@ -2373,7 +2373,7 @@ mod tests {
         assert_eq!(node.lsc_bakiye(&hedef), 5000, "deger hedefe gitti (5000)");
         assert_eq!(
             node.lsc_bakiye(&gonderen),
-            g_once - 5000 - 21_000,
+            g_once - 5000 - 21_000_000_000_000,
             "gonderen dogru dustu"
         );
         // EN KRITIK: TOPLAM ARZ KORUNDU
