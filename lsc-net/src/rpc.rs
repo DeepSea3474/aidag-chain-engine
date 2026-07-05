@@ -424,9 +424,9 @@ async fn testnet_durum(State(st): State<RpcState>, Path(adres_hex): Path<String>
     }))
 }
 
-const FAUCET_MIKTAR: lsc_engine::registry::Tutar = 1000;
+const FAUCET_MIKTAR: lsc_engine::registry::Tutar = 1000 * 1_000_000_000_000_000_000; // 1000 AIDAG (18 ondalik)
 /// Anti-spam: bakiye bu esikteyse faucet TEKRAR vermez (once harca/transfer et).
-const FAUCET_LIMIT: lsc_engine::registry::Tutar = 500;
+const FAUCET_LIMIT: lsc_engine::registry::Tutar = 500 * 1_000_000_000_000_000_000; // 500 AIDAG (18 ondalik)
 
 /// GET /faucet/:adres — TESTNET MUSLUGU: bir adrese sabit test AIDAG verir.
 /// SADECE testnet/devnet icindir; test AIDAG'in GERCEK DEGERI YOKTUR (gercek
@@ -739,6 +739,60 @@ async fn eth_rpc(State(st): State<RpcState>, Json(istek): Json<Value>) -> Json<V
             }
         }
 
+
+        // eth_gasPrice: gas fiyati. Testnette dusuk sabit deger (MetaMask sorar).
+        "eth_gasPrice" => ok(&id, json!("0x3b9aca00")),
+        // eth_maxPriorityFeePerGas: EIP-1559 tip (MetaMask sorar).
+        "eth_maxPriorityFeePerGas" => ok(&id, json!("0x3b9aca00")),
+        // eth_estimateGas: tahmini gas. Basit transfer icin sabit 21000.
+        "eth_estimateGas" => ok(&id, json!("0x5208")),
+        // eth_getBlockByNumber: MetaMask islem oncesi blok bilgisi ister.
+        // Bizde blok = vertex; basit bir blok objesi doneriz (MetaMask'i tatmin eder).
+        "eth_getBlockByNumber" => {
+            let n = st.node.read().await.vertex_count() as u64;
+            ok(&id, json!({
+                "number": format!("0x{:x}", n),
+                "hash": format!("0x{:064x}", n),
+                "parentHash": format!("0x{:064x}", n.saturating_sub(1)),
+                "timestamp": format!("0x{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)),
+                "gasLimit": "0x1c9c380",
+                "gasUsed": "0x0",
+                "baseFeePerGas": "0x3b9aca00",
+                "miner": "0x0000000000000000000000000000000000000000",
+                "transactions": [],
+                "difficulty": "0x0",
+                "totalDifficulty": "0x0",
+                "size": "0x0",
+                "extraData": "0x",
+                "nonce": "0x0000000000000000",
+                "sha3Uncles": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                "logsBloom": "0x0",
+                "stateRoot": format!("0x{:064x}", n),
+                "receiptsRoot": "0x0",
+                "transactionsRoot": "0x0",
+                "uncles": []
+            }))
+        }
+        // eth_getBlockByHash: benzer, hash ile.
+        "eth_getBlockByHash" => {
+            let n = st.node.read().await.vertex_count() as u64;
+            ok(&id, json!({
+                "number": format!("0x{:x}", n),
+                "hash": format!("0x{:064x}", n),
+                "parentHash": format!("0x{:064x}", n.saturating_sub(1)),
+                "timestamp": format!("0x{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)),
+                "gasLimit": "0x1c9c380",
+                "gasUsed": "0x0",
+                "baseFeePerGas": "0x3b9aca00",
+                "miner": "0x0000000000000000000000000000000000000000",
+                "transactions": [],
+                "difficulty": "0x0",
+                "size": "0x0",
+                "extraData": "0x",
+                "nonce": "0x0000000000000000",
+                "uncles": []
+            }))
+        }
 
         _ => err(&id, -32601, "method not found (bu dilimde desteklenmeyen metot)"),
     }
