@@ -29,6 +29,8 @@ pub fn evm_to_adres(addr: &Address) -> [u8; 20] {
 pub struct AidagDatabase {
     /// adres -> LSC bakiyesi (EVM native). Simdilik kopya; sonra gercek deftere baglanir.
     lsc_bakiyeler: HashMap<[u8; 20], crate::registry::Tutar>,
+    /// adres -> AIDAG bakiyesi (EVM native DEGER). Value/transfer BUNU hareket ettirir.
+    aidag_bakiyeler: HashMap<[u8; 20], crate::registry::Tutar>,
     /// KOPRU 5: adres -> sozlesme kodu (deploy edilen bytecode).
     kodlar: HashMap<[u8; 20], Bytecode>,
     /// KOPRU 5: (adres, slot) -> deger. Sozlesme kalici depolama.
@@ -39,6 +41,7 @@ impl AidagDatabase {
     pub fn yeni() -> Self {
         AidagDatabase {
             lsc_bakiyeler: HashMap::new(),
+            aidag_bakiyeler: HashMap::new(),
             kodlar: HashMap::new(),
             depo: HashMap::new(),
         }
@@ -50,6 +53,15 @@ impl AidagDatabase {
     /// Bir adresin LSC bakiyesini oku.
     pub fn lsc_bakiye(&self, adres: &[u8; 20]) -> crate::registry::Tutar {
         self.lsc_bakiyeler.get(adres).copied().unwrap_or(0)
+    }
+
+    /// AIDAG (EVM native deger) bakiyesi koy.
+    pub fn aidag_koy(&mut self, adres: [u8; 20], miktar: crate::registry::Tutar) {
+        self.aidag_bakiyeler.insert(adres, miktar);
+    }
+    /// AIDAG bakiyesini oku.
+    pub fn aidag_bakiye(&self, adres: &[u8; 20]) -> crate::registry::Tutar {
+        self.aidag_bakiyeler.get(adres).copied().unwrap_or(0)
     }
 
     /// KOPRU 5: bir adrese sozlesme kodu (bytecode) koy (deploy/test).
@@ -112,7 +124,7 @@ impl Database for AidagDatabase {
     /// EVM hesap bilgisi sorar -> LSC bakiyesini AccountInfo olarak don.
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Infallible> {
         let adres = address.into_array();
-        let bakiye = self.lsc_bakiyeler.get(&adres).copied().unwrap_or(0);
+        let bakiye = self.aidag_bakiyeler.get(&adres).copied().unwrap_or(0); // EVM native = AIDAG
         // KOPRU 5: bu adresin sozlesme kodu var mi?
         let (code_hash, code) = match self.kodlar.get(&adres) {
             Some(b) => (b.hash_slow(), Some(b.clone())),
@@ -166,9 +178,9 @@ impl DatabaseCommit for AidagDatabase {
             }
             let adres = address.into_array();
 
-            // 1) Bakiye (LSC native) - u64'e sigdigi kadar
+            // 1) Bakiye (AIDAG native deger) - EVM sonucunu AIDAG defterine yaz
             let bakiye_u128 = account.info.balance.try_into().unwrap_or(u128::MAX);
-            self.lsc_bakiyeler.insert(adres, bakiye_u128);
+            self.aidag_bakiyeler.insert(adres, bakiye_u128);
 
             // 2) Kod (deploy edilen sozlesme)
             if let Some(kod) = &account.info.code {
@@ -473,7 +485,7 @@ mod tests {
     fn kopru2_evm_lsc_bakiyesini_okuyor() {
         let mut db = AidagDatabase::yeni();
         let adres: [u8; 20] = [0xAB; 20];
-        db.lsc_koy(adres, 5000); // LSC defterine 5000 koy
+        db.aidag_koy(adres, 5000); // AIDAG (native) defterine 5000 koy
                                  // EVM'in soracagi gibi sor:
         let evm_adres = adres_to_evm(&adres);
         let hesap = db.basic(evm_adres).unwrap().unwrap();
@@ -489,7 +501,7 @@ mod tests {
         let a: [u8; 20] = [0xAA; 20];
         let b: [u8; 20] = [0xBB; 20];
         let mut db = AidagDatabase::yeni();
-        db.lsc_koy(a, 1_000_000); // A'ya 1.000.000 LSC
+        db.aidag_koy(a, 1_000_000); // A'ya 1.000.000 AIDAG
 
         let mut evm = Context::mainnet().with_db(db).build_mainnet();
         let tx = TxEnv::builder()
@@ -528,7 +540,7 @@ mod tests {
         // 2) Defterden EVM database kur
         let mut db = AidagDatabase::yeni();
         for (adr, mik) in lsc_defter.iter() {
-            db.lsc_koy(*adr, *mik);
+            db.aidag_koy(*adr, *mik);
         }
 
         // 3) EVM: A'dan B'ye 1000 transfer
@@ -551,7 +563,7 @@ mod tests {
         let a_son = *lsc_defter.get(&a).unwrap();
         let b_son = *lsc_defter.get(&b).unwrap_or(&0);
         println!("AVM Kopru2-tamtur: A={a_son}, B={b_son}");
-        assert_eq!(b_son, 1000, "B 1000 LSC almali");
+        assert_eq!(b_son, 1000, "B 1000 AIDAG almali");
         assert!(a_son < 1_000_000, "A'nin bakiyesi dusmeli");
     }
     // KOPRU 3 KANIT: gas -> LSC ucreti -> %50 yak + %50 gelistirme.

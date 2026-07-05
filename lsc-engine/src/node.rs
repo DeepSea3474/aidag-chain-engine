@@ -697,9 +697,9 @@ impl NodeState {
 
                         if c.data.is_empty() {
                             // --- DATA BOS: basit LSC deger transferi (ESKI YOL, korunur) ---
-                            let gerekli = c.deger.saturating_add(ucret as crate::registry::Tutar);
-                            if self.lsc_registry.bakiye(&gonderen) >= gerekli {
-                                let s1 = self.lsc_registry.transfer(&gonderen, &c.hedef, c.deger);
+                            let lsc_gerekli = ucret as crate::registry::Tutar;
+                            if self.bakiye_registry.bakiye(&gonderen) >= c.deger && self.lsc_registry.bakiye(&gonderen) >= lsc_gerekli {
+                                let s1 = self.bakiye_registry.transfer(&gonderen, &c.hedef, c.deger);
                                 if matches!(s1, crate::registry::TransferSonuc::Basarili { .. }) {
                                     let _ = self.lsc_registry.transfer(
                                         &gonderen,
@@ -721,8 +721,8 @@ impl NodeState {
                             // avm_db'ye yeniden deploy edilir ki restart sonrasi KALICI olsun.
                             // LSC bakiyesi replay'de yok (test bakiyesi vertex degil); bu
                             // yuzden gas kesintisi atlanir, sadece state yeniden kurulur.
-                            let bak = self.lsc_registry.bakiye(&gonderen);
-                            self.avm_db.lsc_koy(gonderen, bak);
+                            let bak = self.bakiye_registry.bakiye(&gonderen);
+                            self.avm_db.aidag_koy(gonderen, bak);
                             let _ = crate::avm::avm_calistir(
                                 &mut self.avm_db,
                                 &gonderen,
@@ -737,11 +737,11 @@ impl NodeState {
                             // --- DATA DOLU (CANLI): KONTRAT calistirma. Kod/storage avm_db'de KALICI.
                             // Gas sabit kesilir + (deger>0 ise) deger gonderen->hedef ARZ-KORUMALI
                             // lsc_registry.transfer ile tasinir. DETERMINIZM: zaman=vertex.
-                            let gerekli = c.deger.saturating_add(ucret as crate::registry::Tutar);
-                            if self.lsc_registry.bakiye(&gonderen) >= gerekli {
+                            let lsc_gerekli = ucret as crate::registry::Tutar;
+                            if self.bakiye_registry.bakiye(&gonderen) >= c.deger && self.lsc_registry.bakiye(&gonderen) >= lsc_gerekli {
                                 // gonderenin LSC'sini avm_db'ye yukle (EVM kontrat mantigi gormesi icin).
-                                let bak = self.lsc_registry.bakiye(&gonderen);
-                                self.avm_db.lsc_koy(gonderen, bak);
+                                let bak = self.bakiye_registry.bakiye(&gonderen);
+                                self.avm_db.aidag_koy(gonderen, bak);
                                 // KONTRAT calistir: deploy (hedef=sifir) ya da call. deger EVM'e
                                 // verilir ki kontrat mantigi (payable vb.) dogru tetiklensin.
                                 let sonuc = crate::avm::avm_calistir(
@@ -757,9 +757,7 @@ impl NodeState {
                                         // 1) LSC deger hareketi: gonderen -> hedef (ARZ KORUMALI).
                                         //    deger=0 ise transfer no-op olur (guvenli).
                                         if c.deger > 0 {
-                                            let _ = self
-                                                .lsc_registry
-                                                .transfer(&gonderen, &c.hedef, c.deger);
+                                            let _ = self.bakiye_registry.transfer(&gonderen, &c.hedef, c.deger);
                                         }
                                         // 2) gas kes (guvenli yol): %50 yak + %50 gelistirme
                                         let _ = self.lsc_registry.transfer(
@@ -871,14 +869,37 @@ impl NodeState {
             // Hem canli hem replay'de AVM'de calisir -> DAG'da kalici + restart'ta geri gelir.
             Some(&crate::tx::TX_TYPE_HAM_ETH_TX) => {
                 if let Some(raw) = crate::tx::ham_eth_tx_coz_payload(payload) {
-                    // Gonderen'in LSC (gas) bakiyesini avm_db'ye yukle
                     if let Ok(islem) = crate::avm::ham_eth_tx_coz(raw) {
-                        let bak = self.lsc_registry.bakiye(&islem.gonderen);
-                        self.avm_db.lsc_koy(islem.gonderen, bak);
+                        let gonderen = islem.gonderen;
+                        let hedef = islem.hedef.unwrap_or([0u8; 20]);
+                        // Nonce replay korumasi (canli+replay ayni)
+                        if self.nonce_registry.dogru_mu(&gonderen, islem.nonce) {
+                            const ETH_GAS: u64 = 21_000;
+                            let ucret = crate::avm::gas_ucreti_hesapla(ETH_GAS);
+                            let ucret_t = ucret as crate::registry::Tutar;
+                            // Yeterlilik: AIDAG (deger) + LSC (gas), ayri defter
+                            let aidag_yeter = self.bakiye_registry.bakiye(&gonderen) >= islem.deger;
+                            let lsc_yeter = self.lsc_registry.bakiye(&gonderen) >= ucret_t;
+                            if aidag_yeter && lsc_yeter {
+                                // EVM'e gonderen+hedef AIDAG yukle (kontrat mantigi + basari karari)
+                                self.avm_db.aidag_koy(gonderen, self.bakiye_registry.bakiye(&gonderen));
+                                self.avm_db.aidag_koy(hedef, self.bakiye_registry.bakiye(&hedef));
+                                if let Ok((_h, r)) = crate::avm::ham_eth_tx_isle(&mut self.avm_db, raw, zaman) {
+                                    if r.basarili {
+                                        // DEGER = AIDAG (arz-korumali)
+                                        if islem.deger > 0 {
+                                            let _ = self.bakiye_registry.transfer(&gonderen, &hedef, islem.deger);
+                                        }
+                                        // GAS = LSC (%50 yak + %50 gelistirme)
+                                        let (yakilan, gelistirme) = crate::avm::gas_ucreti_bol(ucret);
+                                        let _ = self.lsc_registry.transfer(&gonderen, &crate::avm::YAKIM_ADRESI, yakilan as crate::registry::Tutar);
+                                        let _ = self.lsc_registry.transfer(&gonderen, &crate::avm::GELISTIRME_HAVUZU, gelistirme as crate::registry::Tutar);
+                                        self.nonce_registry.ilerlet(&gonderen);
+                                    }
+                                }
+                            }
+                        }
                     }
-                    // AVM'de calistir (deploy/call). Hata olursa sessizce gecersiz
-                    // (vertex DAG'da kalir, digerleri gibi). Kalicilik: replay'de tekrar isler.
-                    let _ = crate::avm::ham_eth_tx_isle(&mut self.avm_db, raw, zaman);
                 }
             }
             _ => {}
@@ -2006,35 +2027,25 @@ mod tests {
         let sk5 = SigningKey::from_bytes(&[5u8; 32]);
         let gonderen = public_key_to_adres(&sk5.verifying_key().to_bytes());
         let hedef = [0xEE; 20];
-        node.lsc_test_bakiye_ekle(gonderen, 1_000_000_000_000_000);
-        let arz_basta = node.lsc_toplam_arzi();
+        node.test_bakiye_ekle(gonderen, 1_000_000_000_000_000);      // AIDAG (deger)
+        node.lsc_test_bakiye_ekle(gonderen, 1_000_000_000_000_000);  // LSC (gas)
+        let a_once = node.bakiye(&gonderen);
+        let l_once = node.lsc_bakiye(&gonderen);
+        let lsc_arz = node.lsc_toplam_arzi();
 
-        // AVM cagrisi: hedefe 1000 LSC, nonce=0. Gas = 21000 LSC (10500 yak + 10500 havuz).
         let payload = AvmCagri::new(hedef, 1000, 0, vec![]).encode();
         let v = Vertex::new_signed(NET, vec![gid], payload, now, &sk5).expect("avm vertex");
         node.ingest_networked(&wire::encode(&v), now);
 
         let yakim = [0u8; 20];
         let havuz = crate::avm::GELISTIRME_HAVUZU;
-        // deger hedefe ulasti
-        assert_eq!(node.lsc_bakiye(&hedef), 1000, "hedef 1000 LSC almali");
-        // gas yakildi + havuza gitti
-        assert_eq!(node.lsc_bakiye(&yakim), 10_500_000_000_000, "10500 LSC yakildi");
-        assert_eq!(
-            node.lsc_bakiye(&havuz),
-            10_500_000_000_000,
-            "10500 LSC gelistirme havuzunda"
-        );
-        // gonderen: 1_000_000 - 1000 - 21000 = 978_000
-        assert_eq!(
-            node.lsc_bakiye(&gonderen),
-            978_999_999_999_000,
-            "gonderen bakiyesi dogru dustu"
-        );
-        // nonce ilerledi
+        assert_eq!(node.bakiye(&hedef), 1000, "hedef 1000 AIDAG almali");
+        assert_eq!(node.lsc_bakiye(&yakim), 10_500_000_000_000, "gas yak (LSC)");
+        assert_eq!(node.lsc_bakiye(&havuz), 10_500_000_000_000, "gas havuz (LSC)");
+        assert_eq!(node.bakiye(&gonderen), a_once - 1000, "gonderen AIDAG dustu (deger)");
+        assert_eq!(node.lsc_bakiye(&gonderen), l_once - 21_000_000_000_000, "gonderen LSC gas dustu");
         assert_eq!(node.beklenen_nonce(&gonderen), 1, "nonce 1'e ilerledi");
-        // TOPLAM ARZ KORUNDU (sadece yer degisti)
-        assert_eq!(node.lsc_toplam_arzi(), arz_basta, "toplam LSC arzi korundu");
+        assert_eq!(node.lsc_toplam_arzi(), lsc_arz, "LSC arzi korundu");
     }
 
     // KOPRU 5 (canli): node yolundan KONTRAT DEPLOY. data dolu + hedef=sifir -> CREATE.
@@ -2356,32 +2367,23 @@ mod tests {
 
         let sk = SigningKey::from_bytes(&[14u8; 32]);
         let gonderen = public_key_to_adres(&sk.verifying_key().to_bytes());
-        node.lsc_test_bakiye_ekle(gonderen, 100_000_000_000_000_000);
-        let arz_basta = node.lsc_toplam_arzi();
+        node.test_bakiye_ekle(gonderen, 100_000_000_000_000_000);      // AIDAG (deger)
+        node.lsc_test_bakiye_ekle(gonderen, 100_000_000_000_000_000);  // LSC (gas)
+        let a_once = node.bakiye(&gonderen);
+        let l_once = node.lsc_bakiye(&gonderen);
+        let lsc_arz = node.lsc_toplam_arzi();
 
-        // hedef: kod-suz siradan adres (EVM value transferi basarili olur)
         let hedef = [0x77u8; 20];
-        let g_once = node.lsc_bakiye(&gonderen);
-
-        // data dolu (tetikleyici) + deger=5000, nonce=0
         let pc = AvmCagri::new(hedef, 5000, 0, vec![0x01]).encode();
         let vc = Vertex::new_signed(NET, vec![gid], pc, now, &sk).expect("avm deger");
         node.ingest_networked(&wire::encode(&vc), now);
 
-        // KANIT: islendi, deger hedefe gitti, gas kesildi
         assert_eq!(node.beklenen_nonce(&gonderen), 1, "islendi");
-        assert_eq!(node.lsc_bakiye(&hedef), 5000, "deger hedefe gitti (5000)");
-        assert_eq!(
-            node.lsc_bakiye(&gonderen),
-            g_once - 5000 - 21_000_000_000_000,
-            "gonderen dogru dustu"
-        );
-        // EN KRITIK: TOPLAM ARZ KORUNDU
-        assert_eq!(
-            node.lsc_toplam_arzi(),
-            arz_basta,
-            "TOPLAM LSC ARZI KORUNDU (kayip/yaratim yok)"
-        );
+        assert_eq!(node.bakiye(&hedef), 5000, "deger AIDAG hedefe gitti (5000)");
+        assert_eq!(node.bakiye(&gonderen), a_once - 5000, "gonderen AIDAG dustu (deger)");
+        assert_eq!(node.lsc_bakiye(&gonderen), l_once - 21_000_000_000_000, "gonderen LSC gas dustu");
+        assert_eq!(node.bakiye(&gonderen) + node.bakiye(&hedef), a_once, "AIDAG arzi korundu");
+        assert_eq!(node.lsc_toplam_arzi(), lsc_arz, "LSC arzi korundu");
     }
 
     // AVM cagrisi: yetersiz bakiye -> hicbir sey degismez, nonce ilerlemez.
