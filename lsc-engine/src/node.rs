@@ -57,6 +57,8 @@ pub struct NodeState {
     /// Faucet owner adresi (TESTNET). Some ise SADECE bu adres faucet basabilir;
     /// None ise faucet tamamen KAPALI (mainnet guvenligi).
     faucet_owner: Option<[u8; 20]>,
+    /// Faucet CIFTE-DAMLA engeli: bir adrese bir kez.
+    faucet_verildi: std::collections::HashSet<[u8; 20]>,
 
     /// AVM state: sozlesme kodu + storage (KALICI kaynak). LSC bakiyesi BURADA
     /// TUTULMAZ; her cagrida lsc_registry'den yuklenir (tek kaynak = lsc_registry).
@@ -83,6 +85,7 @@ impl NodeState {
             eslestirme_registry: crate::registry::EslestirmeRegistry::yeni(),
             on_satis_registry: crate::registry::OnSatisRegistry::yeni(),
             faucet_owner: None,
+            faucet_verildi: std::collections::HashSet::new(),
             avm_db: crate::avm::AidagDatabase::yeni(),
         }
     }
@@ -851,9 +854,11 @@ impl NodeState {
                 if let Some(owner) = self.faucet_owner {
                     if let Ok(f) = crate::tx::FaucetKaydi::decode(payload) {
                         let imzalayan = crate::registry::public_key_to_adres(signer);
-                        if imzalayan == owner {
+                        if imzalayan == owner && self.faucet_verildi.insert(f.alici) {
                             // Owner dogrulandi -> test bakiyesi bas (aga yayilan).
                             self.bakiye_registry.test_bakiye_ekle(f.alici, f.miktar);
+                            // GAS: faucet AIDAG yaninda birkac islemlik LSC (gas) de verir (gercek gas testi).
+                            self.lsc_registry.test_bakiye_ekle(f.alici, 100_000_000_000_000_000); // 0.1 LSC gas (~4700 transfer)
                         }
                         // owner degilse: sessizce reddet (yetkisiz faucet).
                     }
@@ -2548,6 +2553,30 @@ mod tests {
             KurumKategori::Ozel
         );
         assert_eq!(node.kurum_sayisi(), 2);
+    }
+
+    #[test]
+    fn ingest_faucet_cifte_damla_engellenir() {
+        use crate::registry::public_key_to_adres;
+        use crate::tx::FaucetKaydi;
+        let now = 1_700_000_000;
+        let mut node = NodeState::new_devnet(NET);
+        let (gen, gid) = genesis_bytes(1, now);
+        node.ingest_networked(&gen, now);
+
+        let owner_sk = SigningKey::from_bytes(&[210u8; 32]);
+        let owner_adr = public_key_to_adres(&owner_sk.verifying_key().to_bytes());
+        node.faucet_owner_ayarla(owner_adr);
+
+        let alici = [0x77; 20];
+        let p1 = FaucetKaydi::new(alici, 1000).encode();
+        let v1 = Vertex::new_signed(NET, vec![gid], p1, now, &owner_sk).expect("v1");
+        node.ingest_networked(&wire::encode(&v1), now);
+        let p2 = FaucetKaydi::new(alici, 1000).encode();
+        let v2 = Vertex::new_signed(NET, vec![gid], p2, now + 1, &owner_sk).expect("v2");
+        node.ingest_networked(&wire::encode(&v2), now + 1);
+
+        assert_eq!(node.bakiye(&alici), 1000, "ikinci faucet damlasi eklenmemeli");
     }
 
     // ===== FAUCET owner kontrolu (aga yayilan, guvenli) =====

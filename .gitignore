@@ -37,3 +37,7 @@ avm-sozlesmeler/*.bin
 !avm-sozlesmeler/Token.bin
 !avm-sozlesmeler/Token.sol
 avm-sozlesmeler/token-cikti/
+
+# Owner/faucet anahtari
+*anahtar*
+faucet_anahtar.txt
