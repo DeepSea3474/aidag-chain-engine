@@ -1,7 +1,10 @@
 //! POC: AIDAG secp256k1 (Ethereum/MetaMask) imza dogrulayabilir mi?
 //! Bu test IZOLE - vertex/DAG/konsensus koduna DOKUNMAZ.
 
-use k256::ecdsa::{SigningKey, VerifyingKey, signature::{Signer, Verifier}, Signature};
+use k256::ecdsa::{
+    signature::{Signer, Verifier},
+    Signature, SigningKey, VerifyingKey,
+};
 
 #[test]
 fn secp256k1_imza_uret_ve_dogrula() {
@@ -22,5 +25,8 @@ fn secp256k1_yanlis_anahtar_reddedilir() {
     let vk2 = VerifyingKey::from(&sk2);
     let mesaj = b"test mesaji";
     let imza: Signature = sk1.sign(mesaj);
-    assert!(vk2.verify(mesaj, &imza).is_err(), "yanlis anahtar reddedilmeli");
+    assert!(
+        vk2.verify(mesaj, &imza).is_err(),
+        "yanlis anahtar reddedilmeli"
+    );
 }

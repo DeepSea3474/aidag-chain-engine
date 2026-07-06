@@ -90,7 +90,9 @@ mod tests {
 
     #[test]
     fn genesis_kapali_toplam_tam_arz() {
-        let adresler = [[1u8; 20], [2u8; 20], [3u8; 20], [4u8; 20], [5u8; 20], [6u8; 20]];
+        let adresler = [
+            [1u8; 20], [2u8; 20], [3u8; 20], [4u8; 20], [5u8; 20], [6u8; 20],
+        ];
         let g = GenesisDagitim::planla(adresler);
         // Kapalılık: toplam TAM olarak 21M ×10^18
         assert!(g.kapali_mi(), "genesis kapali degil - arz korunmuyor!");
@@ -99,7 +101,9 @@ mod tests {
 
     #[test]
     fn genesis_dilimler_dogru_oran() {
-        let adresler = [[1u8; 20], [2u8; 20], [3u8; 20], [4u8; 20], [5u8; 20], [6u8; 20]];
+        let adresler = [
+            [1u8; 20], [2u8; 20], [3u8; 20], [4u8; 20], [5u8; 20], [6u8; 20],
+        ];
         let g = GenesisDagitim::planla(adresler);
         // Hazine %25
         assert_eq!(g.hazine.1, AIDAG_ARZ * 25 / 100);
@@ -114,7 +118,9 @@ mod tests {
     #[test]
     fn genesis_dilimler_bakiyeye_yuklenebilir() {
         use crate::registry::BakiyeRegistry;
-        let adresler = [[1u8; 20], [2u8; 20], [3u8; 20], [4u8; 20], [5u8; 20], [6u8; 20]];
+        let adresler = [
+            [1u8; 20], [2u8; 20], [3u8; 20], [4u8; 20], [5u8; 20], [6u8; 20],
+        ];
         let g = GenesisDagitim::planla(adresler);
         let mut reg = BakiyeRegistry::yeni();
         for (adres, miktar) in g.dilimler() {

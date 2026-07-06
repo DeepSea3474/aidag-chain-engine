@@ -14,8 +14,8 @@ fn raw_ethereum_tx_cozulur() {
     let raw = hex::decode(raw_hex).expect("hex");
 
     // alloy-consensus ile cöz (RLP decode + tx parse + imza)
-    use alloy_eips::eip2718::Decodable2718;
     use alloy_consensus::transaction::SignerRecoverable;
+    use alloy_eips::eip2718::Decodable2718;
     let tx = TxEnvelope::decode_2718(&mut raw.as_slice()).expect("tx cozulmeli");
 
     // Gondereni imzadan kurtar (ecrecover, alloy icinde)

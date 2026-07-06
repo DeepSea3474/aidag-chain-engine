@@ -3,9 +3,11 @@
 //! Kanit: MetaMask tarzi bir kullanici, bir islemi secp256k1 ile imzalar;
 //! sistem islemi dogrular ve sahibinin 0x adresini cikarir.
 
-use k256::ecdsa::{SigningKey, VerifyingKey, signature::{Signer, Verifier}, Signature};
+use k256::ecdsa::{
+    signature::{Signer, Verifier},
+    Signature, SigningKey, VerifyingKey,
+};
 #[allow(unused_imports)]
-use k256::elliptic_curve::sec1::ToEncodedPoint;
 use sha3::{Digest, Keccak256};
 
 /// secp256k1 pubkey -> 20 baytlik 0x adres (Ethereum yontemi).
@@ -53,8 +55,15 @@ fn secp256k1_imzali_islem_bastan_sona_dogrulanir() {
     // 4) SISTEM islemi dogrular -> gonderenin adresini cikarir
     let cikan = islem_dogrula(&mesaj, &imza, &kullanici_vk);
     assert!(cikan.is_some(), "gecerli islem dogrulanmali");
-    assert_eq!(cikan.unwrap(), gonderen_adres, "cikan adres, gonderenin 0x adresi olmali");
-    println!("islem dogrulandi, gonderen: 0x{}", hex::encode(gonderen_adres));
+    assert_eq!(
+        cikan.unwrap(),
+        gonderen_adres,
+        "cikan adres, gonderenin 0x adresi olmali"
+    );
+    println!(
+        "islem dogrulandi, gonderen: 0x{}",
+        hex::encode(gonderen_adres)
+    );
 }
 
 #[test]

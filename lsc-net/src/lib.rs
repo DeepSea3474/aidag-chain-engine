@@ -260,7 +260,9 @@ pub async fn run_node(
     let owner_adres_final: [u8; 20] = if let Ok(owner_hex) = std::env::var("LSC_FAUCET_OWNER") {
         let mut a = [0u8; 20];
         if let Ok(b) = hex::decode(owner_hex.trim()) {
-            if b.len() == 20 { a.copy_from_slice(&b); }
+            if b.len() == 20 {
+                a.copy_from_slice(&b);
+            }
         }
         tracing::info!("Faucet/on-satis owner = LSC_FAUCET_OWNER (env, disaridan imzali dagitim)");
         a
@@ -277,8 +279,13 @@ pub async fn run_node(
     // NOT: Bu gecici bir kurulum; gercek mainnet genesis'i pinli/vesting'li olacak.
     if let Ok(hazine_str) = std::env::var("LSC_GENESIS_HAZINE") {
         if let Ok(miktar) = hazine_str.trim().parse::<u128>() {
-            node_state.write().await.test_bakiye_ekle(owner_adres_final, miktar);
-            tracing::warn!("GENESIS HAZINE: owner'a {miktar} birim AIDAG yuklendi (env LSC_GENESIS_HAZINE).");
+            node_state
+                .write()
+                .await
+                .test_bakiye_ekle(owner_adres_final, miktar);
+            tracing::warn!(
+                "GENESIS HAZINE: owner'a {miktar} birim AIDAG yuklendi (env LSC_GENESIS_HAZINE)."
+            );
         } else {
             tracing::warn!("LSC_GENESIS_HAZINE gecersiz (u128 olmali): {hazine_str}");
         }

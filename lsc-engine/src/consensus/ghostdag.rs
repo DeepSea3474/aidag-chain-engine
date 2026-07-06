@@ -457,11 +457,9 @@ impl Ghostdag {
         );
         let sp = d.selected_parent;
         self.data.insert(id, d);
-        if !self.assign_interval_incremental(&id, sp) {
-            if !self.lokal_rebuild_dene(&id, sp) {
-                self.iv = sp_tree_intervals_gapped(&self.data);
-                self.iv_next = self.iv.iter().map(|(k, &(s, _))| (*k, s)).collect();
-            }
+        if !self.assign_interval_incremental(&id, sp) && !self.lokal_rebuild_dene(&id, sp) {
+            self.iv = sp_tree_intervals_gapped(&self.data);
+            self.iv_next = self.iv.iter().map(|(k, &(s, _))| (*k, s)).collect();
         }
         self.torba_guncelle_tek(graph, &id, sp);
         self.up_guncelle_tek(&id, sp);

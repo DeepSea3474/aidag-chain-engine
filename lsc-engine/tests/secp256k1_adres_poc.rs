@@ -3,7 +3,6 @@
 //! Kanit: bizim turetme, Ethereum'un urettigi adresle BIREBIR AYNI mi?
 
 use k256::ecdsa::{SigningKey, VerifyingKey};
-use k256::elliptic_curve::sec1::ToEncodedPoint as _;
 use sha3::{Digest, Keccak256};
 
 /// secp256k1 public key -> 20 baytlik Ethereum adresi.

@@ -77,7 +77,7 @@ async fn avm_kontratlar(State(st): State<RpcState>) -> Json<Value> {
     let liste: Vec<String> = node
         .avm_kontrat_adresleri()
         .iter()
-        .map(|adres| hex::encode(adres))
+        .map(hex::encode)
         .collect();
     Json(json!({ "count": liste.len(), "kontratlar": liste }))
 }
@@ -306,7 +306,10 @@ async fn eslesme(State(st): State<RpcState>, Path(adres_hex): Path<String>) -> J
 
 /// GET /on-satis/:odeme_ref — bir on satis odeme referansinin dagitim kaydi.
 /// Alici, satilan AIDAG, LSC hediye, zaman. Seffaflik/itiraz/denetim icin.
-async fn on_satis_sorgu(State(st): State<RpcState>, Path(odeme_ref_str): Path<String>) -> Json<Value> {
+async fn on_satis_sorgu(
+    State(st): State<RpcState>,
+    Path(odeme_ref_str): Path<String>,
+) -> Json<Value> {
     let odeme_ref: u64 = match odeme_ref_str.trim().parse() {
         Ok(v) => v,
         _ => return Json(json!({ "ok": false, "hata": "odeme_ref sayi olmali" })),
@@ -342,7 +345,11 @@ fn mask_adres(adres: &[u8; 20]) -> String {
 async fn on_satis_ozet(State(st): State<RpcState>) -> Json<Value> {
     let (toplam, sayi, liste) = {
         let n = st.node.read().await;
-        (n.on_satis_toplam_aidag(), n.on_satis_sayisi(), n.on_satis_liste())
+        (
+            n.on_satis_toplam_aidag(),
+            n.on_satis_sayisi(),
+            n.on_satis_liste(),
+        )
     };
     let alimlar: Vec<Value> = liste
         .iter()
@@ -375,7 +382,10 @@ async fn on_satis_adres(State(st): State<RpcState>, Path(adres_hex): Path<String
     adres.copy_from_slice(&b);
     let (alimlar_ham, toplam) = {
         let n = st.node.read().await;
-        (n.on_satis_adrese_gore(&adres), n.on_satis_adres_toplam(&adres))
+        (
+            n.on_satis_adrese_gore(&adres),
+            n.on_satis_adres_toplam(&adres),
+        )
     };
     let alimlar: Vec<Value> = alimlar_ham
         .iter()
@@ -498,9 +508,13 @@ async fn test_bakiye(State(st): State<RpcState>, body: String) -> Json<Value> {
         Err(e) => return Json(json!({ "ok": false, "hata": format!("gecersiz json: {e}") })),
     };
     let adres_hex = v.get("adres").and_then(|a| a.as_str()).unwrap_or("");
-    let miktar: lsc_engine::registry::Tutar = v.get("miktar")
-        .and_then(|m| m.as_str().and_then(|x| x.parse::<u128>().ok())  // string: buyuk deger (18 ondalik)
-            .or_else(|| m.as_u64().map(|n| n as u128)))                // sayi: geriye uyumlu
+    let miktar: lsc_engine::registry::Tutar = v
+        .get("miktar")
+        .and_then(|m| {
+            m.as_str()
+                .and_then(|x| x.parse::<u128>().ok()) // string: buyuk deger (18 ondalik)
+                .or_else(|| m.as_u64().map(|n| n as u128))
+        }) // sayi: geriye uyumlu
         .unwrap_or(0);
     let adres_bytes = match hex::decode(adres_hex.trim()) {
         Ok(b) if b.len() == 20 => b,
@@ -523,9 +537,13 @@ async fn lsc_test_bakiye(State(st): State<RpcState>, body: String) -> Json<Value
         Err(e) => return Json(json!({ "ok": false, "hata": format!("gecersiz json: {e}") })),
     };
     let adres_hex = v.get("adres").and_then(|a| a.as_str()).unwrap_or("");
-    let miktar: lsc_engine::registry::Tutar = v.get("miktar")
-        .and_then(|m| m.as_str().and_then(|x| x.parse::<u128>().ok())  // string: buyuk deger (18 ondalik)
-            .or_else(|| m.as_u64().map(|n| n as u128)))                // sayi: geriye uyumlu
+    let miktar: lsc_engine::registry::Tutar = v
+        .get("miktar")
+        .and_then(|m| {
+            m.as_str()
+                .and_then(|x| x.parse::<u128>().ok()) // string: buyuk deger (18 ondalik)
+                .or_else(|| m.as_u64().map(|n| n as u128))
+        }) // sayi: geriye uyumlu
         .unwrap_or(0);
     let adres_bytes = match hex::decode(adres_hex.trim()) {
         Ok(b) if b.len() == 20 => b,
@@ -596,7 +614,10 @@ const AIDAG_CHAIN_ID: u64 = 3474;
 fn eth_params_call(istek: &Value) -> Option<([u8; 20], Vec<u8>)> {
     let p0 = istek.get("params")?.as_array()?.first()?;
     let to_str = p0.get("to")?.as_str()?;
-    let to_temiz = to_str.trim().trim_start_matches("0x").trim_start_matches("0X");
+    let to_temiz = to_str
+        .trim()
+        .trim_start_matches("0x")
+        .trim_start_matches("0X");
     let to_bytes = hex::decode(to_temiz).ok()?;
     if to_bytes.len() != 20 {
         return None;
@@ -657,26 +678,22 @@ async fn eth_rpc(State(st): State<RpcState>, Json(istek): Json<Value>) -> Json<V
         "web3_clientVersion" => ok(&id, json!("AIDAG-Chain/v0.1.0")),
         // Bir adresin bakiyesi. params[0] = "0x<adres>". Hex (wei tarzi) doner.
         // MetaMask transfer ekraninda bakiyeyi GOSTERIR.
-        "eth_getBalance" => {
-            match eth_params_adres(&istek) {
-                Some(adres) => {
-                    let bakiye = st.node.read().await.bakiye(&adres) as u128;
-                    ok(&id, json!(format!("0x{:x}", bakiye)))
-                }
-                None => err(&id, -32602, "gecersiz adres parametresi"),
+        "eth_getBalance" => match eth_params_adres(&istek) {
+            Some(adres) => {
+                let bakiye = st.node.read().await.bakiye(&adres) as u128;
+                ok(&id, json!(format!("0x{:x}", bakiye)))
             }
-        }
+            None => err(&id, -32602, "gecersiz adres parametresi"),
+        },
         // Bir adresin islem sayisi = nonce. params[0] = "0x<adres>".
         // MetaMask islemi NUMARALANDIRMAK icin sorar (replay korumasi).
-        "eth_getTransactionCount" => {
-            match eth_params_adres(&istek) {
-                Some(adres) => {
-                    let nonce = st.node.read().await.beklenen_nonce(&adres);
-                    ok(&id, json!(format!("0x{:x}", nonce)))
-                }
-                None => err(&id, -32602, "gecersiz adres parametresi"),
+        "eth_getTransactionCount" => match eth_params_adres(&istek) {
+            Some(adres) => {
+                let nonce = st.node.read().await.beklenen_nonce(&adres);
+                ok(&id, json!(format!("0x{:x}", nonce)))
             }
-        }
+            None => err(&id, -32602, "gecersiz adres parametresi"),
+        },
         // eth_call: OKUMA-ONLY sozlesme cagrisi (dApp/web3 sozlesme okur, zincir degismez).
         // params[0] = {"to":"0x<sozlesme>","data":"0x<calldata>"}
         "eth_call" => {
@@ -696,10 +713,17 @@ async fn eth_rpc(State(st): State<RpcState>, Json(istek): Json<Value>) -> Json<V
         // eth_sendRawTransaction: MetaMask/web3'ten imzali ham tx al -> AVM'de calistir.
         // params[0] = "0x<RLP-kodlu imzali tx>". Doner: tx_hash (0x...).
         "eth_sendRawTransaction" => {
-            match istek.get("params").and_then(|p| p.as_array())
-                .and_then(|a| a.first()).and_then(|v| v.as_str()) {
+            match istek
+                .get("params")
+                .and_then(|p| p.as_array())
+                .and_then(|a| a.first())
+                .and_then(|v| v.as_str())
+            {
                 Some(raw_hex) => {
-                    let temiz = raw_hex.trim().trim_start_matches("0x").trim_start_matches("0X");
+                    let temiz = raw_hex
+                        .trim()
+                        .trim_start_matches("0x")
+                        .trim_start_matches("0X");
                     match hex::decode(temiz) {
                         Ok(raw) => {
                             // tx_hash = keccak256(raw) - eth standardi, hemen hesaplanir
@@ -715,12 +739,19 @@ async fn eth_rpc(State(st): State<RpcState>, Json(istek): Json<Value>) -> Json<V
                             let payload = lsc_engine::tx::ham_eth_tx_payload(&raw);
                             let now = std::time::SystemTime::now()
                                 .duration_since(std::time::UNIX_EPOCH)
-                                .map(|d| d.as_secs()).unwrap_or(0);
+                                .map(|d| d.as_secs())
+                                .unwrap_or(0);
                             let (parents, net) = {
                                 let node = st.node.read().await;
                                 (node.tips(), node.network_id())
                             };
-                            let vertex = match lsc_engine::Vertex::new_signed(net, parents, payload, now, &st.signing_key) {
+                            let vertex = match lsc_engine::Vertex::new_signed(
+                                net,
+                                parents,
+                                payload,
+                                now,
+                                &st.signing_key,
+                            ) {
                                 Ok(v) => v,
                                 Err(_) => return err(&id, -32000, "vertex uretilemedi"),
                             };
@@ -739,7 +770,6 @@ async fn eth_rpc(State(st): State<RpcState>, Json(istek): Json<Value>) -> Json<V
             }
         }
 
-
         // eth_gasPrice: gas fiyati. Testnette dusuk sabit deger (MetaMask sorar).
         "eth_gasPrice" => ok(&id, json!("0x3b9aca00")),
         // eth_maxPriorityFeePerGas: EIP-1559 tip (MetaMask sorar).
@@ -750,51 +780,61 @@ async fn eth_rpc(State(st): State<RpcState>, Json(istek): Json<Value>) -> Json<V
         // Bizde blok = vertex; basit bir blok objesi doneriz (MetaMask'i tatmin eder).
         "eth_getBlockByNumber" => {
             let n = st.node.read().await.vertex_count() as u64;
-            ok(&id, json!({
-                "number": format!("0x{:x}", n),
-                "hash": format!("0x{:064x}", n),
-                "parentHash": format!("0x{:064x}", n.saturating_sub(1)),
-                "timestamp": format!("0x{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)),
-                "gasLimit": "0x1c9c380",
-                "gasUsed": "0x0",
-                "baseFeePerGas": "0x3b9aca00",
-                "miner": "0x0000000000000000000000000000000000000000",
-                "transactions": [],
-                "difficulty": "0x0",
-                "totalDifficulty": "0x0",
-                "size": "0x0",
-                "extraData": "0x",
-                "nonce": "0x0000000000000000",
-                "sha3Uncles": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
-                "logsBloom": "0x0",
-                "stateRoot": format!("0x{:064x}", n),
-                "receiptsRoot": "0x0",
-                "transactionsRoot": "0x0",
-                "uncles": []
-            }))
+            ok(
+                &id,
+                json!({
+                    "number": format!("0x{:x}", n),
+                    "hash": format!("0x{:064x}", n),
+                    "parentHash": format!("0x{:064x}", n.saturating_sub(1)),
+                    "timestamp": format!("0x{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)),
+                    "gasLimit": "0x1c9c380",
+                    "gasUsed": "0x0",
+                    "baseFeePerGas": "0x3b9aca00",
+                    "miner": "0x0000000000000000000000000000000000000000",
+                    "transactions": [],
+                    "difficulty": "0x0",
+                    "totalDifficulty": "0x0",
+                    "size": "0x0",
+                    "extraData": "0x",
+                    "nonce": "0x0000000000000000",
+                    "sha3Uncles": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "logsBloom": "0x0",
+                    "stateRoot": format!("0x{:064x}", n),
+                    "receiptsRoot": "0x0",
+                    "transactionsRoot": "0x0",
+                    "uncles": []
+                }),
+            )
         }
         // eth_getBlockByHash: benzer, hash ile.
         "eth_getBlockByHash" => {
             let n = st.node.read().await.vertex_count() as u64;
-            ok(&id, json!({
-                "number": format!("0x{:x}", n),
-                "hash": format!("0x{:064x}", n),
-                "parentHash": format!("0x{:064x}", n.saturating_sub(1)),
-                "timestamp": format!("0x{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)),
-                "gasLimit": "0x1c9c380",
-                "gasUsed": "0x0",
-                "baseFeePerGas": "0x3b9aca00",
-                "miner": "0x0000000000000000000000000000000000000000",
-                "transactions": [],
-                "difficulty": "0x0",
-                "size": "0x0",
-                "extraData": "0x",
-                "nonce": "0x0000000000000000",
-                "uncles": []
-            }))
+            ok(
+                &id,
+                json!({
+                    "number": format!("0x{:x}", n),
+                    "hash": format!("0x{:064x}", n),
+                    "parentHash": format!("0x{:064x}", n.saturating_sub(1)),
+                    "timestamp": format!("0x{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)),
+                    "gasLimit": "0x1c9c380",
+                    "gasUsed": "0x0",
+                    "baseFeePerGas": "0x3b9aca00",
+                    "miner": "0x0000000000000000000000000000000000000000",
+                    "transactions": [],
+                    "difficulty": "0x0",
+                    "size": "0x0",
+                    "extraData": "0x",
+                    "nonce": "0x0000000000000000",
+                    "uncles": []
+                }),
+            )
         }
 
-        _ => err(&id, -32601, "method not found (bu dilimde desteklenmeyen metot)"),
+        _ => err(
+            &id,
+            -32601,
+            "method not found (bu dilimde desteklenmeyen metot)",
+        ),
     }
 }
 
@@ -821,7 +861,7 @@ pub fn router(
         .route("/belge/:hash", get(belge))
         .route("/kurum/:adres", get(kurum))
         .route("/submit", post(submit))
-        .route("/", post(eth_rpc))  // Ethereum JSON-RPC (MetaMask + tum EVM cuzdanlari)
+        .route("/", post(eth_rpc)) // Ethereum JSON-RPC (MetaMask + tum EVM cuzdanlari)
         .route("/islemlerim/:pubkey", get(islemlerim))
         .route("/testnet-durum/:adres", get(testnet_durum))
         .route("/eslestir", post(eslestir))

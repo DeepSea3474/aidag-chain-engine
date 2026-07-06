@@ -478,7 +478,12 @@ pub struct AvmCagri {
 const AVM_CAGRI_SABIT_LEN: usize = 1 + ADDR_LEN + 16 + 8 + 4; // deger u128(16)+nonce(8)+len(4) = 49
 
 impl AvmCagri {
-    pub fn new(hedef: [u8; ADDR_LEN], deger: crate::registry::Tutar, nonce: u64, data: Vec<u8>) -> Self {
+    pub fn new(
+        hedef: [u8; ADDR_LEN],
+        deger: crate::registry::Tutar,
+        nonce: u64,
+        data: Vec<u8>,
+    ) -> Self {
         AvmCagri {
             hedef,
             deger,
@@ -536,7 +541,6 @@ impl AvmCagri {
     }
 }
 
-
 /// ON SATIS DAGITIM (tip=10). SADECE owner cagirir. Hazineden AIDAG + LSC hediye.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OnSatisDagitim {
@@ -548,8 +552,18 @@ pub struct OnSatisDagitim {
 const ON_SATIS_LEN: usize = 1 + ADDR_LEN + 16 + 16 + 8; // aidag(16)+lsc_hediye(16)+odeme_ref(8)
 
 impl OnSatisDagitim {
-    pub fn new(alici: [u8; ADDR_LEN], aidag: crate::registry::Tutar, lsc_hediye: crate::registry::Tutar, odeme_ref: u64) -> Self {
-        OnSatisDagitim { alici, aidag, lsc_hediye, odeme_ref }
+    pub fn new(
+        alici: [u8; ADDR_LEN],
+        aidag: crate::registry::Tutar,
+        lsc_hediye: crate::registry::Tutar,
+        odeme_ref: u64,
+    ) -> Self {
+        OnSatisDagitim {
+            alici,
+            aidag,
+            lsc_hediye,
+            odeme_ref,
+        }
     }
     pub fn encode(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(ON_SATIS_LEN);
@@ -566,7 +580,10 @@ impl OnSatisDagitim {
             return Err(TxError::UnknownType(first));
         }
         if bytes.len() != ON_SATIS_LEN {
-            return Err(TxError::BadLength { expected: ON_SATIS_LEN, got: bytes.len() });
+            return Err(TxError::BadLength {
+                expected: ON_SATIS_LEN,
+                got: bytes.len(),
+            });
         }
         let mut alici = [0u8; ADDR_LEN];
         alici.copy_from_slice(&bytes[1..1 + ADDR_LEN]);
@@ -578,7 +595,12 @@ impl OnSatisDagitim {
         let mut b8 = [0u8; 8];
         b8.copy_from_slice(&bytes[1 + ADDR_LEN + 32..ON_SATIS_LEN]);
         let odeme_ref = u64::from_be_bytes(b8);
-        Ok(OnSatisDagitim { alici, aidag, lsc_hediye, odeme_ref })
+        Ok(OnSatisDagitim {
+            alici,
+            aidag,
+            lsc_hediye,
+            odeme_ref,
+        })
     }
 }
 
@@ -968,7 +990,6 @@ impl EslestirmeKaydi {
     }
 }
 
-
 // ============================================================================
 // tip=11: EVM-UYUMLU TRANSFER (secp256k1 imzali — MetaMask/Trust/Ledger vb.)
 // ----------------------------------------------------------------------------
@@ -1026,7 +1047,11 @@ pub struct EvmTransfer {
 
 /// EVM transferinde IMZALANAN mesaj: [alici:20][miktar:8] (transferin ozu).
 /// Gonderen bu mesaji secp256k1 ile imzalar; biz ecrecover ile gondereni buluruz.
-pub fn evm_transfer_mesaji(alici: &[u8; ADDR_LEN], miktar: crate::registry::Tutar, nonce: u64) -> Vec<u8> {
+pub fn evm_transfer_mesaji(
+    alici: &[u8; ADDR_LEN],
+    miktar: crate::registry::Tutar,
+    nonce: u64,
+) -> Vec<u8> {
     let mut m = Vec::with_capacity(ADDR_LEN + 16 + 8);
     m.extend_from_slice(alici);
     m.extend_from_slice(&miktar.to_be_bytes());
@@ -1070,14 +1095,19 @@ impl EvmTransfer {
         let recovery_id = bytes[1 + ADDR_LEN + 16 + 8];
         let mut imza = [0u8; 64];
         imza.copy_from_slice(&bytes[1 + ADDR_LEN + 16 + 8 + 1..EVM_TRANSFER_ENCODED_LEN]);
-        Ok(EvmTransfer { alici, miktar, nonce, recovery_id, imza })
+        Ok(EvmTransfer {
+            alici,
+            miktar,
+            nonce,
+            recovery_id,
+            imza,
+        })
     }
 
     /// ecrecover: imzadan GONDERENIN 0x adresini kurtar (Secenek B, POC 4).
     /// Imza gecersizse None. Bu DILIM bakiyeye/transfer'e DOKUNMAZ.
     pub fn gonderen_adres(&self) -> Option<[u8; ADDR_LEN]> {
-        use k256::ecdsa::{Signature, RecoveryId, VerifyingKey};
-        use k256::elliptic_curve::sec1::ToEncodedPoint;
+        use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
         use sha3::{Digest, Keccak256};
 
         let mesaj = evm_transfer_mesaji(&self.alici, self.miktar, self.nonce);
@@ -1098,15 +1128,19 @@ impl EvmTransfer {
 #[cfg(test)]
 mod evm_transfer_tests {
     use super::*;
-    use k256::ecdsa::{SigningKey, RecoveryId, Signature, signature::hazmat::PrehashSigner};
+    use k256::ecdsa::{signature::hazmat::PrehashSigner, RecoveryId, Signature, SigningKey};
     use sha3::{Digest, Keccak256};
 
     // Yardimci: secp256k1 ile bir EVM transferi olustur (imzala).
-    fn imzali_transfer(sk: &SigningKey, alici: [u8; ADDR_LEN], miktar: crate::registry::Tutar, nonce: u64) -> EvmTransfer {
+    fn imzali_transfer(
+        sk: &SigningKey,
+        alici: [u8; ADDR_LEN],
+        miktar: crate::registry::Tutar,
+        nonce: u64,
+    ) -> EvmTransfer {
         let mesaj = evm_transfer_mesaji(&alici, miktar, nonce);
         let prehash = Keccak256::digest(&mesaj);
-        let (sig, recid): (Signature, RecoveryId) =
-            sk.sign_prehash(&prehash).expect("imza");
+        let (sig, recid): (Signature, RecoveryId) = sk.sign_prehash(&prehash).expect("imza");
         EvmTransfer {
             alici,
             miktar,
@@ -1133,7 +1167,6 @@ mod evm_transfer_tests {
         let sk = SigningKey::random(&mut rand::rngs::OsRng);
         // gercek gonderen adresi (keccak yontemi)
         use k256::ecdsa::VerifyingKey;
-        use k256::elliptic_curve::sec1::ToEncodedPoint;
         let vk = VerifyingKey::from(&sk);
         let nokta = vk.to_encoded_point(false);
         let h = Keccak256::digest(&nokta.as_bytes()[1..]);
@@ -1142,7 +1175,11 @@ mod evm_transfer_tests {
 
         let t = imzali_transfer(&sk, [0x44u8; ADDR_LEN], 123, 0);
         // ecrecover ile gonderen, gercek adresle ayni olmali
-        assert_eq!(t.gonderen_adres(), Some(gercek), "ecrecover gondereni dogru bulmali");
+        assert_eq!(
+            t.gonderen_adres(),
+            Some(gercek),
+            "ecrecover gondereni dogru bulmali"
+        );
     }
 
     #[test]
@@ -1153,7 +1190,9 @@ mod evm_transfer_tests {
         // miktari degistir (imza eski miktara aitti) -> gonderen ya None ya farkli
         t.miktar = 1;
         let bozuk = t.gonderen_adres();
-        assert_ne!(bozuk, dogru, "tahrif edilen transfer ayni gondereni vermemeli");
+        assert_ne!(
+            bozuk, dogru,
+            "tahrif edilen transfer ayni gondereni vermemeli"
+        );
     }
 }
-

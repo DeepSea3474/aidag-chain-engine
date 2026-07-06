@@ -15,8 +15,8 @@
 
 pub mod avm;
 pub mod consensus;
-pub mod genesis;
 pub mod dag;
+pub mod genesis;
 pub mod node;
 pub mod registry;
 pub mod tx;

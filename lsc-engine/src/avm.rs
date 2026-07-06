@@ -110,10 +110,12 @@ impl AidagDatabase {
         let (yakilan, gelistirme) = gas_ucreti_bol(ucret);
         // yakim: YAKIM_ADRESI bakiyesine ekle (oradan asla cikmaz = yok olmus sayilir)
         let y = self.lsc_bakiye(&YAKIM_ADRESI);
-        self.lsc_bakiyeler.insert(YAKIM_ADRESI, y + yakilan as crate::registry::Tutar);
+        self.lsc_bakiyeler
+            .insert(YAKIM_ADRESI, y + yakilan as crate::registry::Tutar);
         // gelistirme havuzu
         let g = self.lsc_bakiye(&GELISTIRME_HAVUZU);
-        self.lsc_bakiyeler.insert(GELISTIRME_HAVUZU, g + gelistirme as crate::registry::Tutar);
+        self.lsc_bakiyeler
+            .insert(GELISTIRME_HAVUZU, g + gelistirme as crate::registry::Tutar);
         Ok((yakilan, gelistirme))
     }
 }
@@ -125,7 +127,7 @@ impl Database for AidagDatabase {
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Infallible> {
         let adres = address.into_array();
         let bakiye = self.aidag_bakiyeler.get(&adres).copied().unwrap_or(0); // EVM native = AIDAG
-        // KOPRU 5: bu adresin sozlesme kodu var mi?
+                                                                             // KOPRU 5: bu adresin sozlesme kodu var mi?
         let (code_hash, code) = match self.kodlar.get(&adres) {
             Some(b) => (b.hash_slow(), Some(b.clone())),
             None => (KECCAK_EMPTY, None),
@@ -355,7 +357,6 @@ pub struct HamEthIslem {
 
 /// MetaMask/web3'ten gelen RLP-kodlu ham Ethereum tx'i coz + gondereni kurtar.
 /// Girdi: 0x-prefix ol/olmasin ham bytes. Cikti: cozulmus islem + gonderen adres.
-
 /// Ham eth tx'in hash'i = keccak256(raw). Ethereum standardi (tx_hash).
 pub fn eth_tx_hash(raw: &[u8]) -> [u8; 32] {
     use revm::primitives::keccak256;
@@ -368,16 +369,28 @@ pub fn ham_eth_tx_coz(raw: &[u8]) -> Result<HamEthIslem, &'static str> {
     use alloy_eips::eip2718::Decodable2718;
 
     let zarf = TxEnvelope::decode_2718(&mut &raw[..]).map_err(|_| "raw tx cozulemedi (RLP)")?;
-    let gonderen_addr = zarf.recover_signer_unchecked().map_err(|_| "imzadan gonderen kurtarilamadi")?;
+    let gonderen_addr = zarf
+        .recover_signer_unchecked()
+        .map_err(|_| "imzadan gonderen kurtarilamadi")?;
     let gonderen = evm_to_adres(&gonderen_addr);
 
     let hedef = zarf.to().map(|a| evm_to_adres(&a));
-    let deger: u128 = zarf.value().try_into().map_err(|_| "deger u128'e sigmiyor")?;
+    let deger: u128 = zarf
+        .value()
+        .try_into()
+        .map_err(|_| "deger u128'e sigmiyor")?;
     let veri = zarf.input().to_vec();
     let nonce = zarf.nonce();
     let gas_limit = zarf.gas_limit();
 
-    Ok(HamEthIslem { gonderen, hedef, deger, veri, nonce, gas_limit })
+    Ok(HamEthIslem {
+        gonderen,
+        hedef,
+        deger,
+        veri,
+        nonce,
+        gas_limit,
+    })
 }
 
 /// eth_sendRawTransaction cekirdegi: ham tx'i coz -> AVM'de calistir.
@@ -402,7 +415,6 @@ pub fn ham_eth_tx_isle(
 
     Ok((tx_hash, sonuc))
 }
-
 
 pub fn state_lsc_deftere_yansit<'a, I>(
     state: I,
@@ -486,7 +498,7 @@ mod tests {
         let mut db = AidagDatabase::yeni();
         let adres: [u8; 20] = [0xAB; 20];
         db.aidag_koy(adres, 5000); // AIDAG (native) defterine 5000 koy
-                                 // EVM'in soracagi gibi sor:
+                                   // EVM'in soracagi gibi sor:
         let evm_adres = adres_to_evm(&adres);
         let hesap = db.basic(evm_adres).unwrap().unwrap();
         // KANIT: EVM'in gordugu bakiye = bizim LSC defterimizdeki 5000
@@ -924,7 +936,11 @@ mod tests {
         let r1 = islem_nonce_korumali(&mut db, &mut nreg, &isleyen, 0, 21_000);
         assert!(r1.is_ok(), "ilk islem (nonce=0) basarili olmali");
         assert_eq!(nreg.beklenen(&isleyen), 1, "nonce 1'e ilerlemeli");
-        assert_eq!(db.lsc_bakiye(&isleyen), 79_000_000_000_000, "gas kesilmis olmali");
+        assert_eq!(
+            db.lsc_bakiye(&isleyen),
+            79_000_000_000_000,
+            "gas kesilmis olmali"
+        );
 
         // 2) REPLAY: ayni nonce=0 tekrar -> REDDEDILMELI.
         let r2 = islem_nonce_korumali(&mut db, &mut nreg, &isleyen, 0, 21_000);
@@ -999,7 +1015,10 @@ mod tests {
             .caller(adres_to_evm(&deployer))
             .kind(TxKind::Call(kontrat))
             .data(Bytes::from(bo))
-            .gas_limit(300_000).gas_price(0).build().unwrap();
+            .gas_limit(300_000)
+            .gas_price(0)
+            .build()
+            .unwrap();
         let bo_r = evm.transact(bo_tx).expect("balanceOf");
         let bo_out = match &bo_r.result {
             revm::context::result::ExecutionResult::Success { output, .. } => match output {
@@ -1010,7 +1029,11 @@ mod tests {
         };
         let d_bakiye = U256::from_be_slice(&bo_out);
         println!("ERC-20: deployer bakiyesi = {}", d_bakiye);
-        assert_eq!(d_bakiye, U256::from(baslangic_arz), "deployer tum arza sahip");
+        assert_eq!(
+            d_bakiye,
+            U256::from(baslangic_arz),
+            "deployer tum arza sahip"
+        );
 
         // transfer(alici, 1000)
         let sel_transfer = &keccak256(b"transfer(address,uint256)")[0..4];
@@ -1026,7 +1049,10 @@ mod tests {
             .caller(adres_to_evm(&deployer))
             .kind(TxKind::Call(kontrat))
             .data(Bytes::from(tr))
-            .gas_limit(300_000).gas_price(0).build().unwrap();
+            .gas_limit(300_000)
+            .gas_price(0)
+            .build()
+            .unwrap();
         let tr_r = evm.transact_commit(tr_tx).expect("transfer");
         assert!(tr_r.is_success(), "transfer basarili olmali");
         println!("ERC-20: transfer(alici, 1000) basarili");
@@ -1041,7 +1067,10 @@ mod tests {
             .caller(adres_to_evm(&alici))
             .kind(TxKind::Call(kontrat))
             .data(Bytes::from(bo2))
-            .gas_limit(300_000).gas_price(0).build().unwrap();
+            .gas_limit(300_000)
+            .gas_price(0)
+            .build()
+            .unwrap();
         let bo2_r = evm.transact(bo2_tx).expect("balanceOf2");
         let bo2_out = match &bo2_r.result {
             revm::context::result::ExecutionResult::Success { output, .. } => match output {
@@ -1057,12 +1086,11 @@ mod tests {
         println!("ERC-20 KANIT TAMAM: deploy + balanceOf + transfer AVM'de calisti.");
     }
 
-
     // eth_call MOTORU KANITI: avm_call_oku gercek ERC-20'yi OKUR (state degismez).
     // Deploy et -> avm_call_oku ile balanceOf oku -> dogru deger + state degismedi.
     #[test]
     fn avm_call_oku_erc20_balanceof() {
-        use revm::primitives::{keccak256, Bytes, TxKind};
+        use revm::primitives::keccak256;
 
         let bin_hex = include_str!("../../avm-sozlesmeler/Token.bin").trim();
         let deployer: [u8; 20] = [0xCC; 20];
@@ -1076,8 +1104,8 @@ mod tests {
         let mut arz32 = [0u8; 32];
         arz32[16..32].copy_from_slice(&arz.to_be_bytes());
         deploy_data.extend_from_slice(&arz32);
-        let sonuc = avm_calistir(&mut db, &deployer, &[0u8; 20], 0, &deploy_data, 1234)
-            .expect("deploy");
+        let sonuc =
+            avm_calistir(&mut db, &deployer, &[0u8; 20], 0, &deploy_data, 1234).expect("deploy");
         let kontrat = sonuc.olusan_adres.expect("kontrat adresi");
         println!("avm_call testi: kontrat deploy -> {:?}", kontrat);
 
@@ -1093,7 +1121,11 @@ mod tests {
         let cikti = avm_call_oku(&db, &[0u8; 20], &kontrat, &cd).expect("call oku");
         let deger = revm::primitives::U256::from_be_slice(&cikti);
         println!("avm_call testi: balanceOf = {}", deger);
-        assert_eq!(deger, revm::primitives::U256::from(arz), "balanceOf arzi dondurmeli");
+        assert_eq!(
+            deger,
+            revm::primitives::U256::from(arz),
+            "balanceOf arzi dondurmeli"
+        );
 
         // state DEGISMEDI mi? (okuma-only): tekrar oku, ayni deger
         let cikti2 = avm_call_oku(&db, &[0u8; 20], &kontrat, &cd).expect("call oku 2");
@@ -1101,13 +1133,12 @@ mod tests {
         println!("avm_call KANIT: eth_call motoru ERC-20 okudu, state degismedi.");
     }
 
-
     // HAM ETH TX COZME KANITI: gercek imzali Ethereum tx coz + gonderen kurtar.
     // MetaMask/web3'un urettigi RLP tx'i cozup gondereni buluyor muyuz.
     #[test]
     fn ham_eth_tx_coz_gonderen_kurtar() {
         use alloy_consensus::{SignableTransaction, TxLegacy};
-        use alloy_primitives::{TxKind, U256, Signature};
+        use alloy_primitives::{Signature, TxKind, U256};
         use alloy_signer::SignerSync;
         use alloy_signer_local::PrivateKeySigner;
 
@@ -1144,10 +1175,16 @@ mod tests {
         // COZ
         let cozulmus = ham_eth_tx_coz(&raw).expect("ham tx cozulmeli");
         println!("Cozulen gonderen: 0x{}", hex_encode(&cozulmus.gonderen));
-        println!("Cozulen hedef: {:?}", cozulmus.hedef.map(|h| hex_encode(&h)));
+        println!(
+            "Cozulen hedef: {:?}",
+            cozulmus.hedef.map(|h| hex_encode(&h))
+        );
         println!("Cozulen deger: {}", cozulmus.deger);
 
-        assert_eq!(cozulmus.gonderen, beklenen_adres, "gonderen dogru kurtarilmali");
+        assert_eq!(
+            cozulmus.gonderen, beklenen_adres,
+            "gonderen dogru kurtarilmali"
+        );
         assert_eq!(cozulmus.hedef, Some(hedef), "hedef dogru");
         assert_eq!(cozulmus.deger, 1000, "deger dogru");
         assert_eq!(cozulmus.nonce, 0, "nonce dogru");
@@ -1158,7 +1195,6 @@ mod tests {
     fn hex_encode(b: &[u8]) -> String {
         b.iter().map(|x| format!("{:02x}", x)).collect()
     }
-
 
     // HAM ETH TX ISLE KANITI: imzali tx -> AVM'de calistir (uctan uca).
     // Once ERC-20 deploy (test kurulumu), sonra imzali transfer tx'i ISLE.
@@ -1172,7 +1208,8 @@ mod tests {
 
         let signer: PrivateKeySigner =
             "0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318"
-                .parse().unwrap();
+                .parse()
+                .unwrap();
         let gonderen = evm_to_adres(&signer.address());
 
         // Kurulum: gonderen'e LSC (gas) + ERC-20 deploy
@@ -1192,13 +1229,18 @@ mod tests {
         let sel = &keccak256(b"transfer(address,uint256)")[0..4];
         let mut calldata = Vec::new();
         calldata.extend_from_slice(sel);
-        let mut a32 = [0u8; 32]; a32[12..32].copy_from_slice(&alici);
+        let mut a32 = [0u8; 32];
+        a32[12..32].copy_from_slice(&alici);
         calldata.extend_from_slice(&a32);
-        let mut m32 = [0u8; 32]; m32[16..32].copy_from_slice(&(500u128).to_be_bytes());
+        let mut m32 = [0u8; 32];
+        m32[16..32].copy_from_slice(&(500u128).to_be_bytes());
         calldata.extend_from_slice(&m32);
 
         let tx = TxLegacy {
-            chain_id: Some(3474), nonce: 0, gas_price: 0, gas_limit: 300_000,
+            chain_id: Some(3474),
+            nonce: 0,
+            gas_price: 0,
+            gas_limit: 300_000,
             to: TxKind::Call(adres_to_evm(&kontrat)),
             value: AU256::ZERO,
             input: calldata.into(),
@@ -1210,19 +1252,27 @@ mod tests {
 
         // ISLE (coz + AVM'de calistir)
         let (tx_hash, sonuc) = ham_eth_tx_isle(&mut db, &raw, 200).expect("isle");
-        println!("ISLE testi: tx_hash=0x{} basarili={}", hex_encode(&tx_hash), sonuc.basarili);
+        println!(
+            "ISLE testi: tx_hash=0x{} basarili={}",
+            hex_encode(&tx_hash),
+            sonuc.basarili
+        );
         assert!(sonuc.basarili, "transfer tx basarili olmali");
 
         // Dogrula: alici'nin ERC-20 bakiyesi 500 mu (avm_call_oku ile)
         let mut bo = Vec::new();
         bo.extend_from_slice(&keccak256(b"balanceOf(address)")[0..4]);
-        let mut al32 = [0u8; 32]; al32[12..32].copy_from_slice(&alici);
+        let mut al32 = [0u8; 32];
+        al32[12..32].copy_from_slice(&alici);
         bo.extend_from_slice(&al32);
         let cikti = avm_call_oku(&db, &[0u8; 20], &kontrat, &bo).expect("balanceOf");
         let bakiye = revm::primitives::U256::from_be_slice(&cikti);
         println!("ISLE testi: alici ERC-20 bakiyesi = {}", bakiye);
-        assert_eq!(bakiye, revm::primitives::U256::from(500u64), "alici 500 token almali");
+        assert_eq!(
+            bakiye,
+            revm::primitives::U256::from(500u64),
+            "alici 500 token almali"
+        );
         println!("HAM ETH TX ISLE KANIT: imzali tx -> ERC-20 transfer AVM'de calisti.");
     }
-
 }

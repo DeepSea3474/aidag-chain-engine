@@ -932,11 +932,26 @@ impl OnSatisRegistry {
 
     /// Dagitimi kaydet. odeme_ref zaten varsa REDDET (false = kaydedilmedi, cifte engel).
     /// Yeni ise ekler (true). Owner, kaydet=true donerse dagitimi yapmali.
-    pub fn kaydet(&mut self, odeme_ref: u64, alici: [u8; 20], aidag: Tutar, lsc_hediye: Tutar, zaman: u64) -> bool {
+    pub fn kaydet(
+        &mut self,
+        odeme_ref: u64,
+        alici: [u8; 20],
+        aidag: Tutar,
+        lsc_hediye: Tutar,
+        zaman: u64,
+    ) -> bool {
         if self.kayitlar.contains_key(&odeme_ref) {
             return false;
         }
-        self.kayitlar.insert(odeme_ref, OnSatisKaydi { alici, aidag, lsc_hediye, zaman });
+        self.kayitlar.insert(
+            odeme_ref,
+            OnSatisKaydi {
+                alici,
+                aidag,
+                lsc_hediye,
+                zaman,
+            },
+        );
         true
     }
 
@@ -952,7 +967,7 @@ impl OnSatisRegistry {
 
     /// Toplam dagitilan AIDAG (denetim/seffaflik icin).
     pub fn toplam_aidag(&self) -> u128 {
-        self.kayitlar.values().map(|k| k.aidag as u128).sum()
+        self.kayitlar.values().map(|k| k.aidag).sum()
     }
 
     /// Tum kayitlar (diske yazma / mainnet gecisi icin).
@@ -985,7 +1000,7 @@ impl OnSatisRegistry {
         self.kayitlar
             .values()
             .filter(|k| &k.alici == alici)
-            .map(|k| k.aidag as u128)
+            .map(|k| k.aidag)
             .sum()
     }
 }
@@ -999,15 +1014,28 @@ mod on_satis_testleri {
         let mut r = OnSatisRegistry::yeni();
         let alici = [1u8; 20];
         // ilk dagitim: odeme_ref=100 -> kabul (true)
-        assert!(r.kaydet(100, alici, 5000, 10, 1234), "ilk dagitim kabul edilmeli");
+        assert!(
+            r.kaydet(100, alici, 5000, 10, 1234),
+            "ilk dagitim kabul edilmeli"
+        );
         assert_eq!(r.sayisi(), 1);
         assert_eq!(r.toplam_aidag(), 5000);
         // ayni odeme_ref=100 tekrar -> RED (false), cifte dagitim yok
-        assert!(!r.kaydet(100, alici, 5000, 10, 1235), "ayni odeme_ref reddedilmeli");
+        assert!(
+            !r.kaydet(100, alici, 5000, 10, 1235),
+            "ayni odeme_ref reddedilmeli"
+        );
         assert_eq!(r.sayisi(), 1, "kayit sayisi degismemeli");
-        assert_eq!(r.toplam_aidag(), 5000, "toplam AIDAG degismemeli (cifte yok)");
+        assert_eq!(
+            r.toplam_aidag(),
+            5000,
+            "toplam AIDAG degismemeli (cifte yok)"
+        );
         // farkli odeme_ref=200 -> kabul
-        assert!(r.kaydet(200, alici, 3000, 0, 1236), "yeni odeme_ref kabul edilmeli");
+        assert!(
+            r.kaydet(200, alici, 3000, 0, 1236),
+            "yeni odeme_ref kabul edilmeli"
+        );
         assert_eq!(r.sayisi(), 2);
         assert_eq!(r.toplam_aidag(), 8000);
         // sorgula calisiyor mu
@@ -1030,9 +1058,9 @@ mod on_satis_testleri {
         let ali = [0xAAu8; 20];
         let veli = [0xBBu8; 20];
         // Ali iki alim yapar (farkli zaman), Veli bir alim
-        r.kaydet(1, ali, 50, 0, 100);   // Ali: 50 AIDAG, zaman 100
-        r.kaydet(2, veli, 30, 0, 150);  // Veli: 30 AIDAG
-        r.kaydet(3, ali, 20, 0, 200);   // Ali: 20 AIDAG, zaman 200
+        r.kaydet(1, ali, 50, 0, 100); // Ali: 50 AIDAG, zaman 100
+        r.kaydet(2, veli, 30, 0, 150); // Veli: 30 AIDAG
+        r.kaydet(3, ali, 20, 0, 200); // Ali: 20 AIDAG, zaman 200
 
         // Ali kendi alimlarini sorgular -> 2 alim, zamana sirali
         let ali_alimlar = r.adrese_gore(&ali);

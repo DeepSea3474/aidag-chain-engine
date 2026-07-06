@@ -151,7 +151,11 @@ impl NodeState {
 
     /// TEST/DEVNET: bir adrese bakiye basla (gercek arz DEGIL; mekanik testi).
     /// Gercek arz/dagitim modeli sonra (audit+hukuk). Birikimli.
-    pub fn test_bakiye_ekle(&mut self, adres: [u8; 20], miktar: crate::registry::Tutar) -> crate::registry::Tutar {
+    pub fn test_bakiye_ekle(
+        &mut self,
+        adres: [u8; 20],
+        miktar: crate::registry::Tutar,
+    ) -> crate::registry::Tutar {
         self.bakiye_registry.test_bakiye_ekle(adres, miktar)
     }
 
@@ -171,7 +175,11 @@ impl NodeState {
     }
 
     /// TEST/DEVNET: bir adrese LSC basla (gercek arz DEGIL; mekanik testi).
-    pub fn lsc_test_bakiye_ekle(&mut self, adres: [u8; 20], miktar: crate::registry::Tutar) -> crate::registry::Tutar {
+    pub fn lsc_test_bakiye_ekle(
+        &mut self,
+        adres: [u8; 20],
+        miktar: crate::registry::Tutar,
+    ) -> crate::registry::Tutar {
         self.lsc_registry.test_bakiye_ekle(adres, miktar)
     }
 
@@ -213,8 +221,6 @@ impl NodeState {
         let (tx_hash, _sonuc) = crate::avm::ham_eth_tx_isle(&mut self.avm_db, raw, zaman)?;
         Ok(tx_hash)
     }
-
-
 
     /// Kac farkli adresin LSC bakiyesi var.
     pub fn lsc_hesap_sayisi(&self) -> usize {
@@ -284,7 +290,10 @@ impl NodeState {
     }
 
     /// On satis: bir alicinin TUM alimlari (kisisel gorunum, zamana sirali).
-    pub fn on_satis_adrese_gore(&self, alici: &[u8; 20]) -> Vec<(u64, crate::registry::OnSatisKaydi)> {
+    pub fn on_satis_adrese_gore(
+        &self,
+        alici: &[u8; 20],
+    ) -> Vec<(u64, crate::registry::OnSatisKaydi)> {
         self.on_satis_registry.adrese_gore(alici)
     }
 
@@ -698,8 +707,11 @@ impl NodeState {
                         if c.data.is_empty() {
                             // --- DATA BOS: basit LSC deger transferi (ESKI YOL, korunur) ---
                             let lsc_gerekli = ucret as crate::registry::Tutar;
-                            if self.bakiye_registry.bakiye(&gonderen) >= c.deger && self.lsc_registry.bakiye(&gonderen) >= lsc_gerekli {
-                                let s1 = self.bakiye_registry.transfer(&gonderen, &c.hedef, c.deger);
+                            if self.bakiye_registry.bakiye(&gonderen) >= c.deger
+                                && self.lsc_registry.bakiye(&gonderen) >= lsc_gerekli
+                            {
+                                let s1 =
+                                    self.bakiye_registry.transfer(&gonderen, &c.hedef, c.deger);
                                 if matches!(s1, crate::registry::TransferSonuc::Basarili { .. }) {
                                     let _ = self.lsc_registry.transfer(
                                         &gonderen,
@@ -738,7 +750,9 @@ impl NodeState {
                             // Gas sabit kesilir + (deger>0 ise) deger gonderen->hedef ARZ-KORUMALI
                             // lsc_registry.transfer ile tasinir. DETERMINIZM: zaman=vertex.
                             let lsc_gerekli = ucret as crate::registry::Tutar;
-                            if self.bakiye_registry.bakiye(&gonderen) >= c.deger && self.lsc_registry.bakiye(&gonderen) >= lsc_gerekli {
+                            if self.bakiye_registry.bakiye(&gonderen) >= c.deger
+                                && self.lsc_registry.bakiye(&gonderen) >= lsc_gerekli
+                            {
                                 // gonderenin LSC'sini avm_db'ye yukle (EVM kontrat mantigi gormesi icin).
                                 let bak = self.bakiye_registry.bakiye(&gonderen);
                                 self.avm_db.aidag_koy(gonderen, bak);
@@ -757,7 +771,9 @@ impl NodeState {
                                         // 1) LSC deger hareketi: gonderen -> hedef (ARZ KORUMALI).
                                         //    deger=0 ise transfer no-op olur (guvenli).
                                         if c.deger > 0 {
-                                            let _ = self.bakiye_registry.transfer(&gonderen, &c.hedef, c.deger);
+                                            let _ = self
+                                                .bakiye_registry
+                                                .transfer(&gonderen, &c.hedef, c.deger);
                                         }
                                         // 2) gas kes (guvenli yol): %50 yak + %50 gelistirme
                                         let _ = self.lsc_registry.transfer(
@@ -804,10 +820,20 @@ impl NodeState {
                                 // 2) LSC hediye (AIDAG basariliysa). Hediye basarisiz olsa bile
                                 //    AIDAG gitti -> kayit tutulur (asil urun AIDAG'dir).
                                 if d.lsc_hediye > 0 {
-                                    let _ = self.lsc_registry.transfer(&cagiran, &d.alici, d.lsc_hediye);
+                                    let _ = self.lsc_registry.transfer(
+                                        &cagiran,
+                                        &d.alici,
+                                        d.lsc_hediye,
+                                    );
                                 }
                                 // 3) KAYDET: sadece AIDAG GERCEKTEN gittiyse. Kayit = gercek dagitim.
-                                let _ = self.on_satis_registry.kaydet(d.odeme_ref, d.alici, d.aidag, d.lsc_hediye, zaman);
+                                let _ = self.on_satis_registry.kaydet(
+                                    d.odeme_ref,
+                                    d.alici,
+                                    d.aidag,
+                                    d.lsc_hediye,
+                                    zaman,
+                                );
                             } else {
                                 // AIDAG transferi basarisiz (owner bakiyesi yetersiz vb.):
                                 // SESSIZ GECME -> uyar. Dagitim YAPILMADI, kayit YOK.
@@ -856,7 +882,9 @@ impl NodeState {
                             // Owner dogrulandi -> test bakiyesi bas (aga yayilan).
                             self.bakiye_registry.test_bakiye_ekle(f.alici, f.miktar);
                             // GAS: faucet AIDAG yaninda birkac islemlik LSC (gas) de verir (gercek gas testi).
-                            self.lsc_registry.test_bakiye_ekle(f.alici, 100_000_000_000_000_000); // 0.1 LSC gas (~4700 transfer)
+                            self.lsc_registry
+                                .test_bakiye_ekle(f.alici, 100_000_000_000_000_000);
+                            // 0.1 LSC gas (~4700 transfer)
                         }
                         // owner degilse: sessizce reddet (yetkisiz faucet).
                     }
@@ -882,18 +910,35 @@ impl NodeState {
                             let lsc_yeter = self.lsc_registry.bakiye(&gonderen) >= ucret_t;
                             if aidag_yeter && lsc_yeter {
                                 // EVM'e gonderen+hedef AIDAG yukle (kontrat mantigi + basari karari)
-                                self.avm_db.aidag_koy(gonderen, self.bakiye_registry.bakiye(&gonderen));
-                                self.avm_db.aidag_koy(hedef, self.bakiye_registry.bakiye(&hedef));
-                                if let Ok((_h, r)) = crate::avm::ham_eth_tx_isle(&mut self.avm_db, raw, zaman) {
+                                self.avm_db
+                                    .aidag_koy(gonderen, self.bakiye_registry.bakiye(&gonderen));
+                                self.avm_db
+                                    .aidag_koy(hedef, self.bakiye_registry.bakiye(&hedef));
+                                if let Ok((_h, r)) =
+                                    crate::avm::ham_eth_tx_isle(&mut self.avm_db, raw, zaman)
+                                {
                                     if r.basarili {
                                         // DEGER = AIDAG (arz-korumali)
                                         if islem.deger > 0 {
-                                            let _ = self.bakiye_registry.transfer(&gonderen, &hedef, islem.deger);
+                                            let _ = self.bakiye_registry.transfer(
+                                                &gonderen,
+                                                &hedef,
+                                                islem.deger,
+                                            );
                                         }
                                         // GAS = LSC (%50 yak + %50 gelistirme)
-                                        let (yakilan, gelistirme) = crate::avm::gas_ucreti_bol(ucret);
-                                        let _ = self.lsc_registry.transfer(&gonderen, &crate::avm::YAKIM_ADRESI, yakilan as crate::registry::Tutar);
-                                        let _ = self.lsc_registry.transfer(&gonderen, &crate::avm::GELISTIRME_HAVUZU, gelistirme as crate::registry::Tutar);
+                                        let (yakilan, gelistirme) =
+                                            crate::avm::gas_ucreti_bol(ucret);
+                                        let _ = self.lsc_registry.transfer(
+                                            &gonderen,
+                                            &crate::avm::YAKIM_ADRESI,
+                                            yakilan as crate::registry::Tutar,
+                                        );
+                                        let _ = self.lsc_registry.transfer(
+                                            &gonderen,
+                                            &crate::avm::GELISTIRME_HAVUZU,
+                                            gelistirme as crate::registry::Tutar,
+                                        );
                                         self.nonce_registry.ilerlet(&gonderen);
                                     }
                                 }
@@ -1317,15 +1362,18 @@ mod tests {
     #[test]
     #[ignore]
     fn diskli_olcum() {
-        use std::time::Instant;
-        use std::io::Write;
         use std::io::Read;
+        use std::io::Write;
+        use std::time::Instant;
         let dizin = "/tmp/aidag_diskli_test";
         let _ = std::fs::remove_dir_all(dizin);
         std::fs::create_dir_all(dizin).expect("dizin");
         let sk = SigningKey::from_bytes(&[7u8; 32]);
         println!("\n===== DISKLI UCTAN-UCA OLCUM (imzali + disk I/O) =====");
-        println!("{:>8} | {:>10} | {:>12} | {:>12}", "vertex", "yaz(s)", "oku+ing(s)", "TPS");
+        println!(
+            "{:>8} | {:>10} | {:>12} | {:>12}",
+            "vertex", "yaz(s)", "oku+ing(s)", "TPS"
+        );
         for &n in &[1000u64, 5000, 10_000] {
             let now = 1_000_000u64;
             let mut node = NodeState::new_devnet(NET);
@@ -1336,7 +1384,8 @@ mod tests {
             let t_yaz = Instant::now();
             for i in 0..n {
                 let payload = (i as u32).to_le_bytes().to_vec();
-                let v = Vertex::new_signed(NET, vec![parent], payload, now + 1 + i, &sk).expect("v");
+                let v =
+                    Vertex::new_signed(NET, vec![parent], payload, now + 1 + i, &sk).expect("v");
                 parent = *v.id();
                 let bytes = wire::encode(&v);
                 let p = format!("{}/v{:08}.bin", dizin, i);
@@ -1355,7 +1404,10 @@ mod tests {
             }
             let oku_sure = t_oku.elapsed().as_secs_f64();
             let tps = n as f64 / (yaz_sure + oku_sure);
-            println!("{:>8} | {:>10.3} | {:>12.3} | {:>12.0}", n, yaz_sure, oku_sure, tps);
+            println!(
+                "{:>8} | {:>10.3} | {:>12.3} | {:>12.0}",
+                n, yaz_sure, oku_sure, tps
+            );
             assert_eq!(node.vertex_count() as u64, n + 1);
         }
         let _ = std::fs::remove_dir_all(dizin);
@@ -1366,14 +1418,17 @@ mod tests {
     #[test]
     #[ignore]
     fn diskli_olcum_batch() {
-        use std::time::Instant;
-        use std::io::Write;
         use std::io::Read;
+        use std::io::Write;
+        use std::time::Instant;
         let yol = "/tmp/aidag_batch_test.bin";
         let _ = std::fs::remove_file(yol);
         let sk = SigningKey::from_bytes(&[7u8; 32]);
         println!("\n===== DISKLI BATCH OLCUM (imzali + tek dosya + tek sync) =====");
-        println!("{:>8} | {:>10} | {:>12} | {:>12}", "vertex", "yaz(s)", "oku+ing(s)", "TPS");
+        println!(
+            "{:>8} | {:>10} | {:>12} | {:>12}",
+            "vertex", "yaz(s)", "oku+ing(s)", "TPS"
+        );
         for &n in &[1000u64, 5000, 10_000] {
             let now = 1_000_000u64;
             let mut node = NodeState::new_devnet(NET);
@@ -1383,7 +1438,8 @@ mod tests {
             let mut kayitlar: Vec<Vec<u8>> = Vec::with_capacity(n as usize);
             for i in 0..n {
                 let payload = (i as u32).to_le_bytes().to_vec();
-                let v = Vertex::new_signed(NET, vec![parent], payload, now + 1 + i, &sk).expect("v");
+                let v =
+                    Vertex::new_signed(NET, vec![parent], payload, now + 1 + i, &sk).expect("v");
                 parent = *v.id();
                 kayitlar.push(wire::encode(&v));
             }
@@ -1403,17 +1459,24 @@ mod tests {
             // OKUMA + INGEST: tek dosyadan [uzunluk][veri]... oku, ingest et
             let t_oku = Instant::now();
             let mut buf = Vec::new();
-            std::fs::File::open(yol).expect("open").read_to_end(&mut buf).expect("read");
+            std::fs::File::open(yol)
+                .expect("open")
+                .read_to_end(&mut buf)
+                .expect("read");
             let mut off = 0usize;
             for _ in 0..n {
-                let len = u32::from_le_bytes([buf[off],buf[off+1],buf[off+2],buf[off+3]]) as usize;
+                let len = u32::from_le_bytes([buf[off], buf[off + 1], buf[off + 2], buf[off + 3]])
+                    as usize;
                 off += 4;
-                let _ = node.ingest_networked(&buf[off..off+len], now + 1 + n);
+                let _ = node.ingest_networked(&buf[off..off + len], now + 1 + n);
                 off += len;
             }
             let oku_sure = t_oku.elapsed().as_secs_f64();
             let tps = n as f64 / (yaz_sure + oku_sure);
-            println!("{:>8} | {:>10.3} | {:>12.3} | {:>12.0}", n, yaz_sure, oku_sure, tps);
+            println!(
+                "{:>8} | {:>10.3} | {:>12.3} | {:>12.0}",
+                n, yaz_sure, oku_sure, tps
+            );
             assert_eq!(node.vertex_count() as u64, n + 1);
         }
         let _ = std::fs::remove_file(yol);
@@ -1437,7 +1500,8 @@ mod tests {
             let t = Instant::now();
             for i in 0..n {
                 let payload = (i as u32).to_le_bytes().to_vec();
-                let v = Vertex::new_signed(NET, vec![parent], payload, now + 1 + i, &sk).expect("v");
+                let v =
+                    Vertex::new_signed(NET, vec![parent], payload, now + 1 + i, &sk).expect("v");
                 parent = *v.id();
                 let bytes = wire::encode(&v);
                 let _ = node.ingest_networked(&bytes, now + 1 + i);
@@ -1448,9 +1512,6 @@ mod tests {
         }
         println!("====================================================");
     }
-
-
-
 
     // ===== HIZ OLCUMU (TPS) =====
     // Elle calistir: cargo test --release acilis_profili -- --ignored --nocapture
@@ -2027,8 +2088,8 @@ mod tests {
         let sk5 = SigningKey::from_bytes(&[5u8; 32]);
         let gonderen = public_key_to_adres(&sk5.verifying_key().to_bytes());
         let hedef = [0xEE; 20];
-        node.test_bakiye_ekle(gonderen, 1_000_000_000_000_000);      // AIDAG (deger)
-        node.lsc_test_bakiye_ekle(gonderen, 1_000_000_000_000_000);  // LSC (gas)
+        node.test_bakiye_ekle(gonderen, 1_000_000_000_000_000); // AIDAG (deger)
+        node.lsc_test_bakiye_ekle(gonderen, 1_000_000_000_000_000); // LSC (gas)
         let a_once = node.bakiye(&gonderen);
         let l_once = node.lsc_bakiye(&gonderen);
         let lsc_arz = node.lsc_toplam_arzi();
@@ -2041,9 +2102,21 @@ mod tests {
         let havuz = crate::avm::GELISTIRME_HAVUZU;
         assert_eq!(node.bakiye(&hedef), 1000, "hedef 1000 AIDAG almali");
         assert_eq!(node.lsc_bakiye(&yakim), 10_500_000_000_000, "gas yak (LSC)");
-        assert_eq!(node.lsc_bakiye(&havuz), 10_500_000_000_000, "gas havuz (LSC)");
-        assert_eq!(node.bakiye(&gonderen), a_once - 1000, "gonderen AIDAG dustu (deger)");
-        assert_eq!(node.lsc_bakiye(&gonderen), l_once - 21_000_000_000_000, "gonderen LSC gas dustu");
+        assert_eq!(
+            node.lsc_bakiye(&havuz),
+            10_500_000_000_000,
+            "gas havuz (LSC)"
+        );
+        assert_eq!(
+            node.bakiye(&gonderen),
+            a_once - 1000,
+            "gonderen AIDAG dustu (deger)"
+        );
+        assert_eq!(
+            node.lsc_bakiye(&gonderen),
+            l_once - 21_000_000_000_000,
+            "gonderen LSC gas dustu"
+        );
         assert_eq!(node.beklenen_nonce(&gonderen), 1, "nonce 1'e ilerledi");
         assert_eq!(node.lsc_toplam_arzi(), lsc_arz, "LSC arzi korundu");
     }
@@ -2091,7 +2164,11 @@ mod tests {
             bakiye_basta - 21_000_000_000_000,
             "gas kesilmis olmali"
         );
-        assert_eq!(node.lsc_bakiye(&[0u8; 20]), 10_500_000_000_000, "10500 yakildi");
+        assert_eq!(
+            node.lsc_bakiye(&[0u8; 20]),
+            10_500_000_000_000,
+            "10500 yakildi"
+        );
         assert_eq!(
             node.lsc_bakiye(&crate::avm::GELISTIRME_HAVUZU),
             10_500_000_000_000,
@@ -2171,8 +2248,8 @@ mod tests {
         let sk = SigningKey::from_bytes(&[33u8; 32]);
         let owner = public_key_to_adres(&sk.verifying_key().to_bytes());
         src.faucet_owner_ayarla(owner);
-        src.test_bakiye_ekle(owner, 1_000_000);      // owner'da satilacak AIDAG
-        src.lsc_test_bakiye_ekle(owner, 1_000_000);  // owner'da hediye LSC
+        src.test_bakiye_ekle(owner, 1_000_000); // owner'da satilacak AIDAG
+        src.lsc_test_bakiye_ekle(owner, 1_000_000); // owner'da hediye LSC
 
         let alici = [0x55u8; 20];
         let odeme_ref = 777u64;
@@ -2185,7 +2262,9 @@ mod tests {
         // 3) KANIT (kaynak): alici bakiye 5000, on satis kaydi var
         assert_eq!(src.bakiye(&alici), 5000, "src: alici AIDAG aldi");
         assert_eq!(src.on_satis_sayisi(), 1, "src: on satis kaydi olustu");
-        let k = src.on_satis_sorgula(odeme_ref).expect("src: kayit bulunmali");
+        let k = src
+            .on_satis_sorgula(odeme_ref)
+            .expect("src: kayit bulunmali");
         assert_eq!(k.aidag, 5000);
         assert_eq!(k.alici, alici);
 
@@ -2201,11 +2280,21 @@ mod tests {
 
         // 5) KANIT (replay): yeni node'da da alici bakiye 5000 + kayit var
         assert_eq!(dst.bakiye(&alici), 5000, "dst: alici AIDAG replay ile aldi");
-        assert_eq!(dst.on_satis_sayisi(), 1, "dst: on satis kaydi replay ile olustu");
-        let k2 = dst.on_satis_sorgula(odeme_ref).expect("dst: kayit replay ile bulunmali");
+        assert_eq!(
+            dst.on_satis_sayisi(),
+            1,
+            "dst: on satis kaydi replay ile olustu"
+        );
+        let k2 = dst
+            .on_satis_sorgula(odeme_ref)
+            .expect("dst: kayit replay ile bulunmali");
         assert_eq!(k2.aidag, 5000, "dst: dogru miktar");
         assert_eq!(k2.alici, alici, "dst: dogru alici");
-        assert_eq!(src.vertex_count(), dst.vertex_count(), "DAG replay ile birebir");
+        assert_eq!(
+            src.vertex_count(),
+            dst.vertex_count(),
+            "DAG replay ile birebir"
+        );
     }
 
     #[test]
@@ -2226,7 +2315,7 @@ mod tests {
         // SALDIRGAN (owner DEGIL) - kendine bakiye olsa bile on satis dagitamaz
         let saldirgan_sk = SigningKey::from_bytes(&[99u8; 32]);
         let saldirgan = public_key_to_adres(&saldirgan_sk.verifying_key().to_bytes());
-        node.test_bakiye_ekle(saldirgan, 1_000_000);     // saldirganin AIDAG'i olsa bile
+        node.test_bakiye_ekle(saldirgan, 1_000_000); // saldirganin AIDAG'i olsa bile
         node.lsc_test_bakiye_ekle(saldirgan, 1_000_000);
 
         let alici = [0x77u8; 20];
@@ -2274,7 +2363,11 @@ mod tests {
         node.ingest_networked(&wire::encode(&v), now);
 
         // KANIT: AIDAG gitmedi (owner bakiyesi yoktu)
-        assert_eq!(node.bakiye(&alici), 0, "yetersiz bakiye: alici AIDAG almamali");
+        assert_eq!(
+            node.bakiye(&alici),
+            0,
+            "yetersiz bakiye: alici AIDAG almamali"
+        );
         // KANIT: KAYIT TUTULMADI (sahte 'dagitildi' kaydi yok)
         assert_eq!(
             node.on_satis_sayisi(),
@@ -2367,8 +2460,8 @@ mod tests {
 
         let sk = SigningKey::from_bytes(&[14u8; 32]);
         let gonderen = public_key_to_adres(&sk.verifying_key().to_bytes());
-        node.test_bakiye_ekle(gonderen, 100_000_000_000_000_000);      // AIDAG (deger)
-        node.lsc_test_bakiye_ekle(gonderen, 100_000_000_000_000_000);  // LSC (gas)
+        node.test_bakiye_ekle(gonderen, 100_000_000_000_000_000); // AIDAG (deger)
+        node.lsc_test_bakiye_ekle(gonderen, 100_000_000_000_000_000); // LSC (gas)
         let a_once = node.bakiye(&gonderen);
         let l_once = node.lsc_bakiye(&gonderen);
         let lsc_arz = node.lsc_toplam_arzi();
@@ -2380,9 +2473,21 @@ mod tests {
 
         assert_eq!(node.beklenen_nonce(&gonderen), 1, "islendi");
         assert_eq!(node.bakiye(&hedef), 5000, "deger AIDAG hedefe gitti (5000)");
-        assert_eq!(node.bakiye(&gonderen), a_once - 5000, "gonderen AIDAG dustu (deger)");
-        assert_eq!(node.lsc_bakiye(&gonderen), l_once - 21_000_000_000_000, "gonderen LSC gas dustu");
-        assert_eq!(node.bakiye(&gonderen) + node.bakiye(&hedef), a_once, "AIDAG arzi korundu");
+        assert_eq!(
+            node.bakiye(&gonderen),
+            a_once - 5000,
+            "gonderen AIDAG dustu (deger)"
+        );
+        assert_eq!(
+            node.lsc_bakiye(&gonderen),
+            l_once - 21_000_000_000_000,
+            "gonderen LSC gas dustu"
+        );
+        assert_eq!(
+            node.bakiye(&gonderen) + node.bakiye(&hedef),
+            a_once,
+            "AIDAG arzi korundu"
+        );
         assert_eq!(node.lsc_toplam_arzi(), lsc_arz, "LSC arzi korundu");
     }
 
@@ -2578,7 +2683,11 @@ mod tests {
         let v2 = Vertex::new_signed(NET, vec![gid], p2, now + 1, &owner_sk).expect("v2");
         node.ingest_networked(&wire::encode(&v2), now + 1);
 
-        assert_eq!(node.bakiye(&alici), 1000, "ikinci faucet damlasi eklenmemeli");
+        assert_eq!(
+            node.bakiye(&alici),
+            1000,
+            "ikinci faucet damlasi eklenmemeli"
+        );
     }
 
     // ===== FAUCET owner kontrolu (aga yayilan, guvenli) =====
@@ -2648,10 +2757,11 @@ mod tests {
     // vertex imzalayanindan DEGIL, secp256k1 imzasindan (ecrecover) cikar.
     #[test]
     fn ingest_evm_transfer_bakiye_dogru_degisir() {
-        use crate::tx::{EvmTransfer, evm_transfer_mesaji};
-        use k256::ecdsa::{SigningKey as K256Sk, RecoveryId, Signature as K256Sig,
-                          signature::hazmat::PrehashSigner, VerifyingKey as K256Vk};
-        use k256::elliptic_curve::sec1::ToEncodedPoint;
+        use crate::tx::{evm_transfer_mesaji, EvmTransfer};
+        use k256::ecdsa::{
+            signature::hazmat::PrehashSigner, RecoveryId, Signature as K256Sig,
+            SigningKey as K256Sk, VerifyingKey as K256Vk,
+        };
         use sha3::{Digest, Keccak256};
 
         let now = 1_000_000;
@@ -2677,10 +2787,11 @@ mod tests {
         let nonce = 0u64;
         let mesaj = evm_transfer_mesaji(&alici, miktar, nonce);
         let prehash = Keccak256::digest(&mesaj);
-        let (sig, recid): (K256Sig, RecoveryId) =
-            k_sk.sign_prehash(&prehash).expect("imza");
+        let (sig, recid): (K256Sig, RecoveryId) = k_sk.sign_prehash(&prehash).expect("imza");
         let evm_t = EvmTransfer {
-            alici, miktar, nonce,
+            alici,
+            miktar,
+            nonce,
             recovery_id: recid.to_byte(),
             imza: sig.to_bytes().into(),
         };
@@ -2694,9 +2805,12 @@ mod tests {
 
         // 5) KANIT: transfer secp256k1 sahibinden cikti
         assert_eq!(node.bakiye(&alici), miktar, "alici dogru miktari aldi");
-        assert_eq!(node.bakiye(&gonderen), 1_000_000 - miktar, "gonderen dogru dustu");
+        assert_eq!(
+            node.bakiye(&gonderen),
+            1_000_000 - miktar,
+            "gonderen dogru dustu"
+        );
         assert_eq!(node.beklenen_nonce(&gonderen), 1, "gonderen nonce ilerledi");
         assert_eq!(node.toplam_bakiye_arzi(), arz_basta, "TOPLAM ARZ KORUNDU");
     }
-
 }
