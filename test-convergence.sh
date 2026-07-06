@@ -35,7 +35,10 @@ echo "=== SENARYO 1: 3-node zincir (A<-B<-C), 1 uretici + 2 dinleyici ==="
 cleanup
 $BIN /ip4/127.0.0.1/tcp/40001 > /tmp/cA.log 2>&1 & sleep 3
 $BIN /ip4/127.0.0.1/tcp/40002 /ip4/127.0.0.1/tcp/40001 listen > /tmp/cB.log 2>&1 & sleep 3
-$BIN /ip4/127.0.0.1/tcp/40003 /ip4/127.0.0.1/tcp/40002 listen > /tmp/cC.log 2>&1 & sleep 25
+$BIN /ip4/127.0.0.1/tcp/40003 /ip4/127.0.0.1/tcp/40002 listen > /tmp/cC.log 2>&1 & sleep 5
+# A uretici(40001) RPC=8645: faucet ile 3 gercek vertex urettir -> A->B->C yayilmali
+for i in 1 2 3; do curl -s "http://127.0.0.1:8645/faucet/$(printf '%040d' $i)" >/dev/null 2>&1; sleep 2; done
+sleep 20
 pkill -f lsc-node 2>/dev/null; sleep 1
 
 B1=$(grep -oE "toplam_vertex=[0-9]+" /tmp/cB.log | tail -1 | grep -oE "[0-9]+")
