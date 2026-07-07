@@ -992,6 +992,27 @@ impl<'a> ReachIndex<'a> {
     /// B'nin parent'larindan geriye BFS; sp'ye ya da sp'nin atalarina (past(sp))
     /// degince budar. Yalnizca mergeset (kucuk) + sinirini gezer. is_ancestor_rec
     /// ile budama (bellek O(1)). Sonuc, past_b\\past_sp\\{sp} ile AYNI kume.
+    fn saf_atalik_rec(&self, graph: &Graph, a: &VertexId, b: &VertexId) -> bool {
+        if a == b {
+            return false;
+        }
+        let mut stack = vec![*b];
+        let mut seen: BTreeSet<VertexId> = BTreeSet::new();
+        while let Some(x) = stack.pop() {
+            if let Some(vx) = graph.get(&x) {
+                for pp in vx.parents() {
+                    if pp == a {
+                        return true;
+                    }
+                    if graph.contains(pp) && seen.insert(*pp) {
+                        stack.push(*pp);
+                    }
+                }
+            }
+        }
+        false
+    }
+
     fn mergeset_of(&self, graph: &Graph, id: &VertexId, sp: &VertexId) -> BTreeSet<VertexId> {
         use std::collections::VecDeque;
         let mut ms: BTreeSet<VertexId> = BTreeSet::new();
@@ -1010,7 +1031,9 @@ impl<'a> ReachIndex<'a> {
             }
             // cur, sp'nin atasi mi? (past(sp) icinde) -> mergeset disi, budama.
             let mut memo = BTreeMap::new();
-            if self.is_ancestor_rec(graph, &cur, sp, &mut memo) {
+            if self.is_ancestor_rec(graph, &cur, sp, &mut memo)
+                && self.saf_atalik_rec(graph, &cur, sp)
+            {
                 continue;
             }
             // cur mergeset'te.
@@ -1767,6 +1790,47 @@ mod tests {
                 max_t,
                 ort
             );
+        }
+    }
+
+    #[test]
+    fn dogrula_test() {
+        let senaryolar: Vec<(usize, usize)> = vec![(3, 2), (5, 3), (8, 4), (4, 6), (10, 2), (6, 5)];
+        for (kat, w) in senaryolar {
+            let mut g = Graph::devnet(NET);
+            let gen = signed(1, vec![], 1000, b"gen");
+            let gid = *gen.id();
+            g.insert_synced(gen).unwrap();
+            let mut inc = Ghostdag::new_incremental(DEFAULT_K);
+            inc.update_one(&g, &gid);
+            let mut prev = vec![gid];
+            let mut ts = 1001u64;
+            for _k in 0..kat {
+                let mut bu = Vec::new();
+                let mut parents = prev.clone();
+                parents.sort_unstable();
+                for j in 0..w {
+                    let v = signed((j + 1) as u8, parents.clone(), ts, b"x");
+                    ts += 1;
+                    let vid = *v.id();
+                    g.insert_synced(v).unwrap();
+                    inc.update_one(&g, &vid);
+                    bu.push(vid);
+                }
+                prev = bu;
+            }
+            let refr = Ghostdag::compute_default(&g);
+            let d_inc = data_map_of(&inc, &g);
+            let d_ref = data_map_of(&refr, &g);
+            let mut fark = 0;
+            for (id, dref) in &d_ref {
+                let dinc = d_inc.get(id).expect("eksik");
+                if dinc.blue_score != dref.blue_score || dinc.mergeset_blues != dref.mergeset_blues {
+                    fark += 1;
+                }
+            }
+            eprintln!("kat={} w={}: fark={}", kat, w, fark);
+            assert_eq!(fark, 0, "kat={} w={} fark var", kat, w);
         }
     }
 
