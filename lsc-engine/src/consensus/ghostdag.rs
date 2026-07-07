@@ -1772,6 +1772,42 @@ mod tests {
 
     #[test]
     #[ignore]
+    fn torba_stres() {
+        use std::time::Instant;
+        let olcekler: Vec<usize> = std::env::var("TORBA_N").ok()
+            .map(|x| x.split(',').filter_map(|t| t.trim().parse().ok()).collect())
+            .unwrap_or_else(|| vec![20_000usize, 40_000, 80_000, 160_000]);
+        for &n in &olcekler {
+            let mut g = Graph::devnet(NET);
+            let gen = signed(1, vec![], 1000, b"gen");
+            let gid = *gen.id();
+            g.insert_synced(gen).unwrap();
+            let mut ids = vec![gid];
+            let mut ts = 1001u64;
+            let mut gd = Ghostdag::new_incremental(DEFAULT_K);
+            gd.update_one(&g, &gid);
+            let t_build = Instant::now();
+            for i in 1..n {
+                let mut parents = vec![ids[ids.len() - 1]];
+                if ids.len() >= 2 { parents.push(ids[ids.len() - 2]); }
+                parents.sort_unstable();
+                parents.dedup();
+                let v = signed((i % 250) as u8 + 1, parents, ts, b"x");
+                ts += 1;
+                let vid = *v.id();
+                g.insert_synced(v).unwrap();
+                gd.update_one(&g, &vid);
+                ids.push(vid);
+                if i % 10000 == 0 { let e = t_build.elapsed().as_secs_f64(); eprintln!("  [ingest] {}/{} t={:.1}s ({:.0} v/s)", i, n, e, i as f64 / e.max(1e-9)); }
+            }
+            let total_s = t_build.elapsed().as_secs_f64();
+            let tps = n as f64 / total_s.max(1e-9);
+            eprintln!("n={:>9} toplam={:.1}s TPS={:.0} (insert + artimli GHOSTDAG per-vertex = node gercek akisi)", n, total_s, tps);
+        }
+    }
+
+    #[test]
+    #[ignore]
     fn budama_hiz_olcumu() {
         // Ayni paralel DAG'da bridged (budamali) vs rec (budamasiz) cagri sayisi.
         let mut g = Graph::devnet(NET);
