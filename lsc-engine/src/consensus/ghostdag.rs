@@ -1277,6 +1277,71 @@ fn ata_bul_up(
     up.get(&cur).and_then(|t| t.first()).copied()
 }
 
+// MAVI BONCUK: AIDAG'in kendi renklendirme sistemi. coloring_kaspa'nin chain-dongusu
+// (sp-zinciri mergeset_blues toplama) GHOSTDAG invariant'i kirilinca anticone'u eksik
+// sayiyordu (69ef: 14 vs gercek 23 -> overcount). Mavi boncuk, cand'in anticone'unu
+// blue_view icinde DOGRUDAN, SAF-dogrulanmis atalik ile sayar (torba yanlis-pozitifinden
+// bagimsiz). blue kumesi her mavi eklendikce buyur (compute_default ile ayni matematik).
+fn mavi_boncuk(
+    graph: &Graph,
+    id: &VertexId,
+    sp: &VertexId,
+    k: KType,
+    data: &BTreeMap<VertexId, GhostdagData>,
+    ri: &ReachIndex,
+    _anticone_sizes: &BTreeMap<VertexId, BTreeMap<VertexId, u32>>,
+) -> (Vec<VertexId>, Vec<VertexId>, BTreeMap<VertexId, u32>) {
+    let k_usize = k as usize;
+    let mergeset_unordered = ri.mergeset_of(graph, id, sp);
+    let ordered_mergeset = topo_order_subset(graph, &mergeset_unordered);
+
+    // SAF-dogrulanmis anticone: u ve cand, saf recursive ile iliskisizse anticone'da.
+    // DOGRULUK: saf recursive (torba'ya sorma). Torba, is_ancestor_torba fast-path
+    // (sa<=sb && eb<=ea) interval cakismasi yuzunden mavi_boncuk baglaminda yanlis-pozitif
+    // veriyor (overcount geri geliyor) VE bazen yanlis-negatif (undercount). Saf kesin.
+    // [HIZ: sonraki tur - torba fast-path'i saf ile seçici dogrula ya da saf'i hizlandir.]
+    let saf_iliskisiz = |ri: &ReachIndex, u: &VertexId, c: &VertexId| -> bool {
+        !ri.saf_atalik_rec(graph, u, c) && !ri.saf_atalik_rec(graph, c, u)
+    };
+
+    let mut blue: BTreeSet<VertexId> = blue_set_in_view(data, *sp);
+    let mut boyut: BTreeMap<VertexId, u32> = BTreeMap::new();
+    for b in &blue {
+        let mut a = 0u32;
+        for u in &blue {
+            if u != b && saf_iliskisiz(ri, u, b) { a += 1; }
+        }
+        boyut.insert(*b, a);
+    }
+
+    let mut mergeset_blues: Vec<VertexId> = Vec::new();
+    let mut mergeset_reds: Vec<VertexId> = Vec::new();
+    let mut out: BTreeMap<VertexId, u32> = BTreeMap::new();
+    out.insert(*sp, 0);
+
+    for cand in &ordered_mergeset {
+        let anticone: Vec<VertexId> = blue.iter().filter(|u| **u != *cand && saf_iliskisiz(ri, u, cand)).copied().collect();
+        let mut is_blue = anticone.len() <= k_usize;
+        if is_blue {
+            for b in &anticone {
+                if *boyut.get(b).unwrap_or(&0) as usize + 1 > k_usize { is_blue = false; break; }
+            }
+        }
+        if is_blue {
+            for b in &anticone {
+                *boyut.entry(*b).or_insert(0) += 1;
+            }
+            boyut.insert(*cand, anticone.len() as u32);
+            out.insert(*cand, anticone.len() as u32);
+            blue.insert(*cand);
+            mergeset_blues.push(*cand);
+        } else {
+            mergeset_reds.push(*cand);
+        }
+    }
+    (mergeset_blues, mergeset_reds, out)
+}
+
 fn coloring_kaspa(
     graph: &Graph,
     id: &VertexId,
@@ -1457,7 +1522,7 @@ fn compute_vertex_data<W: Weigher>(
     // (coloring_kaspa_*_birebir testleri kanitladi); bit-bit compute-vs-update korunur.
     let (mergeset_blues, mergeset_reds): (Vec<VertexId>, Vec<VertexId>) =
         if let Some(asz) = anticone_sizes {
-            let (b, r, _out) = coloring_kaspa(graph, id, &sp, k, data, &ri, asz);
+            let (b, r, _out) = mavi_boncuk(graph, id, &sp, k, data, &ri, asz);
             (b, r)
         } else {
             let mut blue: BTreeSet<VertexId> = if ordered_mergeset.is_empty() {
@@ -1791,6 +1856,44 @@ mod tests {
                 ort
             );
         }
+    }
+
+    #[test]
+    #[ignore = "regresyon: FUZZ_TUR=2000 ile elle calistir"]
+    fn fuzz_dogrula() {
+        let turlar: u64 = std::env::var("FUZZ_TUR").ok().and_then(|x| x.parse().ok()).unwrap_or(2000);
+        let mut lcg: u64 = 0x9E3779B97F4A7C15;
+        let mut rng = || { lcg = lcg.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); lcg };
+        for tur in 0..turlar {
+            let n = 5 + (rng() % 60) as usize;
+            let mut g = Graph::devnet(NET);
+            let gen = signed(1, vec![], 1000, b"g"); let gid=*gen.id();
+            g.insert_synced(gen).unwrap();
+            let mut inc = Ghostdag::new_incremental(DEFAULT_K); inc.update_one(&g,&gid);
+            let mut ids=vec![gid]; let mut ts=1001u64;
+            for i in 1..n {
+                let mevcut=ids.len(); let pmax=mevcut.min(8);
+                let pk=1+(rng()%pmax as u64) as usize;
+                let mut parents=Vec::new();
+                for _ in 0..pk { let idx=(rng()%mevcut as u64) as usize; let c=ids[idx]; if !parents.contains(&c){parents.push(c);} }
+                if parents.is_empty(){parents.push(ids[mevcut-1]);}
+                let seed=(1+(rng()%250)) as u8;
+                let v=signed(seed,parents,ts,format!("t{tur}v{i}").as_bytes()); ts+=1; let vid=*v.id();
+                if g.insert_synced(v).is_err(){continue;}
+                inc.update_one(&g,&vid); ids.push(vid);
+            }
+            let refr = Ghostdag::compute_default(&g);
+            let d_inc = data_map_of(&inc, &g);
+            let d_ref = data_map_of(&refr, &g);
+            for (id, dref) in &d_ref {
+                let dinc = d_inc.get(id).expect("eksik");
+                if dinc.blue_score != dref.blue_score || dinc.mergeset_blues != dref.mergeset_blues {
+                    panic!("FUZZ FARK tur={} n={} v={:02x}{:02x}: inc_bs={} ref_bs={} inc_blues={} ref_blues={}",
+                        tur, n, id[0], id[1], dinc.blue_score, dref.blue_score, dinc.mergeset_blues.len(), dref.mergeset_blues.len());
+                }
+            }
+        }
+        eprintln!("FUZZ OK: {} tur, hepsi fark=0", turlar);
     }
 
     #[test]

@@ -35,3 +35,18 @@ Hiz etkisi olcul melir (chain-toplami optimizasyondu). Once dogruluk (fuzz gecsi
 ## ARACLAR (git checkout ile silindi, yeniden ekle)
 - fuzz_dogrula: rastgele DAG, update_one vs compute_default, FUZZ_TUR env.
 - zincir_goster: tur=5 DAG'ini vertex vertex OK/FARK dokuyor.
+
+## COZULDU (2026-07-08 gece) — mavi_boncuk
+Overcount + undercount COZULDU. coloring_kaspa (chain-dongusu + atla kisayolu, invariant
+kirik) yerine 'mavi_boncuk': AIDAG'in kendi renklendirme sistemi. Anticone'u blue_view'de
+SAF-dogrulanmis atalik (saf_atalik_rec) ile DOGRUDAN sayar. Deney kaniti: torba VE
+coloring_kaspa chain-dongusu ikisi de payliydi; mavi_boncuk saf ile ikisini de asar.
+SONUC: dogrula_test PASSED, FUZZ_TUR=2000 FUZZ OK, 289 test yesil.
+
+## KALAN: HIZ (sabah devam)
+mavi_boncuk saf_atalik ile O(blue^2) (baslangic dongusu) -> uretim icin YAVAS (10k'da takildi).
+COZUM YONU (NOTLAR_BILINEN_SINIRLAR.md satir 270-312): blues_anticone_sizes MIRAS mimarisi.
+Baslangic O(blue^2) dongusunu kaldir; anticone_size'i sp'den KALICI+TUTARLI miras al.
+DIKKAT: miras tutarli olmali - out'a sadece cand degil, komsu +1 guncellemeleri de yaz;
+update_one anticone_sizes'a beslesin; sonraki vertex miras alsin. Basit miras denemesi
+(sadece boyut sp'den) tur=9'da yeni overcount actı (tutarsizlik) -> tam miras zinciri gerekli.
