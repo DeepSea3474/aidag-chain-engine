@@ -1291,6 +1291,11 @@ static MB_INIT_SAY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64:
 static MB_CAND_SAY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 static BAS_ADIM: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static ODA_NZ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static T_BLUE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static T_MERGE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static T_CAND: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static ODA_TOP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 fn blue_anticone_size(
     b: &VertexId,
@@ -1321,8 +1326,10 @@ fn mavi_boncuk(
     boyut_map: &BTreeMap<VertexId, BTreeMap<VertexId, u32>>,
 ) -> (Vec<VertexId>, Vec<VertexId>, BTreeMap<VertexId, u32>) {
     let k_usize = k as usize;
+    let _tm = std::time::Instant::now();
     let mergeset_unordered = ri.mergeset_of(graph, id, sp);
     let ordered_mergeset = topo_order_subset(graph, &mergeset_unordered);
+    T_MERGE.fetch_add(_tm.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
 
     // SAF-dogrulanmis anticone: u ve cand, saf recursive ile iliskisizse anticone'da.
     // DOGRULUK: saf recursive (torba'ya sorma). Torba, is_ancestor_torba fast-path
@@ -1333,25 +1340,30 @@ fn mavi_boncuk(
         !ri.saf_atalik_rec(graph, u, c) && !ri.saf_atalik_rec(graph, c, u)
     };
 
+    let _t0 = std::time::Instant::now();
+    // [HIZ] mergeset bossa blue HIC kullanilmaz (candidate dongusu donmez) -> kurma.
+    // Zincir senaryosunda mergeset hep bos -> blue_set_in_view O(n^2) darbogazi atlanir.
     let mut blue: BTreeSet<VertexId> = blue_set_in_view(data, *sp);
+    T_BLUE.fetch_add(_t0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+    let _t1 = std::time::Instant::now();
     // [TUGLA2c HIZ] TEK GECIS: sp-zincirini BIR kez yuru, her b'nin ILK (en yakin/
     // guncel) boyutunu topla. Her b icin ayri yuruyus (O(n^2)) YERINE tek yuruyus O(n).
     // "ilk bulunan = en guncel" (blue_anticone_size ile ayni deger). Miras=saf kanitli.
     // [DEVRALMA] anticone_sizes[sp] artik TAM harita (return boyut). Dogrudan
     // devral, sp-zinciri yuruyusu YOK -> O(blue) per vertex. tek geciste yuruyus elendi.
-    BAS_ADIM.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    // [ODA] boyut = SADECE sifir-olmayan anticone boyutlari (varsayilan 0). Zincirde
+    // hepsi 0 -> harita bos -> klon/kaydet O(sifir-olmayan) ~ O(1). O(n^2) bellek kirildi.
+    // sp'den devral (zaten sadece sifir-olmayanlar), blue-disi at, 0 EKLEME.
     let _ = data;
     let mut boyut: BTreeMap<VertexId, u32> = _anticone_sizes.get(sp).cloned().unwrap_or_default();
-    boyut.retain(|kk, _| blue.contains(kk));
-    for b in &blue {
-        boyut.entry(*b).or_insert(0);
-    }
+    boyut.retain(|kk, &mut vv| vv > 0 && blue.contains(kk));
 
     let mut mergeset_blues: Vec<VertexId> = Vec::new();
     let mut mergeset_reds: Vec<VertexId> = Vec::new();
     let mut out: BTreeMap<VertexId, u32> = BTreeMap::new();
     out.insert(*sp, 0);
 
+    let _tc = std::time::Instant::now();
     for cand in &ordered_mergeset {
         let anticone: Vec<VertexId> = blue.iter().filter(|u| {
             if **u != *cand { MB_CAND_SAY.fetch_add(1, std::sync::atomic::Ordering::Relaxed); }
@@ -1369,14 +1381,18 @@ fn mavi_boncuk(
                 *boyut.get_mut(b).unwrap() = yeni;
                 out.insert(*b, yeni); // +1 peer KALICI kaydet (Kaspa mantigi)
             }
-            boyut.insert(*cand, anticone.len() as u32);
-            out.insert(*cand, anticone.len() as u32);
+            // [ODA] sadece sifir-olmayan yaz (0 saklama -> harita kompakt kalir)
+            if !anticone.is_empty() {
+                boyut.insert(*cand, anticone.len() as u32);
+            }
+            let _ = &mut out;
             blue.insert(*cand);
             mergeset_blues.push(*cand);
         } else {
             mergeset_reds.push(*cand);
         }
     }
+    T_CAND.fetch_add(_tc.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
     (mergeset_blues, mergeset_reds, boyut)
 }
 
@@ -2011,6 +2027,13 @@ mod tests {
             let ic = MB_INIT_SAY.load(std::sync::atomic::Ordering::Relaxed);
             let cc = MB_CAND_SAY.load(std::sync::atomic::Ordering::Relaxed);
             let ba = BAS_ADIM.load(std::sync::atomic::Ordering::Relaxed);
+            let onz = ODA_NZ.load(std::sync::atomic::Ordering::Relaxed);
+            let otop = ODA_TOP.load(std::sync::atomic::Ordering::Relaxed);
+            let tb = T_BLUE.load(std::sync::atomic::Ordering::Relaxed);
+            let tm = T_MERGE.load(std::sync::atomic::Ordering::Relaxed);
+            let tcd = T_CAND.load(std::sync::atomic::Ordering::Relaxed);
+            eprintln!("   ZAMAN(ms): blue_set={:.0} mergeset={:.0} candidate={:.0}", tb as f64/1e6, tm as f64/1e6, tcd as f64/1e6);
+            eprintln!("   ODA: sifir-olmayan={} toplam_blue={} (oran={:.3})", onz, otop, onz as f64 / otop.max(1) as f64);
             eprintln!("   PROFIL: baslangic_dongusu(a)={} cand_dongusu(b)={} blue_anticone_ADIM={} (saf_iliskisiz + sp-zinciri adimlari)", ic, cc, ba);
         }
     }
