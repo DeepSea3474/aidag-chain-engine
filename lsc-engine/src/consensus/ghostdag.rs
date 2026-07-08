@@ -537,6 +537,8 @@ impl Ghostdag {
         for a in atilacak {
             bag.remove(&a);
         }
+        TORBA_BOY.fetch_add(bag.len() as u64, std::sync::atomic::Ordering::Relaxed);
+        TORBA_SAY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // (start, id) cifti olarak sakla: interval-start sirali -> sorgu binary search.
         // start'i olmayan (iv'de yok) tabela olmamali; guvenlik icin 0 ata (sorgu yine id ile bulur).
         let bag_cift: BTreeSet<(u64, VertexId)> = bag
@@ -1310,6 +1312,8 @@ static U_ANTI: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(
 static U_IV: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static U_TORBA: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static U_UP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static TORBA_BOY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static TORBA_SAY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static ODA_TOP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 fn blue_anticone_size(
@@ -2064,6 +2068,9 @@ mod tests {
             let ui = U_IV.load(std::sync::atomic::Ordering::Relaxed);
             let ut = U_TORBA.load(std::sync::atomic::Ordering::Relaxed);
             let uu = U_UP.load(std::sync::atomic::Ordering::Relaxed);
+            let tboy = TORBA_BOY.load(std::sync::atomic::Ordering::Relaxed);
+            let tsay = TORBA_SAY.load(std::sync::atomic::Ordering::Relaxed);
+            eprintln!("   TORBA: ort_boyut={:.1} (toplam={} say={})", tboy as f64 / tsay.max(1) as f64, tboy, tsay);
             eprintln!("   UPDATE_ONE(ms): anti_kaydet={:.0} interval={:.0} torba={:.0} up={:.0}", ua as f64/1e6, ui as f64/1e6, ut as f64/1e6, uu as f64/1e6);
             eprintln!("   ANA(ms): imza_uretim={:.0} insert+dogrula={:.0} ghostdag={:.0}", tsg as f64/1e6, tin as f64/1e6, tgd as f64/1e6);
             eprintln!("   ZAMAN(ms): blue_set={:.0} mergeset={:.0} candidate={:.0}", tb as f64/1e6, tm as f64/1e6, tcd as f64/1e6);
