@@ -1975,6 +1975,68 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
+    fn fuzz_determinizm() {
+        // DETERMINIZM FUZZ: ayni vertex kumesi, FARKLI ekleme sirasi -> AYNI sonuc.
+        let turlar: u64 = std::env::var("DET_TUR").ok().and_then(|x| x.parse().ok()).unwrap_or(2000);
+        let mut lcg: u64 = 0xD1B54A32D192ED03;
+        let mut rng = || { lcg = lcg.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); lcg };
+        for tur in 0..turlar {
+            if tur % 1000 == 0 { eprintln!("[det] {}/{} tur", tur, turlar); }
+            let n = 5 + (rng() % 60) as usize;
+            let mut g0 = Graph::devnet(NET);
+            let gen = signed(1, vec![], 1000, b"g"); let gid = *gen.id();
+            g0.insert_synced(gen.clone()).unwrap();
+            let mut ids = vec![gid]; let mut ts = 1001u64;
+            let mut verts: Vec<Vertex> = vec![gen];
+            for i in 1..n {
+                let mevcut = ids.len(); let pmax = mevcut.min(8);
+                let pk = 1 + (rng() % pmax as u64) as usize;
+                let mut parents = Vec::new();
+                for _ in 0..pk { let idx = (rng() % mevcut as u64) as usize; let c = ids[idx]; if !parents.contains(&c) { parents.push(c); } }
+                if parents.is_empty() { parents.push(ids[mevcut - 1]); }
+                let seed = (1 + (rng() % 250)) as u8;
+                let v = signed(seed, parents, ts, format!("t{tur}v{i}").as_bytes()); ts += 1; let vid = *v.id();
+                if g0.insert_synced(v.clone()).is_err() { continue; }
+                ids.push(vid); verts.push(v);
+            }
+            // topolojik-gecerli ekleme (verilen ipucu sirasina gore, parent hazir olani ekle)
+            let insert_ile = |ipucu: &[usize]| -> (Ghostdag, Graph) {
+                let mut g = Graph::devnet(NET);
+                let mut inc = Ghostdag::new_incremental(DEFAULT_K);
+                let mut kalan: Vec<usize> = ipucu.to_vec();
+                loop {
+                    let mut yeni = Vec::new(); let mut ilerledi = false;
+                    for &idx in &kalan {
+                        let v = &verts[idx];
+                        if v.parents().is_empty() || v.parents().iter().all(|p| g.contains(p)) {
+                            let vid = *v.id();
+                            if g.insert_synced(v.clone()).is_ok() { inc.update_one(&g, &vid); ilerledi = true; }
+                        } else { yeni.push(idx); }
+                    }
+                    kalan = yeni;
+                    if kalan.is_empty() || !ilerledi { break; }
+                }
+                (inc, g)
+            };
+            let sira_a: Vec<usize> = (0..verts.len()).collect();
+            let mut sira_b = sira_a.clone();
+            for i in (1..sira_b.len()).rev() { let j = (rng() % (i as u64 + 1)) as usize; sira_b.swap(i, j); }
+            let (gd_a, ga) = insert_ile(&sira_a);
+            let (gd_b, _gb) = insert_ile(&sira_b);
+            let da = data_map_of(&gd_a, &ga);
+            let db = data_map_of(&gd_b, &ga);
+            for (id, a) in &da {
+                let b = db.get(id).expect("det: eksik");
+                if a.blue_score != b.blue_score || a.mergeset_blues != b.mergeset_blues {
+                    panic!("DET FARK tur={} n={} v={:02x}{:02x}: a_bs={} b_bs={}", tur, n, id[0], id[1], a.blue_score, b.blue_score);
+                }
+            }
+        }
+        eprintln!("DET OK: {} tur, farkli sira -> ayni sonuc", turlar);
+    }
+
+    #[test]
     fn dogrula_test() {
         let senaryolar: Vec<(usize, usize)> = vec![(3, 2), (5, 3), (8, 4), (4, 6), (10, 2), (6, 5)];
         for (kat, w) in senaryolar {
