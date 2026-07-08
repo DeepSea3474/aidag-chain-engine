@@ -1343,7 +1343,11 @@ fn mavi_boncuk(
     let _t0 = std::time::Instant::now();
     // [HIZ] mergeset bossa blue HIC kullanilmaz (candidate dongusu donmez) -> kurma.
     // Zincir senaryosunda mergeset hep bos -> blue_set_in_view O(n^2) darbogazi atlanir.
-    let mut blue: BTreeSet<VertexId> = blue_set_in_view(data, *sp);
+    let mut blue: BTreeSet<VertexId> = if ordered_mergeset.is_empty() {
+        BTreeSet::new()
+    } else {
+        blue_set_in_view(data, *sp)
+    };
     T_BLUE.fetch_add(_t0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
     let _t1 = std::time::Instant::now();
     // [TUGLA2c HIZ] TEK GECIS: sp-zincirini BIR kez yuru, her b'nin ILK (en yakin/
@@ -1356,7 +1360,7 @@ fn mavi_boncuk(
     // sp'den devral (zaten sadece sifir-olmayanlar), blue-disi at, 0 EKLEME.
     let _ = data;
     let mut boyut: BTreeMap<VertexId, u32> = _anticone_sizes.get(sp).cloned().unwrap_or_default();
-    boyut.retain(|kk, &mut vv| vv > 0 && blue.contains(kk));
+    boyut.retain(|_kk, &mut vv| vv > 0);
 
     let mut mergeset_blues: Vec<VertexId> = Vec::new();
     let mut mergeset_reds: Vec<VertexId> = Vec::new();
