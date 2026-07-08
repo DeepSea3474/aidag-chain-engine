@@ -225,7 +225,7 @@ impl Ghostdag {
         for id in topological_order(graph) {
             // Topo sıra → tüm ebeveynlerin verisi hazır. Her vertex BİR KEZ.
             let iv = sp_tree_intervals(&data);
-            let d = compute_vertex_data(graph, &id, k, weigher, &data, &iv, None, None);
+            let (d, _out) = compute_vertex_data(graph, &id, k, weigher, &data, &iv, None, None);
             data.insert(id, d);
         }
         Ghostdag {
@@ -395,7 +395,7 @@ impl Ghostdag {
         // aynı (sıra değişmez, sadece zaten-hesaplanan israfı kalkar).
         let mevcut: std::collections::BTreeSet<VertexId> = self.data.keys().copied().collect();
         for id in topological_order_eksik_hizli(graph, &mevcut) {
-            let d = compute_vertex_data(
+            let (d, out) = compute_vertex_data(
                 graph,
                 &id,
                 self.k,
@@ -407,6 +407,7 @@ impl Ghostdag {
             );
             let sp = d.selected_parent;
             self.data.insert(id, d);
+            self.anticone_sizes.insert(id, out);
             // INKREMENTAL interval ata. Bosluk dolarsa (false) -> tum iv'yi
             // bosluklu sema ile bir kez bastan kur (NADIR; amortize ucuz).
             if !self.assign_interval_incremental(&id, sp) {
@@ -445,7 +446,7 @@ impl Ghostdag {
             return;
         }
         let id = *yeni;
-        let d = compute_vertex_data(
+        let (d, out) = compute_vertex_data(
             graph,
             &id,
             self.k,
@@ -457,6 +458,7 @@ impl Ghostdag {
         );
         let sp = d.selected_parent;
         self.data.insert(id, d);
+        self.anticone_sizes.insert(id, out);
         if !self.assign_interval_incremental(&id, sp) && !self.lokal_rebuild_dene(&id, sp) {
             self.iv = sp_tree_intervals_gapped(&self.data);
             self.iv_next = self.iv.iter().map(|(k, &(s, _))| (*k, s)).collect();
@@ -1282,6 +1284,9 @@ fn ata_bul_up(
 // sayiyordu (69ef: 14 vs gercek 23 -> overcount). Mavi boncuk, cand'in anticone'unu
 // blue_view icinde DOGRUDAN, SAF-dogrulanmis atalik ile sayar (torba yanlis-pozitifinden
 // bagimsiz). blue kumesi her mavi eklendikce buyur (compute_default ile ayni matematik).
+static MB_INIT_SAY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static MB_CAND_SAY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 fn mavi_boncuk(
     graph: &Graph,
     id: &VertexId,
@@ -1309,7 +1314,10 @@ fn mavi_boncuk(
     for b in &blue {
         let mut a = 0u32;
         for u in &blue {
-            if u != b && saf_iliskisiz(ri, u, b) { a += 1; }
+            if u != b {
+                MB_INIT_SAY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if saf_iliskisiz(ri, u, b) { a += 1; }
+            }
         }
         boyut.insert(*b, a);
     }
@@ -1320,7 +1328,10 @@ fn mavi_boncuk(
     out.insert(*sp, 0);
 
     for cand in &ordered_mergeset {
-        let anticone: Vec<VertexId> = blue.iter().filter(|u| **u != *cand && saf_iliskisiz(ri, u, cand)).copied().collect();
+        let anticone: Vec<VertexId> = blue.iter().filter(|u| {
+            if **u != *cand { MB_CAND_SAY.fetch_add(1, std::sync::atomic::Ordering::Relaxed); }
+            **u != *cand && saf_iliskisiz(ri, u, cand)
+        }).copied().collect();
         let mut is_blue = anticone.len() <= k_usize;
         if is_blue {
             for b in &anticone {
@@ -1470,7 +1481,7 @@ fn compute_vertex_data<W: Weigher>(
     iv: &BTreeMap<VertexId, (u64, u64)>,
     torba: Option<&BTreeMap<VertexId, BTreeSet<(u64, VertexId)>>>,
     anticone_sizes: Option<&BTreeMap<VertexId, BTreeMap<VertexId, u32>>>,
-) -> GhostdagData {
+) -> (GhostdagData, BTreeMap<VertexId, u32>) {
     let vx = graph.get(id).expect("id graph'ta var");
     // Yalnızca graph'ta GERÇEKTEN mevcut ebeveynler (savunmacı).
     let parents: Vec<VertexId> = vx
@@ -1482,13 +1493,13 @@ fn compute_vertex_data<W: Weigher>(
 
     if parents.is_empty() {
         // Genesis: mavi yok, score/work 0, seçili ebeveyn yok.
-        return GhostdagData {
+        return (GhostdagData {
             blue_score: 0,
             blue_work: 0,
             selected_parent: None,
             mergeset_blues: Vec::new(),
             mergeset_reds: Vec::new(),
-        };
+        }, BTreeMap::new());
     }
 
     // 1. Seçili ebeveyn: max blue_work, beraberlik min-id.
@@ -1520,10 +1531,10 @@ fn compute_vertex_data<W: Weigher>(
     // (sp-zinciri yuruyusu, baslangic dongusu YOK, hizli). Yoksa (compute_with_weight,
     // toptan) -> eski blue_set_in_view + tum-blue tarama. Ikisi de ayni sonucu verir
     // (coloring_kaspa_*_birebir testleri kanitladi); bit-bit compute-vs-update korunur.
-    let (mergeset_blues, mergeset_reds): (Vec<VertexId>, Vec<VertexId>) =
+    let (mergeset_blues, mergeset_reds, out_opt): (Vec<VertexId>, Vec<VertexId>, Option<BTreeMap<VertexId, u32>>) =
         if let Some(asz) = anticone_sizes {
-            let (b, r, _out) = mavi_boncuk(graph, id, &sp, k, data, &ri, asz);
-            (b, r)
+            let (b, r, out_mb) = mavi_boncuk(graph, id, &sp, k, data, &ri, asz);
+            (b, r, Some(out_mb))
         } else {
             let mut blue: BTreeSet<VertexId> = if ordered_mergeset.is_empty() {
                 BTreeSet::new()
@@ -1562,7 +1573,7 @@ fn compute_vertex_data<W: Weigher>(
                     mergeset_reds.push(cand);
                 }
             }
-            (mergeset_blues, mergeset_reds)
+            (mergeset_blues, mergeset_reds, Some(anticone_size))
         };
 
     // 4. blue_score = bs(sp) + 1 (sp'nin kendisi) + yeni maviler.
@@ -1577,13 +1588,13 @@ fn compute_vertex_data<W: Weigher>(
         .sum();
     let blue_work = sp_work + weigher.weight(graph, &sp) + mergeset_blue_work;
 
-    GhostdagData {
+    (GhostdagData {
         blue_score,
         blue_work,
         selected_parent: Some(sp),
         mergeset_blues,
         mergeset_reds,
-    }
+    }, out_opt.unwrap_or_default())
 }
 
 /// Ebeveynler içinde en yüksek blue-WORK'lü olanı seç; beraberlikte min-id
@@ -1970,6 +1981,9 @@ mod tests {
             let total_s = t_build.elapsed().as_secs_f64();
             let tps = n as f64 / total_s.max(1e-9);
             eprintln!("n={:>9} toplam={:.1}s TPS={:.0} (insert + artimli GHOSTDAG per-vertex = node gercek akisi)", n, total_s, tps);
+            let ic = MB_INIT_SAY.load(std::sync::atomic::Ordering::Relaxed);
+            let cc = MB_CAND_SAY.load(std::sync::atomic::Ordering::Relaxed);
+            eprintln!("   PROFIL: baslangic_dongusu(a)={} cand_dongusu(b)={} (saf_iliskisiz cagri sayilari)", ic, cc);
         }
     }
 
