@@ -1287,19 +1287,20 @@ fn ata_bul_up(
 static MB_INIT_SAY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static MB_CAND_SAY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+static BAS_ADIM: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 fn blue_anticone_size(
     b: &VertexId,
     sp: &VertexId,
     data: &BTreeMap<VertexId, GhostdagData>,
     anticone_sizes: &BTreeMap<VertexId, BTreeMap<VertexId, u32>>,
 ) -> Option<u32> {
-    // Kaspa blue_anticone_size: sp-zincirinde geriye yuru, b iceren ILK kayitta dur.
+    // Geriye yuru, b iceren ILK (en yakin/guncel) kayitta dur.
     let mut cur = Some(*sp);
     while let Some(c) = cur {
-        if let Some(m) = anticone_sizes.get(&c) {
-            if let Some(&sz) = m.get(b) {
-                return Some(sz);
-            }
+        BAS_ADIM.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if let Some(sz) = anticone_sizes.get(&c).and_then(|m| m.get(b)) {
+            return Some(*sz);
         }
         cur = data.get(&c).and_then(|d| d.selected_parent);
     }
@@ -1329,12 +1330,25 @@ fn mavi_boncuk(
     };
 
     let mut blue: BTreeSet<VertexId> = blue_set_in_view(data, *sp);
+    // [TUGLA2c HIZ] TEK GECIS: sp-zincirini BIR kez yuru, her b'nin ILK (en yakin/
+    // guncel) boyutunu topla. Her b icin ayri yuruyus (O(n^2)) YERINE tek yuruyus O(n).
+    // "ilk bulunan = en guncel" (blue_anticone_size ile ayni deger). Miras=saf kanitli.
     let mut boyut: BTreeMap<VertexId, u32> = BTreeMap::new();
-    // [TUGLA2b HIZ] Baslangic O(blue^2) saf hesap KALDIRILDI. boyut miras'tan
-    // (blue_anticone_size, sp-zinciri geriye) okunur. Miras=saf bit-bit kanitlandi (fuzz 2000).
+    let mut cur = Some(*sp);
+    while let Some(c) = cur {
+        BAS_ADIM.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if let Some(m) = _anticone_sizes.get(&c) {
+            for (bb, &sz) in m {
+                if blue.contains(bb) {
+                    boyut.entry(*bb).or_insert(sz);
+                }
+            }
+        }
+        if boyut.len() >= blue.len() { break; }
+        cur = data.get(&c).and_then(|d| d.selected_parent);
+    }
     for b in &blue {
-        let a = blue_anticone_size(b, sp, data, _anticone_sizes).unwrap_or(0);
-        boyut.insert(*b, a);
+        boyut.entry(*b).or_insert(0);
     }
 
     let mut mergeset_blues: Vec<VertexId> = Vec::new();
@@ -2000,7 +2014,8 @@ mod tests {
             eprintln!("n={:>9} toplam={:.1}s TPS={:.0} (insert + artimli GHOSTDAG per-vertex = node gercek akisi)", n, total_s, tps);
             let ic = MB_INIT_SAY.load(std::sync::atomic::Ordering::Relaxed);
             let cc = MB_CAND_SAY.load(std::sync::atomic::Ordering::Relaxed);
-            eprintln!("   PROFIL: baslangic_dongusu(a)={} cand_dongusu(b)={} (saf_iliskisiz cagri sayilari)", ic, cc);
+            let ba = BAS_ADIM.load(std::sync::atomic::Ordering::Relaxed);
+            eprintln!("   PROFIL: baslangic_dongusu(a)={} cand_dongusu(b)={} blue_anticone_ADIM={} (saf_iliskisiz + sp-zinciri adimlari)", ic, cc, ba);
         }
     }
 
