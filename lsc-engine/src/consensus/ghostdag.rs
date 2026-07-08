@@ -1287,6 +1287,25 @@ fn ata_bul_up(
 static MB_INIT_SAY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static MB_CAND_SAY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+fn blue_anticone_size(
+    b: &VertexId,
+    sp: &VertexId,
+    data: &BTreeMap<VertexId, GhostdagData>,
+    anticone_sizes: &BTreeMap<VertexId, BTreeMap<VertexId, u32>>,
+) -> Option<u32> {
+    // Kaspa blue_anticone_size: sp-zincirinde geriye yuru, b iceren ILK kayitta dur.
+    let mut cur = Some(*sp);
+    while let Some(c) = cur {
+        if let Some(m) = anticone_sizes.get(&c) {
+            if let Some(&sz) = m.get(b) {
+                return Some(sz);
+            }
+        }
+        cur = data.get(&c).and_then(|d| d.selected_parent);
+    }
+    None
+}
+
 fn mavi_boncuk(
     graph: &Graph,
     id: &VertexId,
@@ -1319,6 +1338,10 @@ fn mavi_boncuk(
                 if saf_iliskisiz(ri, u, b) { a += 1; }
             }
         }
+        // [TUGLA2 DOGRULAMA] miras arama saf ile ayni mi?
+        if let Some(miras) = blue_anticone_size(b, sp, data, _anticone_sizes) {
+            assert_eq!(miras, a, "TUGLA2 FARK: b={:?} miras={} saf={}", b, miras, a);
+        }
         boyut.insert(*b, a);
     }
 
@@ -1340,7 +1363,9 @@ fn mavi_boncuk(
         }
         if is_blue {
             for b in &anticone {
-                *boyut.entry(*b).or_insert(0) += 1;
+                let yeni = *boyut.entry(*b).or_insert(0) + 1;
+                *boyut.get_mut(b).unwrap() = yeni;
+                out.insert(*b, yeni); // +1 peer KALICI kaydet (Kaspa mantigi)
             }
             boyut.insert(*cand, anticone.len() as u32);
             out.insert(*cand, anticone.len() as u32);
