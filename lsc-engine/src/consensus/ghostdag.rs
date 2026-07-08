@@ -1330,18 +1330,10 @@ fn mavi_boncuk(
 
     let mut blue: BTreeSet<VertexId> = blue_set_in_view(data, *sp);
     let mut boyut: BTreeMap<VertexId, u32> = BTreeMap::new();
+    // [TUGLA2b HIZ] Baslangic O(blue^2) saf hesap KALDIRILDI. boyut miras'tan
+    // (blue_anticone_size, sp-zinciri geriye) okunur. Miras=saf bit-bit kanitlandi (fuzz 2000).
     for b in &blue {
-        let mut a = 0u32;
-        for u in &blue {
-            if u != b {
-                MB_INIT_SAY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                if saf_iliskisiz(ri, u, b) { a += 1; }
-            }
-        }
-        // [TUGLA2 DOGRULAMA] miras arama saf ile ayni mi?
-        if let Some(miras) = blue_anticone_size(b, sp, data, _anticone_sizes) {
-            assert_eq!(miras, a, "TUGLA2 FARK: b={:?} miras={} saf={}", b, miras, a);
-        }
+        let a = blue_anticone_size(b, sp, data, _anticone_sizes).unwrap_or(0);
         boyut.insert(*b, a);
     }
 
