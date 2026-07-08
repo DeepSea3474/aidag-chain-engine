@@ -205,6 +205,7 @@ pub struct Ghostdag {
     /// icin gerekli; iv/torba gibi GhostdagData'yi/konsensusu ETKILEMEZ.
     /// Henuz PASIF (dolduruluyor ama lokal rebuild devrede degil).
     children_sp: BTreeMap<VertexId, BTreeSet<VertexId>>,
+    boyut_map: BTreeMap<VertexId, BTreeMap<VertexId, u32>>,
 }
 
 impl Ghostdag {
@@ -238,6 +239,7 @@ impl Ghostdag {
             anticone_sizes: BTreeMap::new(),
             up: BTreeMap::new(),
             children_sp: BTreeMap::new(),
+            boyut_map: BTreeMap::new(),
         }
     }
 
@@ -254,6 +256,7 @@ impl Ghostdag {
             anticone_sizes: BTreeMap::new(),
             up: BTreeMap::new(),
             children_sp: BTreeMap::new(),
+            boyut_map: BTreeMap::new(),
         }
     }
 
@@ -1315,6 +1318,7 @@ fn mavi_boncuk(
     data: &BTreeMap<VertexId, GhostdagData>,
     ri: &ReachIndex,
     _anticone_sizes: &BTreeMap<VertexId, BTreeMap<VertexId, u32>>,
+    boyut_map: &BTreeMap<VertexId, BTreeMap<VertexId, u32>>,
 ) -> (Vec<VertexId>, Vec<VertexId>, BTreeMap<VertexId, u32>) {
     let k_usize = k as usize;
     let mergeset_unordered = ri.mergeset_of(graph, id, sp);
@@ -1333,20 +1337,12 @@ fn mavi_boncuk(
     // [TUGLA2c HIZ] TEK GECIS: sp-zincirini BIR kez yuru, her b'nin ILK (en yakin/
     // guncel) boyutunu topla. Her b icin ayri yuruyus (O(n^2)) YERINE tek yuruyus O(n).
     // "ilk bulunan = en guncel" (blue_anticone_size ile ayni deger). Miras=saf kanitli.
-    let mut boyut: BTreeMap<VertexId, u32> = BTreeMap::new();
-    let mut cur = Some(*sp);
-    while let Some(c) = cur {
-        BAS_ADIM.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if let Some(m) = _anticone_sizes.get(&c) {
-            for (bb, &sz) in m {
-                if blue.contains(bb) {
-                    boyut.entry(*bb).or_insert(sz);
-                }
-            }
-        }
-        if boyut.len() >= blue.len() { break; }
-        cur = data.get(&c).and_then(|d| d.selected_parent);
-    }
+    // [DEVRALMA] anticone_sizes[sp] artik TAM harita (return boyut). Dogrudan
+    // devral, sp-zinciri yuruyusu YOK -> O(blue) per vertex. tek geciste yuruyus elendi.
+    BAS_ADIM.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let _ = data;
+    let mut boyut: BTreeMap<VertexId, u32> = _anticone_sizes.get(sp).cloned().unwrap_or_default();
+    boyut.retain(|kk, _| blue.contains(kk));
     for b in &blue {
         boyut.entry(*b).or_insert(0);
     }
@@ -1381,7 +1377,7 @@ fn mavi_boncuk(
             mergeset_reds.push(*cand);
         }
     }
-    (mergeset_blues, mergeset_reds, out)
+    (mergeset_blues, mergeset_reds, boyut)
 }
 
 fn coloring_kaspa(
@@ -1564,7 +1560,7 @@ fn compute_vertex_data<W: Weigher>(
     // (coloring_kaspa_*_birebir testleri kanitladi); bit-bit compute-vs-update korunur.
     let (mergeset_blues, mergeset_reds, out_opt): (Vec<VertexId>, Vec<VertexId>, Option<BTreeMap<VertexId, u32>>) =
         if let Some(asz) = anticone_sizes {
-            let (b, r, out_mb) = mavi_boncuk(graph, id, &sp, k, data, &ri, asz);
+            let (b, r, out_mb) = mavi_boncuk(graph, id, &sp, k, data, &ri, asz, asz);
             (b, r, Some(out_mb))
         } else {
             let mut blue: BTreeSet<VertexId> = if ordered_mergeset.is_empty() {
