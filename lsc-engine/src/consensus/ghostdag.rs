@@ -1593,10 +1593,11 @@ fn compute_vertex_data<W: Weigher>(
     // gereksiz. blue_set_in_view sp-zincirini yurur (zincirde O(n)); mergeset bossa
     // gereksiz -> bos birak (sonuc bit-bit ayni). [olcum: n=10000'de ~32s idi]
 
-    // RENKLENDIRME: anticone_sizes verildiyse (update yolu) -> coloring_kaspa
-    // (sp-zinciri yuruyusu, baslangic dongusu YOK, hizli). Yoksa (compute_with_weight,
-    // toptan) -> eski blue_set_in_view + tum-blue tarama. Ikisi de ayni sonucu verir
-    // (coloring_kaspa_*_birebir testleri kanitladi); bit-bit compute-vs-update korunur.
+    // RENKLENDIRME: anticone_sizes verildiyse (update yolu) -> mavi_boncuk
+    // (AIDAG'in kendi near-linear renklendirmesi: kosullu blue + oda sikistirma +
+    // sp'den boyut devralma). Yoksa (compute_with_weight, toptan) -> eski
+    // blue_set_in_view + tum-blue tarama. Ikisi de ayni sonucu verir
+    // (fuzz_dogrula 2000 tur + birebir testler kanitladi); bit-bit compute-vs-update korunur.
     let (mergeset_blues, mergeset_reds, out_opt): (Vec<VertexId>, Vec<VertexId>, Option<BTreeMap<VertexId, u32>>) =
         if let Some(asz) = anticone_sizes {
             let (b, r, out_mb) = mavi_boncuk(graph, id, &sp, k, data, &ri, asz, asz);
