@@ -426,7 +426,7 @@ impl Ghostdag {
             // v'nin sp-olmayan parent'lari (kopruleri), sonra sikistir. iv hazir
             // olmali (sikistirma interval kullanir) -> interval atamasindan SONRA.
             self.torba_guncelle_tek(graph, &id, sp);
-            self.up_guncelle_tek(&id, sp);
+            // [HIZ] up PASIF (uretimde okunmuyor, sadece test) - kaldirildi: self.up_guncelle_tek(&id, sp);
         }
     }
 
@@ -461,13 +461,21 @@ impl Ghostdag {
         );
         let sp = d.selected_parent;
         self.data.insert(id, d);
+        let _ta = std::time::Instant::now();
         self.anticone_sizes.insert(id, out);
+        U_ANTI.fetch_add(_ta.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+        let _ti = std::time::Instant::now();
         if !self.assign_interval_incremental(&id, sp) && !self.lokal_rebuild_dene(&id, sp) {
             self.iv = sp_tree_intervals_gapped(&self.data);
             self.iv_next = self.iv.iter().map(|(k, &(s, _))| (*k, s)).collect();
         }
+        U_IV.fetch_add(_ti.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+        let _tt = std::time::Instant::now();
         self.torba_guncelle_tek(graph, &id, sp);
-        self.up_guncelle_tek(&id, sp);
+        U_TORBA.fetch_add(_tt.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+        let _tu = std::time::Instant::now();
+        // [HIZ] up PASIF - kaldirildi: self.up_guncelle_tek(&id, sp);
+        U_UP.fetch_add(_tu.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Tek vertex icin inkremental torba: sp-atasinin torbasini devral + kendi
@@ -1295,6 +1303,13 @@ static ODA_NZ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(
 static T_BLUE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static T_MERGE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static T_CAND: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static T_SIGN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static T_INSERT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static T_GD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static U_ANTI: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static U_IV: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static U_TORBA: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static U_UP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static ODA_TOP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 fn blue_anticone_size(
@@ -2017,11 +2032,17 @@ mod tests {
                 if ids.len() >= 2 { parents.push(ids[ids.len() - 2]); }
                 parents.sort_unstable();
                 parents.dedup();
+                let _ts0 = Instant::now();
                 let v = signed((i % 250) as u8 + 1, parents, ts, b"x");
+                T_SIGN.fetch_add(_ts0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
                 ts += 1;
                 let vid = *v.id();
+                let _ti0 = Instant::now();
                 g.insert_synced(v).unwrap();
+                T_INSERT.fetch_add(_ti0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+                let _tg0 = Instant::now();
                 gd.update_one(&g, &vid);
+                T_GD.fetch_add(_tg0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
                 ids.push(vid);
                 if i % 10000 == 0 { let e = t_build.elapsed().as_secs_f64(); eprintln!("  [ingest] {}/{} t={:.1}s ({:.0} v/s)", i, n, e, i as f64 / e.max(1e-9)); }
             }
@@ -2036,11 +2057,46 @@ mod tests {
             let tb = T_BLUE.load(std::sync::atomic::Ordering::Relaxed);
             let tm = T_MERGE.load(std::sync::atomic::Ordering::Relaxed);
             let tcd = T_CAND.load(std::sync::atomic::Ordering::Relaxed);
+            let tsg = T_SIGN.load(std::sync::atomic::Ordering::Relaxed);
+            let tin = T_INSERT.load(std::sync::atomic::Ordering::Relaxed);
+            let tgd = T_GD.load(std::sync::atomic::Ordering::Relaxed);
+            let ua = U_ANTI.load(std::sync::atomic::Ordering::Relaxed);
+            let ui = U_IV.load(std::sync::atomic::Ordering::Relaxed);
+            let ut = U_TORBA.load(std::sync::atomic::Ordering::Relaxed);
+            let uu = U_UP.load(std::sync::atomic::Ordering::Relaxed);
+            eprintln!("   UPDATE_ONE(ms): anti_kaydet={:.0} interval={:.0} torba={:.0} up={:.0}", ua as f64/1e6, ui as f64/1e6, ut as f64/1e6, uu as f64/1e6);
+            eprintln!("   ANA(ms): imza_uretim={:.0} insert+dogrula={:.0} ghostdag={:.0}", tsg as f64/1e6, tin as f64/1e6, tgd as f64/1e6);
             eprintln!("   ZAMAN(ms): blue_set={:.0} mergeset={:.0} candidate={:.0}", tb as f64/1e6, tm as f64/1e6, tcd as f64/1e6);
             eprintln!("   ODA: sifir-olmayan={} toplam_blue={} (oran={:.3})", onz, otop, onz as f64 / otop.max(1) as f64);
             eprintln!("   PROFIL: baslangic_dongusu(a)={} cand_dongusu(b)={} blue_anticone_ADIM={} (saf_iliskisiz + sp-zinciri adimlari)", ic, cc, ba);
         }
     }
+
+    #[test]
+    #[ignore]
+    fn imza_paralel_bench() {
+        use std::time::Instant;
+        use rayon::prelude::*;
+        let n: usize = std::env::var("IMZA_N").ok().and_then(|x| x.parse().ok()).unwrap_or(100_000);
+        // n vertex uret (imzali)
+        let mut vs = Vec::with_capacity(n);
+        let mut ts = 1000u64;
+        for i in 0..n {
+            vs.push(signed((i % 250) as u8 + 1, vec![], ts, b"x"));
+            ts += 1;
+        }
+        // TEK TEK verify
+        let t0 = Instant::now();
+        for v in &vs { v.verify().unwrap(); }
+        let tek = t0.elapsed().as_secs_f64();
+        // PARALEL verify (rayon, 18 cekirdek)
+        let t1 = Instant::now();
+        vs.par_iter().for_each(|v| { v.verify().unwrap(); });
+        let par = t1.elapsed().as_secs_f64();
+        eprintln!("IMZA n={} TEK={:.2}s ({:.0}/s) PARALEL={:.2}s ({:.0}/s) HIZLANMA={:.1}x",
+            n, tek, n as f64/tek, par, n as f64/par, tek/par);
+    }
+
 
     #[test]
     #[ignore]
@@ -2156,6 +2212,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn ata_bul_up_eski_chain_ile_birebir() {
         // ata_bul_up (binary lifting), eski blok-blok chain yuruyusunun KRITIK 1'de
         // durdugu ata'nin AYNISINI buluyor mu? Cesitli DAG'larda bit-bit.
