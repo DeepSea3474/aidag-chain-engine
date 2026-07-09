@@ -840,6 +840,49 @@ mod tests {
         assert_eq!(reg.beklenen(&[0xAA; 20]), 1);
         assert_eq!(reg.beklenen(&[0xBB; 20]), 0);
     }
+
+    #[test]
+    #[ignore]
+    fn fuzz_kalkan_replay() {
+        // ADVERSARIAL FUZZ: replay/cift-harcama kalkani (NonceRegistry).
+        use super::NonceRegistry;
+        let turlar: u64 = std::env::var("NONCE_TUR").ok().and_then(|x| x.parse().ok()).unwrap_or(2000);
+        let mut lcg: u64 = 0xC2B2AE3D27D4EB4F;
+        let mut rng = || { lcg = lcg.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); lcg };
+        for tur in 0..turlar {
+            if tur % 1000 == 0 { eprintln!("[nonce] {}/{} tur", tur, turlar); }
+            let mut reg = NonceRegistry::yeni();
+            let adres_sayisi = 1 + (rng() % 4) as usize;
+            let mut adresler: Vec<[u8; 20]> = Vec::new();
+            let mut beklenen: Vec<u64> = Vec::new();
+            for _ in 0..adres_sayisi {
+                let mut a = [0u8; 20]; for x in a.iter_mut() { *x = (rng() & 0xff) as u8; }
+                adresler.push(a); beklenen.push(0);
+            }
+            let islem_sayisi = 5 + (rng() % 20) as usize;
+            for _ in 0..islem_sayisi {
+                let idx = (rng() % adres_sayisi as u64) as usize;
+                let adres = adresler[idx];
+                let exp = beklenen[idx];
+                let senaryo = rng() % 3;
+                let gelen = match senaryo {
+                    0 => exp,
+                    1 => if exp > 0 { exp - 1 } else { exp + 1 },
+                    _ => exp + 1 + (rng() % 5),
+                };
+                let kabul = reg.dogru_mu(&adres, gelen);
+                let olmali = gelen == exp;
+                if kabul != olmali {
+                    panic!("KALKAN DELINDI tur={}: nonce={} beklenen={} kalkan={} olmali={}", tur, gelen, exp, kabul, olmali);
+                }
+                if kabul { reg.ilerlet(&adres); beklenen[idx] += 1; }
+                if exp > 0 && reg.dogru_mu(&adres, exp - 1) {
+                    panic!("KALKAN DELINDI tur={}: kullanilmis nonce {} tekrar kabul edildi (replay gecti!)", tur, exp - 1);
+                }
+            }
+        }
+        eprintln!("NONCE OK: {} tur, replay ve atlama reddedildi, dogru nonce ilerledi", turlar);
+    }
 }
 
 /// Testnet eslestirme defteri: test_adresi -> gercek (mainnet odul) adresi.
