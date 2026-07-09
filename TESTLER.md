@@ -66,7 +66,6 @@ mDNS peer kesfi, pull/push senkronizasyon, node'lar ayni zincire yakinsiyor
 
 ## AUDIT ONCESI TODO (henuz yapilmadi)
 - Otomatik multi-node entegrasyon testi (CI)
-- Replay/nonce (cift-harcama) kalkani adversarial fuzz
 - Genis-olcek/patolojik DAG fuzz
 - EVM/AVM uyumluluk (revm) - Ethereum test suite
 - cargo clippy, cargo audit, miri
@@ -98,7 +97,6 @@ mDNS peer kesfi, pull/push senkronizasyon, node'lar ayni zincire yakinsiyor
 
 ## AUDIT ONCESI TODO (henuz yapilmadi)
 - Otomatik multi-node entegrasyon testi (CI)
-- Replay/nonce (cift-harcama) kalkani adversarial fuzz
 - Genis-olcek/patolojik DAG fuzz
 - EVM/AVM uyumluluk (revm) - Ethereum test suite
 - cargo clippy, cargo audit, miri
@@ -113,3 +111,11 @@ mDNS peer kesfi, pull/push senkronizasyon, node'lar ayni zincire yakinsiyor
 
 NOT: Ic testler bir audit'in YERINI TUTMAZ. Bunlar audit'e HAZIR girmek icindir.
 Gercek deger/para tutan asamadan once bagimsiz denetim sarttir.
+
+### 7. fuzz_kalkan_replay - replay/cift-harcama kalkani
+Ne yapar: NonceRegistry uzerinde binlerce senaryo - dogru nonce kabul edilir,
+REPLAY (kullanilmis nonce tekrar) reddedilir, ATLAMA (ileri nonce) reddedilir,
+adresler bagimsiz.
+Neden: cift-harcama (ayni parayi iki kez kullanmak) bir blockchain'in en temel
+saldirisidir. Nonce sirasi bunu engeller. Para tutan sistemin en kritik kalkani.
+Son: 2.000 tur, replay ve atlama reddedildi OK.
