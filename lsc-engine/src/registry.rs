@@ -1081,4 +1081,50 @@ mod on_satis_testleri {
         // Genel toplam
         assert_eq!(r.toplam_aidag(), 100, "toplam satilan 50+30+20=100");
     }
+
+    #[test]
+    #[ignore]
+    fn fuzz_kalkan_sahte_belge() {
+        // ADVERSARIAL FUZZ: belge/diploma kalkani (RecordRegistry).
+        use super::RecordRegistry;
+        // hash = ham 32-bayt (mevcut testlerle tutarli; keccak katmani ayri).
+        let turlar: u64 = std::env::var("BELGE_TUR").ok().and_then(|x| x.parse().ok()).unwrap_or(2000);
+        let mut lcg: u64 = 0x9E6C63D0676A9A99;
+        let mut rng = || { lcg = lcg.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); lcg };
+        let h32 = |rng: &mut dyn FnMut() -> u64| { let mut a = [0u8; 32]; for x in a.iter_mut() { *x = (rng() & 0xff) as u8; } a };
+        let a20 = |rng: &mut dyn FnMut() -> u64| { let mut a = [0u8; 20]; for x in a.iter_mut() { *x = (rng() & 0xff) as u8; } a };
+        for tur in 0..turlar {
+            if tur % 1000 == 0 { eprintln!("[belge] {}/{} tur", tur, turlar); }
+            let mut reg = RecordRegistry::yeni();
+            let gercek_hash = h32(&mut rng);
+            let kaydeden = a20(&mut rng);
+            reg.kaydet(gercek_hash, kaydeden, 1000 + tur);
+            // 1: kayitli belge dogrulanmali
+            if reg.dogrula(&gercek_hash).is_none() {
+                panic!("KALKAN DELINDI tur={}: kayitli belge dogrulanamadi", tur);
+            }
+            // 2: sahte (kayitsiz) hash reddedilmeli
+            let mut sahte = h32(&mut rng);
+            while sahte == gercek_hash { sahte = h32(&mut rng); }
+            if reg.dogrula(&sahte).is_some() {
+                panic!("KALKAN DELINDI tur={}: sahte belge dogrulandi!", tur);
+            }
+            // 3: tahrif — gercek hash'in 1 byte'i degismis -> reddedilmeli
+            let mut tahrif = gercek_hash;
+            let idx = (rng() % 32) as usize;
+            tahrif[idx] = tahrif[idx].wrapping_add(1);
+            if tahrif != gercek_hash && reg.dogrula(&tahrif).is_some() {
+                panic!("KALKAN DELINDI tur={}: tahrif edilmis belge dogrulandi!", tur);
+            }
+            // 4: ilk kayit kazanir — ayni hash farkli kaydeden ile ezilmemeli
+            let baska = a20(&mut rng);
+            if reg.kaydet(gercek_hash, baska, 9999) {
+                panic!("KALKAN DELINDI tur={}: kayitli belge ezildi!", tur);
+            }
+            if reg.dogrula(&gercek_hash).unwrap().kaydeden != kaydeden {
+                panic!("KALKAN DELINDI tur={}: ilk kaydeden degisti", tur);
+            }
+        }
+        eprintln!("BELGE OK: {} tur, sahte/tahrif reddedildi, ilk kayit korundu", turlar);
+    }
 }

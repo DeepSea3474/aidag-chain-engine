@@ -1205,8 +1205,8 @@ mod evm_transfer_tests {
         let mut rng = || { lcg = lcg.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); lcg };
         for tur in 0..turlar {
             if tur % 1000 == 0 { eprintln!("[kalkan] {}/{} tur", tur, turlar); }
-            let mut adr = |rng: &mut dyn FnMut() -> u64| { let mut a = [0u8; ADDR_LEN]; for x in a.iter_mut() { *x = (rng() & 0xff) as u8; } a };
-            let mut smb = |rng: &mut dyn FnMut() -> u64| { let mut s = [0u8; SYMBOL_LEN]; for x in s.iter_mut() { *x = (rng() & 0xff) as u8; } s };
+            let adr = |rng: &mut dyn FnMut() -> u64| { let mut a = [0u8; ADDR_LEN]; for x in a.iter_mut() { *x = (rng() & 0xff) as u8; } a };
+            let smb = |rng: &mut dyn FnMut() -> u64| { let mut s = [0u8; SYMBOL_LEN]; for x in s.iter_mut() { *x = (rng() & 0xff) as u8; } s };
             let adres_a = adr(&mut rng);
             let mut adres_b = adr(&mut rng);
             while adres_b == adres_a { adres_b = adr(&mut rng); }
