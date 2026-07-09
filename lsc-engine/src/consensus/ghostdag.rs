@@ -2037,6 +2037,53 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
+    fn fuzz_invariant() {
+        // PROPERTY FUZZ: INV1 monotonluk, INV2 mavi/kirmizi ayrik, INV3 k-cluster
+        let turlar: u64 = std::env::var("PROP_TUR").ok().and_then(|x| x.parse().ok()).unwrap_or(2000);
+        let mut lcg: u64 = 0x2545F4914F6CDD1D;
+        let mut rng = || { lcg = lcg.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); lcg };
+        let k = DEFAULT_K as u32;
+        for tur in 0..turlar {
+            if tur % 1000 == 0 { eprintln!("[prop] {}/{} tur", tur, turlar); }
+            let n = 5 + (rng() % 60) as usize;
+            let mut g = Graph::devnet(NET);
+            let gen = signed(1, vec![], 1000, b"g"); let gid = *gen.id();
+            g.insert_synced(gen).unwrap();
+            let mut inc = Ghostdag::new_incremental(DEFAULT_K); inc.update_one(&g, &gid);
+            let mut ids = vec![gid]; let mut ts = 1001u64;
+            for i in 1..n {
+                let mevcut = ids.len(); let pmax = mevcut.min(8);
+                let pk = 1 + (rng() % pmax as u64) as usize;
+                let mut parents = Vec::new();
+                for _ in 0..pk { let idx = (rng() % mevcut as u64) as usize; let c = ids[idx]; if !parents.contains(&c) { parents.push(c); } }
+                if parents.is_empty() { parents.push(ids[mevcut - 1]); }
+                let seed = (1 + (rng() % 250)) as u8;
+                let v = signed(seed, parents, ts, format!("p{tur}v{i}").as_bytes()); ts += 1; let vid = *v.id();
+                if g.insert_synced(v).is_err() { continue; }
+                inc.update_one(&g, &vid); ids.push(vid);
+            }
+            let d = data_map_of(&inc, &g);
+            for (id, gd) in &d {
+                for b in &gd.mergeset_blues {
+                    if gd.mergeset_reds.contains(b) { panic!("INV2 IHLAL tur={} v={:02x}{:02x}", tur, id[0], id[1]); }
+                }
+                if let Some(sp) = gd.selected_parent {
+                    if let Some(spd) = d.get(&sp) {
+                        if spd.blue_score > gd.blue_score { panic!("INV1 IHLAL tur={} v={:02x}{:02x}: {}>{}", tur, id[0], id[1], spd.blue_score, gd.blue_score); }
+                    }
+                }
+            }
+            for (vid, harita) in inc.anticone_sizes.iter() {
+                for (bid, &sz) in harita.iter() {
+                    if sz > k { panic!("INV3 IHLAL tur={} v={:02x}{:02x} b={:02x}{:02x}: {}>{}", tur, vid[0], vid[1], bid[0], bid[1], sz, k); }
+                }
+            }
+        }
+        eprintln!("PROP OK: {} tur, INV1+INV2+INV3 tuttu", turlar);
+    }
+
+    #[test]
     fn dogrula_test() {
         let senaryolar: Vec<(usize, usize)> = vec![(3, 2), (5, 3), (8, 4), (4, 6), (10, 2), (6, 5)];
         for (kat, w) in senaryolar {
