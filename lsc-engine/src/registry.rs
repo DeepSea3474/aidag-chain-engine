@@ -555,6 +555,57 @@ mod tests {
     // ===== BakiyeRegistry / transfer testleri =====
 
     #[test]
+    #[ignore]
+    fn fuzz_kalkan_bakiye() {
+        // ADVERSARIAL FUZZ: bakiye/transfer kalkani. EN KRITIK: toplam arz SABIT.
+        use super::{BakiyeRegistry, TransferSonuc};
+        let turlar: u64 = std::env::var("BAKIYE_TUR").ok().and_then(|x| x.parse().ok()).unwrap_or(2000);
+        let mut lcg: u64 = 0x8CB92BA72F3D8DD7;
+        let mut rng = || { lcg = lcg.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); lcg };
+        for tur in 0..turlar {
+            if tur % 1000 == 0 { eprintln!("[bakiye] {}/{} tur", tur, turlar); }
+            let mut reg = BakiyeRegistry::yeni();
+            let adres_sayisi = 2 + (rng() % 5) as usize;
+            let mut adresler: Vec<[u8; 20]> = Vec::new();
+            for i in 0..adres_sayisi {
+                let mut a = [0u8; 20]; a[0] = i as u8; for x in a.iter_mut().skip(1) { *x = (rng() & 0xff) as u8; }
+                adresler.push(a);
+                reg.test_bakiye_ekle(a, (rng() % 1_000_000) as u128);
+            }
+            let baslangic_arz = reg.toplam_arz();
+            let islem_sayisi = 10 + (rng() % 40) as usize;
+            for _ in 0..islem_sayisi {
+                let gonderen = adresler[(rng() % adres_sayisi as u64) as usize];
+                let alici = adresler[(rng() % adres_sayisi as u64) as usize];
+                let miktar = (rng() % 2_000_000) as u128;
+                let onceki_g = reg.bakiye(&gonderen);
+                let onceki_a = reg.bakiye(&alici);
+                match reg.transfer(&gonderen, &alici, miktar) {
+                    TransferSonuc::Basarili { .. } => {
+                        if gonderen != alici {
+                            if reg.bakiye(&gonderen) != onceki_g - miktar { panic!("KALKAN DELINDI tur={}: gonderenden yanlis dustu", tur); }
+                            if reg.bakiye(&alici) != onceki_a + miktar { panic!("KALKAN DELINDI tur={}: aliciya yanlis eklendi", tur); }
+                        }
+                    }
+                    TransferSonuc::YetersizBakiye { .. } => {
+                        if reg.bakiye(&gonderen) != onceki_g { panic!("KALKAN DELINDI tur={}: yetersiz reddedildi ama bakiye degisti", tur); }
+                        if onceki_g >= miktar && miktar > 0 && gonderen != alici { panic!("KALKAN HATASI tur={}: yeterliydi ama yetersiz dendi", tur); }
+                    }
+                    TransferSonuc::GecersizMiktar => {
+                        if miktar > 0 && gonderen != alici && reg.bakiye(&alici).checked_add(miktar).is_some() {
+                            panic!("KALKAN HATASI tur={}: gecerli transfer GecersizMiktar dendi", tur);
+                        }
+                    }
+                }
+                if reg.toplam_arz() != baslangic_arz {
+                    panic!("KALKAN DELINDI tur={}: ARZ DEGISTI! bas={} simdi={}", tur, baslangic_arz, reg.toplam_arz());
+                }
+            }
+        }
+        eprintln!("BAKIYE OK: {} tur, arz korundu, yetersiz bakiye reddedildi", turlar);
+    }
+
+    #[test]
     fn bakiye_basit_transfer() {
         let mut reg = BakiyeRegistry::yeni();
         reg.test_bakiye_ekle([0xAA; 20], 1000);
