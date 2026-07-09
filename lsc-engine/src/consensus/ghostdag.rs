@@ -2084,6 +2084,70 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
+    fn fuzz_kalkan_corba() {
+        // KAOS/CORBA FUZZ: karisik parti (gercek+sahte, farkli saldiri turleri ic ice).
+        // Kalkan her ogeyi DOGRU ayiklamali: gercek gecer, sahte reddedilir, karismaz.
+        use crate::tx::{TokenKaydi, ayni_sembol_farkli_adres};
+        use crate::registry::RecordRegistry;
+        let turlar: u64 = std::env::var("CORBA_TUR").ok().and_then(|x| x.parse().ok()).unwrap_or(2000);
+        let mut lcg: u64 = 0x853C49E6748FEA9B;
+        let mut rng = || { lcg = lcg.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); lcg };
+        let mut beklenen_kabul = 0u64; let mut beklenen_red = 0u64;
+        let mut gercek_kabul = 0u64; let mut gercek_red = 0u64;
+        for tur in 0..turlar {
+            if tur % 1000 == 0 { eprintln!("[corba] {}/{} tur (kabul={} red={})", tur, turlar, gercek_kabul, gercek_red); }
+            let parti = 3 + (rng() % 6) as usize;
+            let mut reg = RecordRegistry::yeni();
+            let mut gercek_belge = [0u8; 32]; for x in gercek_belge.iter_mut() { *x = (rng() & 0xff) as u8; }
+            reg.kaydet(gercek_belge, [0x11; 20], 1000);
+            let mut t_adres = [0u8; 20]; for x in t_adres.iter_mut() { *x = (rng() & 0xff) as u8; }
+            let mut t_sembol = [0u8; 8]; for x in t_sembol.iter_mut() { *x = (rng() & 0xff) as u8; }
+            let gercek_token = TokenKaydi::new(t_adres, t_sembol);
+            for _ in 0..parti {
+                let saldiri = rng() % 6;
+                match saldiri {
+                    0 => {
+                        let v = signed((1 + rng() % 200) as u8, vec![], 1000 + tur, format!("c{tur}").as_bytes());
+                        beklenen_kabul += 1;
+                        if v.verify().is_ok() { gercek_kabul += 1; } else { panic!("CORBA tur={}: GERCEK imza reddedildi!", tur); }
+                    }
+                    1 => {
+                        let mut v = signed((1 + rng() % 200) as u8, vec![], 1000 + tur, format!("c{tur}").as_bytes());
+                        if rng() % 2 == 0 { v.tamper_signature([0xAB; 64]); } else { v.tamper_payload(b"tahrif".to_vec()); }
+                        beklenen_red += 1;
+                        if v.verify().is_err() { gercek_red += 1; } else { panic!("CORBA tur={}: SAHTE imza gecti!", tur); }
+                    }
+                    2 => {
+                        let ayni = TokenKaydi::new(t_adres, t_sembol);
+                        beklenen_kabul += 1;
+                        if !ayni_sembol_farkli_adres(&gercek_token, &ayni) { gercek_kabul += 1; } else { panic!("CORBA tur={}: GERCEK token taklit sayildi!", tur); }
+                    }
+                    3 => {
+                        let mut sahte_adres = [0u8; 20]; for x in sahte_adres.iter_mut() { *x = (rng() & 0xff) as u8; }
+                        while sahte_adres == t_adres { sahte_adres[0] = sahte_adres[0].wrapping_add(1); }
+                        let taklit = TokenKaydi::new(sahte_adres, t_sembol);
+                        beklenen_red += 1;
+                        if ayni_sembol_farkli_adres(&gercek_token, &taklit) { gercek_red += 1; } else { panic!("CORBA tur={}: SAHTE token gecti!", tur); }
+                    }
+                    4 => {
+                        beklenen_kabul += 1;
+                        if reg.dogrula(&gercek_belge).is_some() { gercek_kabul += 1; } else { panic!("CORBA tur={}: GERCEK belge reddedildi!", tur); }
+                    }
+                    _ => {
+                        let mut sahte = gercek_belge; let idx = (rng() % 32) as usize; sahte[idx] = sahte[idx].wrapping_add(1);
+                        beklenen_red += 1;
+                        if sahte == gercek_belge || reg.dogrula(&sahte).is_none() { gercek_red += 1; } else { panic!("CORBA tur={}: SAHTE belge gecti!", tur); }
+                    }
+                }
+            }
+        }
+        assert_eq!(beklenen_kabul, gercek_kabul, "kabul sayisi tutmadi");
+        assert_eq!(beklenen_red, gercek_red, "red sayisi tutmadi");
+        eprintln!("CORBA OK: {} tur, kabul={} red={} (karisik yukte her oge dogru ayiklandi)", turlar, gercek_kabul, gercek_red);
+    }
+
+    #[test]
     fn dogrula_test() {
         let senaryolar: Vec<(usize, usize)> = vec![(3, 2), (5, 3), (8, 4), (4, 6), (10, 2), (6, 5)];
         for (kat, w) in senaryolar {
