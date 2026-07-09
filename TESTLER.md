@@ -127,3 +127,10 @@ payload, asiri parent. verify() hepsini reddetmeli.
 Neden: vertex dogrulama, zincire giren HER blogun ilk guvenlik kapisidir. Bu
 kalkan delinirse kotu/sahte bloklar zincire girer. Blok girisinin temel savunmasi.
 Son: 2.000 tur, tum bozuk vertex'ler reddedildi OK.
+
+### 9. fuzz_kalkan_bakiye - bakiye/transfer kalkani
+Ne yapar: binlerce rastgele transfer - EN KRITIK invariant: her transfer sonrasi
+toplam ARZ SABIT (para yoktan var olmaz, yok olmaz); yetersiz bakiye reddedilir
+(bakiye degismez); basarili transferde gonderenden tam duser, aliciya tam eklenir.
+Neden: nonce (test 7) cift-harcamayi engeller; bu test paranin BUTUNLUGUNU korur.
+Ikisi birlikte para tutan sistemin temel guvenligi. Son: 2.000 tur, arz korundu OK.
