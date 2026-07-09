@@ -1195,4 +1195,44 @@ mod evm_transfer_tests {
             "tahrif edilen transfer ayni gondereni vermemeli"
         );
     }
+
+    #[test]
+    #[ignore]
+    fn fuzz_kalkan_sahte_token() {
+        // ADVERSARIAL FUZZ: sahte token kalkani (ayni_sembol_farkli_adres).
+        let turlar: u64 = std::env::var("KALKAN_TUR").ok().and_then(|x| x.parse().ok()).unwrap_or(2000);
+        let mut lcg: u64 = 0x14057B7EF767814F;
+        let mut rng = || { lcg = lcg.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); lcg };
+        for tur in 0..turlar {
+            if tur % 1000 == 0 { eprintln!("[kalkan] {}/{} tur", tur, turlar); }
+            let mut adr = |rng: &mut dyn FnMut() -> u64| { let mut a = [0u8; ADDR_LEN]; for x in a.iter_mut() { *x = (rng() & 0xff) as u8; } a };
+            let mut smb = |rng: &mut dyn FnMut() -> u64| { let mut s = [0u8; SYMBOL_LEN]; for x in s.iter_mut() { *x = (rng() & 0xff) as u8; } s };
+            let adres_a = adr(&mut rng);
+            let mut adres_b = adr(&mut rng);
+            while adres_b == adres_a { adres_b = adr(&mut rng); }
+            let sembol = smb(&mut rng);
+            let mut sembol2 = smb(&mut rng);
+            while sembol2 == sembol { sembol2 = smb(&mut rng); }
+            let gercek = TokenKaydi::new(adres_a, sembol);
+            // 1: ayni sembol, farkli adres -> TAKLIT (true)
+            let taklit = TokenKaydi::new(adres_b, sembol);
+            if !ayni_sembol_farkli_adres(&gercek, &taklit) {
+                panic!("KALKAN DELINDI tur={}: sahte token (ayni sembol farkli adres) gecti!", tur);
+            }
+            // 2: ayni adres -> TAKLIT DEGIL (false)
+            if ayni_sembol_farkli_adres(&gercek, &TokenKaydi::new(adres_a, sembol)) {
+                panic!("KALKAN YANLIS POZITIF tur={}: gercek token taklit sayildi", tur);
+            }
+            // 3: farkli sembol + farkli adres -> TAKLIT DEGIL (false)
+            if ayni_sembol_farkli_adres(&gercek, &TokenKaydi::new(adres_b, sembol2)) {
+                panic!("KALKAN YANLIS POZITIF tur={}: ayri token taklit sayildi", tur);
+            }
+            // 4: encode/decode round-trip kimligi bozmamali
+            let dec = TokenKaydi::decode(&taklit.encode()).expect("decode basarisiz");
+            if dec.kanonik_adres != taklit.kanonik_adres || dec.sembol != taklit.sembol {
+                panic!("KALKAN CODEC BOZUK tur={}", tur);
+            }
+        }
+        eprintln!("KALKAN OK: {} tur, sahte token korumasi tuttu", turlar);
+    }
 }
