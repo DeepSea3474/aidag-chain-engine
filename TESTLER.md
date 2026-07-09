@@ -119,3 +119,11 @@ adresler bagimsiz.
 Neden: cift-harcama (ayni parayi iki kez kullanmak) bir blockchain'in en temel
 saldirisidir. Nonce sirasi bunu engeller. Para tutan sistemin en kritik kalkani.
 Son: 2.000 tur, replay ve atlama reddedildi OK.
+
+### 8. fuzz_kalkan_gecersiz_vertex - vertex dogrulama kalkani
+Ne yapar: her turda gecerli imzali vertex uretilir (once kabul edildigi kontrol
+edilir), sonra rastgele bozulur: bozuk imza, tahrif payload, sahte id, asiri
+payload, asiri parent. verify() hepsini reddetmeli.
+Neden: vertex dogrulama, zincire giren HER blogun ilk guvenlik kapisidir. Bu
+kalkan delinirse kotu/sahte bloklar zincire girer. Blok girisinin temel savunmasi.
+Son: 2.000 tur, tum bozuk vertex'ler reddedildi OK.
