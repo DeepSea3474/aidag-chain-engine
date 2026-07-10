@@ -134,3 +134,10 @@ toplam ARZ SABIT (para yoktan var olmaz, yok olmaz); yetersiz bakiye reddedilir
 (bakiye degismez); basarili transferde gonderenden tam duser, aliciya tam eklenir.
 Neden: nonce (test 7) cift-harcamayi engeller; bu test paranin BUTUNLUGUNU korur.
 Ikisi birlikte para tutan sistemin temel guvenligi. Son: 2.000 tur, arz korundu OK.
+
+## BAGIMLILIK DENETIMI (cargo audit)
+cargo audit calistirildi. Cikan 5 uyari (rand, tokio, derivative, paste,
+proc-macro-error2) DOLAYLI bagimliliklardan gelir (revm, tokio, alloy'un ic
+bagimliliklari) ya da "unmaintained" bildirimidir. Kendi kodumuzda dogrudan
+guvenlik acigi yok. Bu crate'ler ust bagimliliklar (ozellikle revm) guncellendikce
+duzelecek; takip ediliyor. cargo clippy: gercek bug yok, sadece olu-kod uyarilari.
