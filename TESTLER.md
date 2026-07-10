@@ -151,3 +151,10 @@ MAINNET GEREKSINIMI: tum node'lar AYNI sabit/pinli genesis'ten baslamali (Bitcoi
 gibi gomulu genesis). Bu, genesis.rs + token dagitimi (21M, 6-dilim) ile birlikte
 tasarlanmali; mainnet-oncesi, acele edilmeden. Kod zaten bunu biliyor (lib.rs:
 "gercek mainnet genesis'i pinli/vesting'li olacak").
+
+## GENESIS BAGLAMA PLANI (karar)
+genesis.rs YAZILDI ve test edildi (21M AIDAG, 6-dilim GenesisDagitim). ANCAK henuz
+node'a BAGLI DEGIL (her node kendi gecici genesis'ini uretir). KARAR: gercek cuzdan
+adresleri + vesting + node'a baglama (paylasilan sabit genesis) AUDIT SONRASINA
+birakildi. Sebep: genesis geri alinamaz; adresler/multisig/vesting proje olgunlasip
+audit yapilinca netlesir. Sira: testler -> kod dondur -> audit -> genesis sabitle -> mainnet.
