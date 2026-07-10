@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["AIDAG Chain Contributors"]
 description = "LSC (Light Soulware Chain) - AI destekli, DAG tabanli L1 konsensus motoru."
-license = "Apache-2.0"
+license = "BSL-1.1"
 
 [dependencies]
 blake3 = "=1.5.5"
