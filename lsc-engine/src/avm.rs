@@ -1275,4 +1275,72 @@ mod tests {
         );
         println!("HAM ETH TX ISLE KANIT: imzali tx -> ERC-20 transfer AVM'de calisti.");
     }
+
+    // ============================================================
+    // KUBR — Degerli Maden RWA Token (Altin) AVM entegrasyon testi
+    // 1 KUBR = 1 gram altin. ERC20 + RWA teminat meta-verisi.
+    // ============================================================
+    #[test]
+    fn kubr_altin_rwa_token_avm_de_calisir() {
+        use revm::primitives::{keccak256, U256};
+        let bin_hex = include_str!("kubr_bytecode.hex").trim();
+        let mut deploy_data = hex_decode(bin_hex);
+        let custodian = [0x11u8; 20];
+        let mut cust32 = [0u8; 32];
+        cust32[12..32].copy_from_slice(&custodian);
+        deploy_data.extend_from_slice(&cust32);
+        let ilk_arz = U256::from(1000u64) * U256::from(10u64).pow(U256::from(18u64));
+        let mut arz32 = [0u8; 32];
+        arz32.copy_from_slice(&ilk_arz.to_be_bytes::<32>());
+        deploy_data.extend_from_slice(&arz32);
+        let mut db = AidagDatabase::yeni();
+        let sahip = [0xAAu8; 20];
+        let d = avm_calistir(&mut db, &sahip, &[0u8; 20], 0, &deploy_data, 100).expect("KUBR deploy");
+        let kubr = d.olusan_adres.expect("kontrat adresi");
+        println!("KUBR: deploy -> 0x{}", hex_encode(&kubr));
+        let mut bo = Vec::new();
+        bo.extend_from_slice(&keccak256(b"balanceOf(address)")[0..4]);
+        let mut s32 = [0u8; 32];
+        s32[12..32].copy_from_slice(&sahip);
+        bo.extend_from_slice(&s32);
+        let cikti = avm_call_oku(&db, &[0u8; 20], &kubr, &bo).expect("balanceOf");
+        let bakiye = U256::from_be_slice(&cikti);
+        println!("KUBR: owner bakiyesi = {}", bakiye);
+        assert_eq!(bakiye, ilk_arz, "owner 1000 token (gram) tutmali");
+        let mut pu = Vec::new();
+        pu.extend_from_slice(&keccak256(b"purity()")[0..4]);
+        let cikti = avm_call_oku(&db, &[0u8; 20], &kubr, &pu).expect("purity");
+        assert_eq!(U256::from_be_slice(&cikti), U256::from(9999u64), "saflik 9999 olmali");
+        println!("KUBR: saflik = 9999 (%99.99)");
+        let mut mg = Vec::new();
+        mg.extend_from_slice(&keccak256(b"mgPerToken()")[0..4]);
+        let cikti = avm_call_oku(&db, &[0u8; 20], &kubr, &mg).expect("mgPerToken");
+        assert_eq!(U256::from_be_slice(&cikti), U256::from(1000u64), "1 token = 1000 mg olmali");
+        println!("KUBR: mgPerToken = 1000 (1 gram)");
+        let mut tt = Vec::new();
+        tt.extend_from_slice(&keccak256(b"tamTeminatliMi()")[0..4]);
+        let cikti = avm_call_oku(&db, &[0u8; 20], &kubr, &tt).expect("tamTeminatliMi");
+        assert_eq!(U256::from_be_slice(&cikti), U256::from(1u64), "tam teminatli olmali");
+        println!("KUBR: tam teminatli = evet");
+        let alici = [0xBBu8; 20];
+        let mut tr = Vec::new();
+        tr.extend_from_slice(&keccak256(b"transfer(address,uint256)")[0..4]);
+        let mut a32 = [0u8; 32];
+        a32[12..32].copy_from_slice(&alici);
+        tr.extend_from_slice(&a32);
+        let yarim = U256::from(500u64) * U256::from(10u64).pow(U256::from(18u64));
+        let mut m32 = [0u8; 32];
+        m32.copy_from_slice(&yarim.to_be_bytes::<32>());
+        tr.extend_from_slice(&m32);
+        let _ = avm_calistir(&mut db, &sahip, &kubr, 0, &tr, 101).expect("transfer");
+        let mut bo2 = Vec::new();
+        bo2.extend_from_slice(&keccak256(b"balanceOf(address)")[0..4]);
+        let mut al32 = [0u8; 32];
+        al32[12..32].copy_from_slice(&alici);
+        bo2.extend_from_slice(&al32);
+        let cikti = avm_call_oku(&db, &[0u8; 20], &kubr, &bo2).expect("balanceOf alici");
+        assert_eq!(U256::from_be_slice(&cikti), yarim, "alici 500 token (gram) almali");
+        println!("KUBR KANIT: Altin RWA token AVM'de calisti — deploy, arz, saflik, teminat, transfer hepsi dogru.");
+    }
+
 }
