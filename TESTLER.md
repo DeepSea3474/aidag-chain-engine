@@ -141,3 +141,13 @@ proc-macro-error2) DOLAYLI bagimliliklardan gelir (revm, tokio, alloy'un ic
 bagimliliklari) ya da "unmaintained" bildirimidir. Kendi kodumuzda dogrudan
 guvenlik acigi yok. Bu crate'ler ust bagimliliklar (ozellikle revm) guncellendikce
 duzelecek; takip ediliyor. cargo clippy: gercek bug yok, sadece olu-kod uyarilari.
+
+## COK-NODE AG KESIF NOTU (10 Tem)
+2 node ayri ayri baslatilinca: mDNS kesif, baglanti, pull/push-sync protokolu
+CALISIYOR (peer=1, abone oldu). ANCAK her node KENDI genesis'ini urettigi icin
+(farkli imza anahtari -> farkli genesis) "ikinci genesis reddedildi" ve senkron
+0 vertex entegre etti. Node dogru davraniyor (sahte 2. genesis'i reddetmek guvenli).
+MAINNET GEREKSINIMI: tum node'lar AYNI sabit/pinli genesis'ten baslamali (Bitcoin
+gibi gomulu genesis). Bu, genesis.rs + token dagitimi (21M, 6-dilim) ile birlikte
+tasarlanmali; mainnet-oncesi, acele edilmeden. Kod zaten bunu biliyor (lib.rs:
+"gercek mainnet genesis'i pinli/vesting'li olacak").
