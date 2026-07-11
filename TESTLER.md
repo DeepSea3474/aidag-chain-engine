@@ -158,3 +158,37 @@ node'a BAGLI DEGIL (her node kendi gecici genesis'ini uretir). KARAR: gercek cuz
 adresleri + vesting + node'a baglama (paylasilan sabit genesis) AUDIT SONRASINA
 birakildi. Sebep: genesis geri alinamaz; adresler/multisig/vesting proje olgunlasip
 audit yapilinca netlesir. Sira: testler -> kod dondur -> audit -> genesis sabitle -> mainnet.
+
+## PERFORMANS KANITI (olculmus, tekrarlanabilir)
+
+İki bağımsız test, O(n) lineer ölçeklenmeyi (O(n²) darboğazı YOK) kanıtlar.
+Tüm ölçümler: imza doğrulama + insert + artımlı GHOSTDAG (mavi_boncuk) dahil.
+
+### olcek_egrisi (node.rs)
+| vertex | süre(s) | TPS  |
+|--------|---------|------|
+| 100    | 0.016   | 6199 |
+| 1000   | 0.164   | 6084 |
+| 5000   | 0.805   | 6212 |
+| 10000  | 1.521   | 6573 |
+TPS düşmüyor → DAG büyüme maliyeti yok → O(n) lineer.
+
+### torba_stres (ghostdag.rs)
+| vertex | süre(s) | TPS  |
+|--------|---------|------|
+| 20000  | 3.3     | 6097 |
+| 40000  | 6.7     | 6014 |
+| 80000  | ~13     | ~6200 |
+n 2x → süre 2x (TPS sabit) → O(n) lineer doğrulandı.
+
+### imza_paralel_bench (ghostdag.rs)
+- 100.000 imza: tek çekirdek 14.272/s, paralel 192.627/s (13.5x hızlanma).
+
+### Güvenlik (9 fuzz kalkanı, elle çalıştırma, 149s)
+Hepsi geçer: sahte token, sahte belge, replay, bakiye/çift-harcama,
+çorba (karışık yük), geçersiz vertex, invariant, determinizm, doğrulama.
+
+Çalıştırma:
+- cargo test --release --lib olcek_egrisi -- --ignored --nocapture
+- TORBA_N=20000,40000,80000 cargo test --release --lib torba_stres -- --ignored --nocapture
+- cargo test --release --lib fuzz -- --ignored
