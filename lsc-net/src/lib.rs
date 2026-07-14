@@ -291,6 +291,37 @@ pub async fn run_node(
         }
     }
 
+    // ── MAINNET GENESIS DAGITIMI (6 dilim, pinli) ──────────────────────────
+    // LSC_GENESIS_DAGITIM=1 ise, genesis.rs'teki 6-dilim dagitimi uygulanir.
+    // 6 adres env'den okunur (LSC_GEN_EKOSISTEM ... LSC_GEN_DESTEKCI).
+    // Kapali sistem: toplam TAM 21M olmali (kapali_mi kontrolu).
+    if std::env::var("LSC_GENESIS_DAGITIM").ok().as_deref() == Some("1") {
+        let adr = |k: &str| -> Option<[u8; 20]> {
+            let h = std::env::var(k).ok()?;
+            let b = hex::decode(h.trim().trim_start_matches("0x")).ok()?;
+            if b.len() == 20 { let mut a = [0u8; 20]; a.copy_from_slice(&b); Some(a) } else { None }
+        };
+        let adresler = [
+            adr("LSC_GEN_EKOSISTEM"), adr("LSC_GEN_HAZINE"), adr("LSC_GEN_LIKIDITE"),
+            adr("LSC_GEN_TOPLULUK"), adr("LSC_GEN_KURUCU"), adr("LSC_GEN_DESTEKCI"),
+        ];
+        if adresler.iter().all(|x| x.is_some()) {
+            let a: [[u8;20];6] = std::array::from_fn(|i| adresler[i].unwrap());
+            let dagitim = lsc_engine::genesis::GenesisDagitim::planla(a);
+            if dagitim.kapali_mi() {
+                let mut st = node_state.write().await;
+                for (adres, miktar) in dagitim.dilimler() {
+                    st.test_bakiye_ekle(adres, miktar);
+                }
+                tracing::warn!("GENESIS DAGITIM: 6 dilim yuklendi (toplam 21M AIDAG, kapali sistem).");
+            } else {
+                tracing::error!("GENESIS DAGITIM REDDEDILDI: toplam 21M degil (kapali_mi=false)!");
+            }
+        } else {
+            tracing::error!("GENESIS DAGITIM: 6 adres env'i eksik/gecersiz.");
+        }
+    }
+
     // Bir genesis vertex (parent'siz) uret, imzala, wire ile encode et,
     // kendi DAG state'ine ingest et (vertex 0 -> 1). Yayin 4b'de.
     let now = std::time::SystemTime::now()
