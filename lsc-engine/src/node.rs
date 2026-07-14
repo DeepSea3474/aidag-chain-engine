@@ -64,6 +64,16 @@ pub struct NodeState {
     /// TUTULMAZ; her cagrida lsc_registry'den yuklenir (tek kaynak = lsc_registry).
     /// Kod+storage DAG replay'i ile yeniden kurulur (vertex'ler kalici).
     avm_db: crate::avm::AidagDatabase,
+
+    /// BASLANGIC DAGITIMI (genesis / test). DAG'da vertex karsiligi YOK,
+    /// bu yuzden durum yeniden uygulanirken ONCE bunlar yuklenir.
+    baslangic_bakiyeler: Vec<([u8; 20], crate::registry::Tutar)>,
+    /// Baslangic LSC dagitimi (DAG disi).
+    baslangic_lsc: Vec<([u8; 20], crate::registry::Tutar)>,
+    /// DAG disi eklenen stake kayitlari (test/bootstrap).
+    baslangic_stake: Vec<crate::tx::StakeKaydi>,
+    /// DAG disi eklenen vesting kayitlari.
+    baslangic_vesting: Vec<([u8; 20], crate::registry::VestingKaydi)>,
 }
 
 impl NodeState {
@@ -87,6 +97,10 @@ impl NodeState {
             faucet_owner: None,
             faucet_verildi: std::collections::HashSet::new(),
             avm_db: crate::avm::AidagDatabase::yeni(),
+            baslangic_bakiyeler: Vec::new(),
+            baslangic_lsc: Vec::new(),
+            baslangic_stake: Vec::new(),
+            baslangic_vesting: Vec::new(),
         }
     }
 
@@ -130,6 +144,7 @@ impl NodeState {
 
     /// STAKING: bir adresin teminatini ekle (birikimli). Donus: yeni toplam.
     pub fn stake_ekle(&mut self, kayit: crate::tx::StakeKaydi) -> crate::registry::Tutar {
+        self.baslangic_stake.push(kayit.clone());
         self.stake_registry.stake_ekle(kayit)
     }
 
@@ -156,12 +171,14 @@ impl NodeState {
         adres: [u8; 20],
         miktar: crate::registry::Tutar,
     ) -> crate::registry::Tutar {
+        self.baslangic_bakiyeler.push((adres, miktar));
         self.bakiye_registry.test_bakiye_ekle(adres, miktar)
     }
 
     /// GENESIS VESTING: bir adrese vesting plani ekle (kurucu/destekci/likidite).
     /// Kilitli AIDAG transfer edilemez; cliff+dogrusal ile zamanla acilir.
     pub fn vesting_ekle(&mut self, adres: [u8; 20], kayit: crate::registry::VestingKaydi) {
+        self.baslangic_vesting.push((adres, kayit.clone()));
         self.bakiye_registry.vesting_ekle(adres, kayit);
     }
 
@@ -196,6 +213,7 @@ impl NodeState {
         adres: [u8; 20],
         miktar: crate::registry::Tutar,
     ) -> crate::registry::Tutar {
+        self.baslangic_lsc.push((adres, miktar));
         self.lsc_registry.test_bakiye_ekle(adres, miktar)
     }
 
@@ -590,10 +608,62 @@ impl NodeState {
         }
         self.ghostdag.update_one(&self.graph, &yeni_id);
 
-        // Entegrasyon basarili -> KALKAN/STAKING'e yonlendir (imzalayan ile).
-        self.kalkana_yonlendir(&payload_kopya, &signer_kopya, zaman_kopya, synced);
+        // KONSENSUS DUZELTMESI: state ARTIK burada uygulanmiyor.
+        // Neden: ingest sirasi = ag gelis sirasi. Iki node ayni vertex'leri
+        // farkli sirada alirsa FARKLI duruma giderdi (konsensus bolunmesi).
+        // Dogrusu: state, ghostdag.total_order()'dan TURETILIR (belirlenimci).
+        let _ = (&payload_kopya, &signer_kopya, zaman_kopya, synced);
+        self.durumu_yeniden_uygula();
 
         Ok(())
+    }
+
+    /// DURUMU YENIDEN UYGULA — konsensus belirlenimciligi.
+    ///
+    /// Tum turetilmis defterleri SIFIRLAR, sonra ghostdag'in BELIRLENIMCI
+    /// toplam siralamasi (total_order) ile vertex'leri bastan isler.
+    /// Boylece durum, vertex'lerin AG'DAN GELIS SIRASINA degil, DAG'in
+    /// uzlasilmis sirasina baglidir -> iki node AYNI duruma yakinsar.
+    ///
+    /// NOT: naif O(n) — her ingest'te tam yeniden hesap. Once DOGRULUK.
+    /// Artimli hale getirme (sadece reorg olan kismi yeniden uygula) sonraki adim.
+    fn durumu_yeniden_uygula(&mut self) {
+        // 1) Turetilmis defterleri sifirla.
+        self.token_registry = crate::registry::TokenRegistry::yeni();
+        self.stake_registry = crate::registry::StakeRegistry::yeni();
+        self.bakiye_registry = crate::registry::BakiyeRegistry::yeni();
+        self.lsc_registry = crate::registry::BakiyeRegistry::yeni();
+        self.nonce_registry = crate::registry::NonceRegistry::yeni();
+        self.record_registry = crate::registry::RecordRegistry::yeni();
+        self.kurum_registry = crate::registry::KurumRegistry::yeni();
+        self.eslestirme_registry = crate::registry::EslestirmeRegistry::yeni();
+        self.on_satis_registry = crate::registry::OnSatisRegistry::yeni();
+        self.faucet_verildi = std::collections::HashSet::new();
+        self.avm_db = crate::avm::AidagDatabase::yeni();
+
+        // 2) BASLANGIC DURUMU (genesis/test) — DAG'da vertex karsiligi YOK.
+        for (adres, miktar) in self.baslangic_bakiyeler.clone() {
+            self.bakiye_registry.test_bakiye_ekle(adres, miktar);
+        }
+        for (adres, miktar) in self.baslangic_lsc.clone() {
+            self.lsc_registry.test_bakiye_ekle(adres, miktar);
+        }
+        for kayit in self.baslangic_stake.clone() {
+            self.stake_registry.stake_ekle(kayit);
+        }
+        for (adres, kayit) in self.baslangic_vesting.clone() {
+            self.bakiye_registry.vesting_ekle(adres, kayit);
+        }
+
+        // 3) BELIRLENIMCI sira ile tum vertex'leri yeniden isle.
+        let sira = self.ghostdag.total_order(&self.graph);
+        for id in sira {
+            let Some(v) = self.graph.get(&id) else { continue };
+            let payload: Vec<u8> = v.payload().to_vec();
+            let signer: [u8; 32] = *v.public_key();
+            let zaman: u64 = v.timestamp();
+            self.kalkana_yonlendir(&payload, &signer, zaman, true);
+        }
     }
 
     /// KALKAN yonlendirme: payload tip=2 (TokenKaydi) ise registry'ye kaydet.
@@ -1123,7 +1193,7 @@ mod tests {
         let adr_b = public_key_to_adres(&sk_b.verifying_key().to_bytes());
         node.stake_ekle(StakeKaydi::new(adr_b, 1000));
         let p2 = TokenKaydi::new([0xBB; 20], sym("USDC")).encode();
-        let v2 = Vertex::new_signed(NET, vec![gid], p2, now + 1, &sk_b).expect("v2");
+        let v2 = Vertex::new_signed(NET, vec![*v1.id()], p2, now + 1, &sk_b).expect("v2");
         node.ingest_networked(&wire::encode(&v2), now + 1);
 
         // KANIT: stake'li olsa bile TAKLIT reddedilir (sahte deftere girmez)
@@ -2016,7 +2086,7 @@ mod tests {
         // 2) AYNI nonce=0 ile FARKLI vertex (timestamp+1) -> REPLAY.
         //    beklenen artik 1; nonce=0 eslesmiyor -> bakiye DEGISMEZ.
         let p_replay = TransferKaydi::new(alici, 300, 0).encode();
-        let v_replay = Vertex::new_signed(NET, vec![gid], p_replay, now + 1, &sk5).expect("vr");
+        let v_replay = Vertex::new_signed(NET, vec![*v0.id()], p_replay, now + 1, &sk5).expect("vr");
         node.ingest_networked(&wire::encode(&v_replay), now + 1);
         assert_eq!(
             node.bakiye(&gonderen),
@@ -2028,7 +2098,7 @@ mod tests {
 
         // 3) nonce=1 ile YENI transfer -> basarili (sira ilerliyor).
         let p1 = TransferKaydi::new(alici, 200, 1).encode();
-        let v1 = Vertex::new_signed(NET, vec![gid], p1, now + 2, &sk5).expect("v1");
+        let v1 = Vertex::new_signed(NET, vec![*v_replay.id()], p1, now + 2, &sk5).expect("v1");
         node.ingest_networked(&wire::encode(&v1), now + 2);
         assert_eq!(node.bakiye(&gonderen), 500, "ikinci gecerli transfer dustu");
         assert_eq!(node.bakiye(&alici), 500);
@@ -2036,7 +2106,7 @@ mod tests {
 
         // 4) Yanlis (atlamali) nonce=5 -> reddedilir, bakiye degismez.
         let p5 = TransferKaydi::new(alici, 100, 5).encode();
-        let v5 = Vertex::new_signed(NET, vec![gid], p5, now + 3, &sk5).expect("v5");
+        let v5 = Vertex::new_signed(NET, vec![*v1.id()], p5, now + 3, &sk5).expect("v5");
         node.ingest_networked(&wire::encode(&v5), now + 3);
         assert_eq!(
             node.bakiye(&gonderen),
@@ -2078,7 +2148,7 @@ mod tests {
 
         // Ayni nonce=0 ile gecerli (50) transfer -> simdi basarili.
         let p2 = TransferKaydi::new(alici, 50, 0).encode();
-        let v2 = Vertex::new_signed(NET, vec![gid], p2, now + 1, &sk6).expect("v2");
+        let v2 = Vertex::new_signed(NET, vec![*v.id()], p2, now + 1, &sk6).expect("v2");
         node.ingest_networked(&wire::encode(&v2), now + 1);
         assert_eq!(
             node.bakiye(&gonderen),
@@ -2828,5 +2898,164 @@ mod tests {
         );
         assert_eq!(node.beklenen_nonce(&gonderen), 1, "gonderen nonce ilerledi");
         assert_eq!(node.toplam_bakiye_arzi(), arz_basta, "TOPLAM ARZ KORUNDU");
+    }
+
+    // ===============================================================
+    // COK-NODE ENTEGRASYON TESTLERI
+    // Iki bagimsiz NodeState + AYNI genesis. Vertex'ler karsilikli
+    // beslenir. Kritik soru: ayni vertex kumesi FARKLI SIRADA gelirse
+    // iki node AYNI duruma mi yakinsar?
+    // ===============================================================
+
+    fn iki_node(now: u64) -> (NodeState, NodeState, VertexId) {
+        let mut n1 = NodeState::new_devnet(NET);
+        let mut n2 = NodeState::new_devnet(NET);
+        let (gen, gid) = genesis_bytes(1, now);
+        n1.ingest_networked(&gen, now);
+        n2.ingest_networked(&gen, now);
+        (n1, n2, gid)
+    }
+
+    #[test]
+    fn cok_node_senkron_ayni_duruma_yakinsar() {
+        use crate::registry::public_key_to_adres;
+        use crate::tx::TransferKaydi;
+        let now = 1_000_000;
+        let (mut n1, mut n2, gid) = iki_node(now);
+        let sk = SigningKey::from_bytes(&[11u8; 32]);
+        let gonderen = public_key_to_adres(&sk.verifying_key().to_bytes());
+        let alici = [0xA1; 20];
+        n1.test_bakiye_ekle(gonderen, 1000);
+        n2.test_bakiye_ekle(gonderen, 1000);
+
+        let p = TransferKaydi::new(alici, 300, 0).encode();
+        let v = Vertex::new_signed(NET, vec![gid], p, now, &sk).expect("v");
+        let bytes = wire::encode(&v);
+
+        n1.ingest_networked(&bytes, now);
+        assert_eq!(n1.bakiye(&gonderen), 700);
+        assert_eq!(n2.bakiye(&gonderen), 1000, "node2 henuz gormedi");
+
+        n2.ingest_networked(&bytes, now);
+        assert_eq!(n1.bakiye(&gonderen), n2.bakiye(&gonderen), "gonderen ayni");
+        assert_eq!(n1.bakiye(&alici), n2.bakiye(&alici), "alici ayni");
+        assert_eq!(
+            n1.beklenen_nonce(&gonderen),
+            n2.beklenen_nonce(&gonderen),
+            "nonce ayni"
+        );
+        assert_eq!(n1.toplam_bakiye_arzi(), n2.toplam_bakiye_arzi(), "arz ayni");
+    }
+
+    // EN KRITIK: ayni nonce, iki farkli transfer, iki node, TERS SIRA.
+    #[test]
+    fn cok_node_eszamanli_ayni_nonce_cift_harcama() {
+        use crate::registry::public_key_to_adres;
+        use crate::tx::TransferKaydi;
+        let now = 1_000_000;
+        let (mut n1, mut n2, gid) = iki_node(now);
+        let sk = SigningKey::from_bytes(&[12u8; 32]);
+        let gonderen = public_key_to_adres(&sk.verifying_key().to_bytes());
+        let alici_a = [0xAA; 20];
+        let alici_b = [0xBB; 20];
+        n1.test_bakiye_ekle(gonderen, 1000);
+        n2.test_bakiye_ekle(gonderen, 1000);
+
+        let pa = TransferKaydi::new(alici_a, 800, 0).encode();
+        let va = Vertex::new_signed(NET, vec![gid], pa, now, &sk).expect("va");
+        let ba = wire::encode(&va);
+
+        let pb = TransferKaydi::new(alici_b, 800, 0).encode();
+        let vb = Vertex::new_signed(NET, vec![gid], pb, now + 1, &sk).expect("vb");
+        let bb = wire::encode(&vb);
+
+        // Bolunme: farkli node'lar farkli vertex'i once gorur.
+        n1.ingest_networked(&ba, now);
+        n2.ingest_networked(&bb, now + 1);
+
+        // Birlesme: ikisi de digerini gorur (TERS SIRALARDA).
+        n1.ingest_networked(&bb, now + 1);
+        n2.ingest_networked(&ba, now);
+
+        assert_eq!(n1.toplam_bakiye_arzi(), 1000, "node1: ARZ SABIT");
+        assert_eq!(n2.toplam_bakiye_arzi(), 1000, "node2: ARZ SABIT");
+
+        let a1 = n1.bakiye(&alici_a);
+        let b1 = n1.bakiye(&alici_b);
+        assert!(
+            (a1 == 800 && b1 == 0) || (a1 == 0 && b1 == 800),
+            "node1: TAM OLARAK BIRI uygulanmali (a={a1}, b={b1})"
+        );
+        assert_eq!(n1.bakiye(&gonderen), 200, "node1: gonderen 200");
+
+        assert_eq!(n1.bakiye(&alici_a), n2.bakiye(&alici_a), "YAKINSAMA alici_a");
+        assert_eq!(n1.bakiye(&alici_b), n2.bakiye(&alici_b), "YAKINSAMA alici_b");
+        assert_eq!(
+            n1.bakiye(&gonderen),
+            n2.bakiye(&gonderen),
+            "YAKINSAMA gonderen"
+        );
+        assert_eq!(n1.beklenen_nonce(&gonderen), 1, "nonce bir kez ilerledi");
+        assert_eq!(n2.beklenen_nonce(&gonderen), 1, "nonce bir kez ilerledi");
+    }
+
+    // BOLUNME + BIRLESME: ayri kollar, sonra merge.
+    #[test]
+    fn cok_node_bolunme_birlesme_yakinsar() {
+        use crate::registry::public_key_to_adres;
+        use crate::tx::TransferKaydi;
+        let now = 1_000_000;
+        let (mut n1, mut n2, gid) = iki_node(now);
+        let sk_x = SigningKey::from_bytes(&[13u8; 32]);
+        let sk_y = SigningKey::from_bytes(&[14u8; 32]);
+        let x = public_key_to_adres(&sk_x.verifying_key().to_bytes());
+        let y = public_key_to_adres(&sk_y.verifying_key().to_bytes());
+        let hedef = [0xCC; 20];
+
+        n1.test_bakiye_ekle(x, 500);
+        n1.test_bakiye_ekle(y, 500);
+        n2.test_bakiye_ekle(x, 500);
+        n2.test_bakiye_ekle(y, 500);
+
+        let px = TransferKaydi::new(hedef, 100, 0).encode();
+        let vx = Vertex::new_signed(NET, vec![gid], px, now, &sk_x).expect("vx");
+        let bx = wire::encode(&vx);
+
+        let py = TransferKaydi::new(hedef, 200, 0).encode();
+        let vy = Vertex::new_signed(NET, vec![gid], py, now + 1, &sk_y).expect("vy");
+        let by = wire::encode(&vy);
+
+        // BOLUNME
+        n1.ingest_networked(&bx, now);
+        n2.ingest_networked(&by, now + 1);
+        assert_eq!(n1.bakiye(&y), 500, "node1 kol B'yi gormedi");
+        assert_eq!(n2.bakiye(&x), 500, "node2 kol A'yi gormedi");
+
+        // BIRLESME: once iki kol da her iki node'a yayilir...
+        n1.ingest_networked(&by, now + 1);
+        n2.ingest_networked(&bx, now);
+
+        // ...sonra IKISINI DE parent alan bir BIRLESTIRICI vertex gelir.
+        // GHOSTDAG'da kardes tip'ler, onlari birlestiren bir blok gelene
+        // kadar total_order'a GIRMEZ (beklenen davranis). Gercek agda bir
+        // sonraki blok bunu yapar; testte biz uretiyoruz.
+        let sk_m = SigningKey::from_bytes(&[15u8; 32]);
+        let bos = TransferKaydi::new([0x00; 20], 0, 0).encode();
+        // Parent'lar ARTAN id sirasinda olmali (protokol kurali).
+        let mut ebeveynler = vec![*vx.id(), *vy.id()];
+        ebeveynler.sort();
+        let vm = Vertex::new_signed(NET, ebeveynler, bos, now + 2, &sk_m).expect("vm");
+        let bm = wire::encode(&vm);
+        n1.ingest_networked(&bm, now + 2);
+        n2.ingest_networked(&bm, now + 2);
+
+        assert_eq!(n1.bakiye(&x), n2.bakiye(&x), "YAKINSAMA X");
+        assert_eq!(n1.bakiye(&y), n2.bakiye(&y), "YAKINSAMA Y");
+        assert_eq!(n1.bakiye(&hedef), n2.bakiye(&hedef), "YAKINSAMA hedef");
+        assert_eq!(n1.bakiye(&x), 400, "X'ten 100 dustu");
+        assert_eq!(n1.bakiye(&y), 300, "Y'den 200 dustu");
+        assert_eq!(n1.bakiye(&hedef), 300, "hedef 300 aldi");
+        assert_eq!(n1.toplam_bakiye_arzi(), 1000, "node1 arz sabit");
+        assert_eq!(n2.toplam_bakiye_arzi(), 1000, "node2 arz sabit");
     }
 }
