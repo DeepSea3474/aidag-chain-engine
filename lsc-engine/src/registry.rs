@@ -175,12 +175,39 @@ impl StakeRegistry {
 pub struct BakiyeRegistry {
     /// adres -> serbest AIDAG bakiyesi.
     bakiyeler: HashMap<[u8; 20], Tutar>,
+    /// VESTING: adres -> vesting plani. Kilitli kisim transfer EDILEMEZ.
+    vesting: HashMap<[u8; 20], VestingKaydi>,
+    /// Su anki zincir zamani (transfer'de vesting kontrolu icin).
+    simdi_zaman: u64,
+}
+
+/// Vesting plani: cliff + dogrusal acilim (blok/zaman bazli).
+#[derive(Clone, Debug)]
+pub struct VestingKaydi {
+    pub toplam: Tutar,
+    pub baslangic: u64,
+    pub cliff_sure: u64,
+    pub toplam_sure: u64,
+}
+
+impl VestingKaydi {
+    pub fn acilmis(&self, simdi: u64) -> Tutar {
+        if simdi < self.baslangic + self.cliff_sure { return 0; }
+        let gecen = simdi.saturating_sub(self.baslangic);
+        if gecen >= self.toplam_sure { return self.toplam; }
+        self.toplam * (gecen as u128) / (self.toplam_sure as u128)
+    }
+    pub fn kilitli(&self, simdi: u64) -> Tutar {
+        self.toplam.saturating_sub(self.acilmis(simdi))
+    }
 }
 
 impl BakiyeRegistry {
     pub fn yeni() -> Self {
         BakiyeRegistry {
             bakiyeler: HashMap::new(),
+            vesting: HashMap::new(),
+            simdi_zaman: 0,
         }
     }
 
@@ -195,6 +222,19 @@ impl BakiyeRegistry {
         let b = self.bakiyeler.entry(adres).or_insert(0);
         *b = b.saturating_add(miktar);
         *b
+    }
+
+    /// VESTING: bir adrese vesting plani ekle.
+    pub fn vesting_ekle(&mut self, adres: [u8; 20], kayit: VestingKaydi) {
+        self.vesting.insert(adres, kayit);
+    }
+    /// Bir adresin su an KILITLI miktari.
+    pub fn vesting_kilitli(&self, adres: &[u8; 20], simdi: u64) -> Tutar {
+        self.vesting.get(adres).map(|v| v.kilitli(simdi)).unwrap_or(0)
+    }
+    /// Zincir zamanini ayarla (transfer'de vesting kontrolu icin).
+    pub fn zaman_ayarla(&mut self, simdi: u64) {
+        self.simdi_zaman = simdi;
     }
 
     /// TRANSFER: gonderenden alici'ya `miktar` AIDAG aktar.
@@ -214,9 +254,12 @@ impl BakiyeRegistry {
             return TransferSonuc::GecersizMiktar;
         }
         let gonderen_bakiye = self.bakiye(gonderen);
-        if gonderen_bakiye < miktar {
+        // VESTING KILIT: kilitli kisim harcanamaz.
+        let kilitli = self.vesting_kilitli(gonderen, self.simdi_zaman);
+        let harcanabilir = gonderen_bakiye.saturating_sub(kilitli);
+        if harcanabilir < miktar {
             return TransferSonuc::YetersizBakiye {
-                mevcut: gonderen_bakiye,
+                mevcut: harcanabilir,
                 istenen: miktar,
             };
         }
@@ -435,6 +478,34 @@ impl NonceRegistry {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn vesting_kilitli_transfer_edilemez() {
+        let mut reg = BakiyeRegistry::yeni();
+        let kurucu = [0x11u8; 20];
+        let alici = [0x22u8; 20];
+        reg.test_bakiye_ekle(kurucu, 1000);
+        let baslangic = 1_000_000u64;
+        reg.vesting_ekle(kurucu, VestingKaydi {
+            toplam: 1000,
+            baslangic,
+            cliff_sure: 180 * 86400,
+            toplam_sure: 730 * 86400,
+        });
+        // Cliff icinde (3. ay) -> kilitli, transfer REDDEDILMELI
+        reg.zaman_ayarla(baslangic + 90 * 86400);
+        let s1 = reg.transfer(&kurucu, &alici, 100);
+        assert!(matches!(s1, TransferSonuc::YetersizBakiye { .. }),
+            "cliff icinde -> transfer reddedilmeli");
+        // 2 yil sonra -> acildi, transfer BASARILI
+        reg.zaman_ayarla(baslangic + 730 * 86400);
+        let s2 = reg.transfer(&kurucu, &alici, 100);
+        assert!(matches!(s2, TransferSonuc::Basarili { .. }),
+            "vesting bitti -> transfer basarili");
+        // Yari yolda kismen kilitli
+        let k = reg.vesting_kilitli(&kurucu, baslangic + 365 * 86400);
+        assert!(k > 0, "yari yolda kismen kilitli olmali");
+    }
     use super::*;
 
     fn sym(s: &str) -> [u8; 8] {
