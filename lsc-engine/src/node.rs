@@ -159,6 +159,22 @@ impl NodeState {
         self.bakiye_registry.test_bakiye_ekle(adres, miktar)
     }
 
+    /// GENESIS VESTING: bir adrese vesting plani ekle (kurucu/destekci/likidite).
+    /// Kilitli AIDAG transfer edilemez; cliff+dogrusal ile zamanla acilir.
+    pub fn vesting_ekle(&mut self, adres: [u8; 20], kayit: crate::registry::VestingKaydi) {
+        self.bakiye_registry.vesting_ekle(adres, kayit);
+    }
+
+    /// Zincir zamanini bakiye_registry'ye ver (transfer'de vesting kontrolu).
+    pub fn vesting_zaman_ayarla(&mut self, simdi: u64) {
+        self.bakiye_registry.zaman_ayarla(simdi);
+    }
+
+    /// Bir adresin su an kilitli (vesting) miktari.
+    pub fn vesting_kilitli(&self, adres: &[u8; 20], simdi: u64) -> crate::registry::Tutar {
+        self.bakiye_registry.vesting_kilitli(adres, simdi)
+    }
+
     /// Toplam serbest AIDAG arzi (bakiye defteri). Test/denetim.
     pub fn toplam_bakiye_arzi(&self) -> crate::registry::Tutar {
         self.bakiye_registry.toplam_arz()

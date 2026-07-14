@@ -310,10 +310,36 @@ pub async fn run_node(
             let dagitim = lsc_engine::genesis::GenesisDagitim::planla(a);
             if dagitim.kapali_mi() {
                 let mut st = node_state.write().await;
-                for (adres, miktar) in dagitim.dilimler() {
-                    st.test_bakiye_ekle(adres, miktar);
+                // Vesting baslangici: simdiki zincir zamani
+                let vesting_bas = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs()).unwrap_or(0);
+                let cliff_6ay: u64 = 180 * 86400;
+                let sure_2yil: u64 = 730 * 86400;
+
+                // dilimler() sirasi: [ekosistem, hazine, likidite, topluluk, kurucu, destekci]
+                let dilim_list = dagitim.dilimler();
+                for (idx, (adres, miktar)) in dilim_list.iter().enumerate() {
+                    st.test_bakiye_ekle(*adres, *miktar);
+                    // KILITLI dilimler: likidite(2), kurucu(4), destekci(5)
+                    match idx {
+                        2 => { // likidite: 2 yil dogrusal (cliff yok, DEX esnekligi)
+                            st.vesting_ekle(*adres, lsc_engine::registry::VestingKaydi {
+                                toplam: *miktar, baslangic: vesting_bas,
+                                cliff_sure: 0, toplam_sure: sure_2yil,
+                            });
+                        }
+                        4 | 5 => { // kurucu + destekci: 6 ay cliff + 2 yil
+                            st.vesting_ekle(*adres, lsc_engine::registry::VestingKaydi {
+                                toplam: *miktar, baslangic: vesting_bas,
+                                cliff_sure: cliff_6ay, toplam_sure: sure_2yil,
+                            });
+                        }
+                        _ => {} // ekosistem(0), hazine(1), topluluk(3): acik (vesting yok)
+                    }
                 }
-                tracing::warn!("GENESIS DAGITIM: 6 dilim yuklendi (toplam 21M AIDAG, kapali sistem).");
+                st.vesting_zaman_ayarla(vesting_bas);
+                tracing::warn!("GENESIS DAGITIM: 6 dilim yuklendi (21M). VESTING: likidite/kurucu/destekci kilitli.");
             } else {
                 tracing::error!("GENESIS DAGITIM REDDEDILDI: toplam 21M degil (kapali_mi=false)!");
             }
