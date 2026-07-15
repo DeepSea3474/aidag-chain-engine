@@ -74,6 +74,9 @@ pub struct NodeState {
     baslangic_stake: Vec<crate::tx::StakeKaydi>,
     /// DAG disi eklenen vesting kayitlari.
     baslangic_vesting: Vec<([u8; 20], crate::registry::VestingKaydi)>,
+    /// ARTIMLI: en son uygulanan total_order. Yeni sira bunun uzantisiysa
+    /// (append) sadece kuyruk islenir; degilse (reorg) tam yeniden hesap.
+    son_uygulanan_sira: Vec<VertexId>,
 }
 
 impl NodeState {
@@ -101,6 +104,7 @@ impl NodeState {
             baslangic_lsc: Vec::new(),
             baslangic_stake: Vec::new(),
             baslangic_vesting: Vec::new(),
+            son_uygulanan_sira: Vec::new(),
         }
     }
 
@@ -628,6 +632,36 @@ impl NodeState {
     /// NOT: naif O(n) — her ingest'te tam yeniden hesap. Once DOGRULUK.
     /// Artimli hale getirme (sadece reorg olan kismi yeniden uygula) sonraki adim.
     fn durumu_yeniden_uygula(&mut self) {
+        let yeni_sira = self.ghostdag.total_order(&self.graph);
+
+        // APPEND FAST-PATH: yeni sira, son uygulanan siranin uzantisi mi?
+        // Oyleyse onceki state gecerli; sadece YENI kuyrugu isle (sifirlama yok).
+        let onceki = &self.son_uygulanan_sira;
+        let append_mi = yeni_sira.len() >= onceki.len()
+            && yeni_sira[..onceki.len()] == onceki[..];
+
+        if append_mi && !onceki.is_empty() {
+            let baslangic = onceki.len();
+            for id in &yeni_sira[baslangic..] {
+                if let Some(v) = self.graph.get(id) {
+                    let payload: Vec<u8> = v.payload().to_vec();
+                    let signer: [u8; 32] = *v.public_key();
+                    let zaman: u64 = v.timestamp();
+                    self.kalkana_yonlendir(&payload, &signer, zaman, false);
+                }
+            }
+            self.son_uygulanan_sira = yeni_sira;
+            return;
+        }
+
+        // REORG (veya ilk kez): TAM yeniden hesap.
+        self.tam_yeniden_uygula(yeni_sira);
+    }
+
+    /// TAM yeniden hesap: tum defterleri sifirla, baslangic durumunu yukle,
+    /// verilen siradaki TUM vertex'leri bastan isle. Reorg'da veya ilk
+    /// uygulamada cagrilir. HER ZAMAN dogru (yavas yol).
+    fn tam_yeniden_uygula(&mut self, sira: Vec<VertexId>) {
         // 1) Turetilmis defterleri sifirla.
         self.token_registry = crate::registry::TokenRegistry::yeni();
         self.stake_registry = crate::registry::StakeRegistry::yeni();
@@ -656,18 +690,16 @@ impl NodeState {
         }
 
         // 3) BELIRLENIMCI sira ile tum vertex'leri yeniden isle.
-        let sira = self.ghostdag.total_order(&self.graph);
-        for id in sira {
-            let Some(v) = self.graph.get(&id) else { continue };
+        for id in &sira {
+            let Some(v) = self.graph.get(id) else { continue };
             let payload: Vec<u8> = v.payload().to_vec();
             let signer: [u8; 32] = *v.public_key();
             let zaman: u64 = v.timestamp();
-            // synced=FALSE: bu bir disk-replay'i DEGIL, state'in sifirdan TAM
-            // KURALLARLA yeniden hesabi. Gas kesilmeli, nonce ilerlemeli,
-            // bakiye kontrol edilmeli. (synced=true dali gas'i atlar — o dal
-            // diskten yukleme icin; bkz. kalkana_yonlendir AVM replay kolu.)
+            // synced=FALSE: disk-replay DEGIL; state'in sifirdan TAM KURALLARLA
+            // yeniden hesabi (gas kesilir, nonce ilerler, bakiye kontrol edilir).
             self.kalkana_yonlendir(&payload, &signer, zaman, false);
         }
+        self.son_uygulanan_sira = sira;
     }
 
     /// KALKAN yonlendirme: payload tip=2 (TokenKaydi) ise registry'ye kaydet.
@@ -3071,5 +3103,90 @@ mod tests {
         assert_eq!(n1.bakiye(&hedef), 300, "hedef 300 aldi");
         assert_eq!(n1.toplam_bakiye_arzi(), 1000, "node1 arz sabit");
         assert_eq!(n2.toplam_bakiye_arzi(), 1000, "node2 arz sabit");
+    }
+
+
+
+    // INVARIANT: artimli (append fast-path + reorg fallback) sonucu, HER ZAMAN
+    // tam-yeniden-hesap ile AYNI olmali. Rastgele DAG yapilari uret; her
+    // adimda iki node karsilastir: (A) artimli yol (normal ingest),
+    // (B) ayni vertex'leri TAMAMEN sifirdan alan taze node. Bakiye/nonce/arz
+    // birebir esit olmali. Esit degilse artimli optimizasyon BOZUK demektir.
+    #[test]
+    fn artimli_esittir_tam_yeniden_hesap() {
+        use crate::tx::TransferKaydi;
+        let net = NET;
+        let now = 1_000_000u64;
+
+        // Deterministik pseudo-random (sabit tohum -> tekrarlanabilir).
+        let mut rng: u64 = 0x1234_5678_9abc_def0;
+        let mut next = || { rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17; rng };
+
+        let sk = SigningKey::from_bytes(&[9u8; 32]);
+        let gonderen = crate::registry::public_key_to_adres(&sk.verifying_key().to_bytes());
+
+        // ARTIMLI node (normal ingest yolu = append fast-path + reorg fallback).
+        let mut a = NodeState::new_devnet(net);
+        let (gen, gid) = genesis_bytes(1, now);
+        a.ingest_networked(&gen, now);
+        a.test_bakiye_ekle(gonderen, 1_000_000);
+
+        // Uretilen tum vertex baytlari (B node'unu sifirdan kurmak icin).
+        let mut hepsi: Vec<(Vec<u8>, u64)> = Vec::new();
+        let mut tips: Vec<VertexId> = vec![gid];
+        let mut nonce = 0u64;
+
+        for adim in 0..60u64 {
+            // Rastgele 1-2 parent sec (dallanma + birlesme uret).
+            let mut parents: Vec<VertexId> = Vec::new();
+            let p1 = tips[(next() as usize) % tips.len()];
+            parents.push(p1);
+            if tips.len() > 1 && next() % 3 == 0 {
+                let p2 = tips[(next() as usize) % tips.len()];
+                if p2 != p1 { parents.push(p2); }
+            }
+            parents.sort();
+            parents.dedup();
+
+            let miktar = (1 + (next() % 5)) as u128;
+            let payload = TransferKaydi::new([0x55; 20], miktar, nonce).encode();
+            nonce += 1;
+            let ts = now + adim + 1;
+            let v = Vertex::new_signed(net, parents.clone(), payload, ts, &sk).expect("v");
+            let bytes = wire::encode(&v);
+
+            a.ingest_networked(&bytes, ts);
+            hepsi.push((bytes, ts));
+
+            // tips guncelle: kullanilan parent'lari cikar, yeni id ekle.
+            tips.retain(|t| !parents.contains(t));
+            tips.push(*v.id());
+
+            // ---- B node: SIFIRDAN, ayni vertex'leri sirayla al ----
+            let mut b = NodeState::new_devnet(net);
+            b.ingest_networked(&gen, now);
+            b.test_bakiye_ekle(gonderen, 1_000_000);
+            for (byt, t) in &hepsi {
+                b.ingest_networked(byt, *t);
+            }
+
+            // KARSILASTIR: artimli (a) == tam-hesap (b)
+            assert_eq!(
+                a.bakiye(&gonderen), b.bakiye(&gonderen),
+                "adim {adim}: gonderen bakiye artimli != tam"
+            );
+            assert_eq!(
+                a.bakiye(&[0x55; 20]), b.bakiye(&[0x55; 20]),
+                "adim {adim}: alici bakiye artimli != tam"
+            );
+            assert_eq!(
+                a.beklenen_nonce(&gonderen), b.beklenen_nonce(&gonderen),
+                "adim {adim}: nonce artimli != tam"
+            );
+            assert_eq!(
+                a.toplam_bakiye_arzi(), b.toplam_bakiye_arzi(),
+                "adim {adim}: ARZ artimli != tam"
+            );
+        }
     }
 }
