@@ -662,7 +662,11 @@ impl NodeState {
             let payload: Vec<u8> = v.payload().to_vec();
             let signer: [u8; 32] = *v.public_key();
             let zaman: u64 = v.timestamp();
-            self.kalkana_yonlendir(&payload, &signer, zaman, true);
+            // synced=FALSE: bu bir disk-replay'i DEGIL, state'in sifirdan TAM
+            // KURALLARLA yeniden hesabi. Gas kesilmeli, nonce ilerlemeli,
+            // bakiye kontrol edilmeli. (synced=true dali gas'i atlar — o dal
+            // diskten yukleme icin; bkz. kalkana_yonlendir AVM replay kolu.)
+            self.kalkana_yonlendir(&payload, &signer, zaman, false);
         }
     }
 
@@ -1215,24 +1219,34 @@ mod tests {
         let (gen, gid) = genesis_bytes(1, now);
         node.ingest_networked(&gen, now);
 
-        // Gercek USDC kaydeden (sk_a): stake + dogru kayit
+        // STAKE ARTIK DAG'DAN (tip=3 vertex) — arka kapi DEGIL. Boylece
+        // durum yeniden uygulanirken stake dogru sirada kurulur ve SLASH
+        // (yakma) geri alinmaz. Vertex'ler ZINCIR olusturur (kardes degil).
+
+        // Gercek USDC kaydeden (sk_a): once STAKE vertex'i, sonra token kaydi
         let sk_a = SigningKey::from_bytes(&[10u8; 32]);
         let adr_a = public_key_to_adres(&sk_a.verifying_key().to_bytes());
-        node.stake_ekle(StakeKaydi::new(adr_a, 1000));
+        let ps_a = StakeKaydi::new(adr_a, 1000).encode();
+        let vs_a = Vertex::new_signed(NET, vec![gid], ps_a, now, &sk_a).expect("vs_a");
+        node.ingest_networked(&wire::encode(&vs_a), now);
+        assert_eq!(node.stake_miktari(&adr_a), 1000, "adr_a stake DAG'dan geldi");
+
         let p1 = TokenKaydi::new([0xAA; 20], sym("USDC")).encode();
-        let v1 = Vertex::new_signed(NET, vec![gid], p1, now, &sk_a).expect("v1");
-        node.ingest_networked(&wire::encode(&v1), now);
+        let v1 = Vertex::new_signed(NET, vec![*vs_a.id()], p1, now + 1, &sk_a).expect("v1");
+        node.ingest_networked(&wire::encode(&v1), now + 1);
         assert_eq!(node.token_sayisi(), 1);
 
-        // Sahteci (sk_b): stake eder (5000), sonra TAKLIT USDC kaydetmeye kalkar
+        // Sahteci (sk_b): STAKE vertex'i (5000), sonra TAKLIT USDC kaydi
         let sk_b = SigningKey::from_bytes(&[11u8; 32]);
         let adr_b = public_key_to_adres(&sk_b.verifying_key().to_bytes());
-        node.stake_ekle(StakeKaydi::new(adr_b, 5000));
+        let ps_b = StakeKaydi::new(adr_b, 5000).encode();
+        let vs_b = Vertex::new_signed(NET, vec![*v1.id()], ps_b, now + 2, &sk_b).expect("vs_b");
+        node.ingest_networked(&wire::encode(&vs_b), now + 2);
         assert_eq!(node.stake_miktari(&adr_b), 5000); // stake'i var
 
         let p2 = TokenKaydi::new([0xBB; 20], sym("USDC")).encode(); // ayni sembol farkli adres = TAKLIT
-        let v2 = Vertex::new_signed(NET, vec![gid], p2, now + 1, &sk_b).expect("v2");
-        node.ingest_networked(&wire::encode(&v2), now + 1);
+        let v2 = Vertex::new_signed(NET, vec![*vs_b.id()], p2, now + 3, &sk_b).expect("v2");
+        node.ingest_networked(&wire::encode(&v2), now + 3);
 
         // KANIT 1: taklit token deftere GIRMEDI (hala 1)
         assert_eq!(node.token_sayisi(), 1);
@@ -2508,7 +2522,7 @@ mod tests {
         calldata.extend_from_slice(belge.as_slice());
         let bakiye_call_oncesi = node.lsc_bakiye(&gonderen);
         let p_call = AvmCagri::new(kontrat, 0, 1, calldata).encode();
-        let v1 = Vertex::new_signed(NET, vec![kontrat_parent(&node, gid)], p_call, now, &sk)
+        let v1 = Vertex::new_signed(NET, vec![*v0.id()], p_call, now, &sk)
             .expect("call v");
         node.ingest_networked(&wire::encode(&v1), now);
 
