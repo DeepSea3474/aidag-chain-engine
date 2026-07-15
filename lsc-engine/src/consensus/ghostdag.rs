@@ -453,19 +453,31 @@ impl Ghostdag {
         self.data.insert(id, d);
         let _ta = std::time::Instant::now();
         self.anticone_sizes.insert(id, out);
-        U_ANTI.fetch_add(_ta.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+        U_ANTI.fetch_add(
+            _ta.elapsed().as_nanos() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
         let _ti = std::time::Instant::now();
         if !self.assign_interval_incremental(&id, sp) && !self.lokal_rebuild_dene(&id, sp) {
             self.iv = sp_tree_intervals_gapped(&self.data);
             self.iv_next = self.iv.iter().map(|(k, &(s, _))| (*k, s)).collect();
         }
-        U_IV.fetch_add(_ti.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+        U_IV.fetch_add(
+            _ti.elapsed().as_nanos() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
         let _tt = std::time::Instant::now();
         self.torba_guncelle_tek(graph, &id, sp);
-        U_TORBA.fetch_add(_tt.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+        U_TORBA.fetch_add(
+            _tt.elapsed().as_nanos() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
         let _tu = std::time::Instant::now();
         // [HIZ] up PASIF - kaldirildi: self.up_guncelle_tek(&id, sp);
-        U_UP.fetch_add(_tu.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+        U_UP.fetch_add(
+            _tu.elapsed().as_nanos() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
     }
 
     fn torba_guncelle_tek(&mut self, graph: &Graph, v: &VertexId, sp: Option<VertexId>) {
@@ -1234,7 +1246,10 @@ fn mavi_boncuk(
     let _tm = std::time::Instant::now();
     let mergeset_unordered = ri.mergeset_of(graph, id, sp);
     let ordered_mergeset = topo_order_subset(graph, &mergeset_unordered);
-    T_MERGE.fetch_add(_tm.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+    T_MERGE.fetch_add(
+        _tm.elapsed().as_nanos() as u64,
+        std::sync::atomic::Ordering::Relaxed,
+    );
 
     // SAF-dogrulanmis anticone: u ve cand, saf recursive ile iliskisizse anticone'da.
     // DOGRULUK: saf recursive (torba'ya sorma). Torba, is_ancestor_torba fast-path
@@ -1253,7 +1268,10 @@ fn mavi_boncuk(
     } else {
         blue_set_in_view(data, *sp)
     };
-    T_BLUE.fetch_add(_t0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+    T_BLUE.fetch_add(
+        _t0.elapsed().as_nanos() as u64,
+        std::sync::atomic::Ordering::Relaxed,
+    );
     let _t1 = std::time::Instant::now();
     // [TUGLA2c HIZ] TEK GECIS: sp-zincirini BIR kez yuru, her b'nin ILK (en yakin/
     // guncel) boyutunu topla. Her b icin ayri yuruyus (O(n^2)) YERINE tek yuruyus O(n).
@@ -1274,14 +1292,23 @@ fn mavi_boncuk(
 
     let _tc = std::time::Instant::now();
     for cand in &ordered_mergeset {
-        let anticone: Vec<VertexId> = blue.iter().filter(|u| {
-            if **u != *cand { MB_CAND_SAY.fetch_add(1, std::sync::atomic::Ordering::Relaxed); }
-            **u != *cand && saf_iliskisiz(ri, u, cand)
-        }).copied().collect();
+        let anticone: Vec<VertexId> = blue
+            .iter()
+            .filter(|u| {
+                if **u != *cand {
+                    MB_CAND_SAY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                **u != *cand && saf_iliskisiz(ri, u, cand)
+            })
+            .copied()
+            .collect();
         let mut is_blue = anticone.len() <= k_usize;
         if is_blue {
             for b in &anticone {
-                if *boyut.get(b).unwrap_or(&0) as usize + 1 > k_usize { is_blue = false; break; }
+                if *boyut.get(b).unwrap_or(&0) as usize + 1 > k_usize {
+                    is_blue = false;
+                    break;
+                }
             }
         }
         if is_blue {
@@ -1301,7 +1328,10 @@ fn mavi_boncuk(
             mergeset_reds.push(*cand);
         }
     }
-    T_CAND.fetch_add(_tc.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+    T_CAND.fetch_add(
+        _tc.elapsed().as_nanos() as u64,
+        std::sync::atomic::Ordering::Relaxed,
+    );
     (mergeset_blues, mergeset_reds, boyut)
 }
 
@@ -1330,13 +1360,16 @@ fn compute_vertex_data<W: Weigher>(
 
     if parents.is_empty() {
         // Genesis: mavi yok, score/work 0, seçili ebeveyn yok.
-        return (GhostdagData {
-            blue_score: 0,
-            blue_work: 0,
-            selected_parent: None,
-            mergeset_blues: Vec::new(),
-            mergeset_reds: Vec::new(),
-        }, BTreeMap::new());
+        return (
+            GhostdagData {
+                blue_score: 0,
+                blue_work: 0,
+                selected_parent: None,
+                mergeset_blues: Vec::new(),
+                mergeset_reds: Vec::new(),
+            },
+            BTreeMap::new(),
+        );
     }
 
     // 1. Seçili ebeveyn: max blue_work, beraberlik min-id.
@@ -1369,50 +1402,53 @@ fn compute_vertex_data<W: Weigher>(
     // sp'den boyut devralma). Yoksa (compute_with_weight, toptan) -> eski
     // blue_set_in_view + tum-blue tarama. Ikisi de ayni sonucu verir
     // (fuzz_dogrula 2000 tur + birebir testler kanitladi); bit-bit compute-vs-update korunur.
-    let (mergeset_blues, mergeset_reds, out_opt): (Vec<VertexId>, Vec<VertexId>, Option<BTreeMap<VertexId, u32>>) =
-        if let Some(asz) = anticone_sizes {
-            let (b, r, out_mb) = mavi_boncuk(graph, id, &sp, k, data, &ri, asz);
-            (b, r, Some(out_mb))
+    let (mergeset_blues, mergeset_reds, out_opt): (
+        Vec<VertexId>,
+        Vec<VertexId>,
+        Option<BTreeMap<VertexId, u32>>,
+    ) = if let Some(asz) = anticone_sizes {
+        let (b, r, out_mb) = mavi_boncuk(graph, id, &sp, k, data, &ri, asz);
+        (b, r, Some(out_mb))
+    } else {
+        let mut blue: BTreeSet<VertexId> = if ordered_mergeset.is_empty() {
+            BTreeSet::new()
         } else {
-            let mut blue: BTreeSet<VertexId> = if ordered_mergeset.is_empty() {
-                BTreeSet::new()
-            } else {
-                blue_set_in_view(data, sp)
-            };
-            let mut anticone_size: BTreeMap<VertexId, u32> = BTreeMap::new();
-            if !ordered_mergeset.is_empty() {
-                for b in &blue {
-                    anticone_size.insert(*b, ri.anticone_within_ri(graph, b, &blue).len() as u32);
-                }
-            }
-            let mut mergeset_blues: Vec<VertexId> = Vec::new();
-            let mut mergeset_reds: Vec<VertexId> = Vec::new();
-            for cand in ordered_mergeset {
-                let cand_anticone = ri.anticone_within_ri(graph, &cand, &blue);
-                let k_usize = k as usize;
-                let mut is_blue = cand_anticone.len() <= k_usize;
-                if is_blue {
-                    for b in &cand_anticone {
-                        let cur = *anticone_size.get(b).unwrap_or(&0);
-                        if cur as usize + 1 > k_usize {
-                            is_blue = false;
-                            break;
-                        }
-                    }
-                }
-                if is_blue {
-                    for b in &cand_anticone {
-                        *anticone_size.entry(*b).or_insert(0) += 1;
-                    }
-                    anticone_size.insert(cand, cand_anticone.len() as u32);
-                    blue.insert(cand);
-                    mergeset_blues.push(cand);
-                } else {
-                    mergeset_reds.push(cand);
-                }
-            }
-            (mergeset_blues, mergeset_reds, Some(anticone_size))
+            blue_set_in_view(data, sp)
         };
+        let mut anticone_size: BTreeMap<VertexId, u32> = BTreeMap::new();
+        if !ordered_mergeset.is_empty() {
+            for b in &blue {
+                anticone_size.insert(*b, ri.anticone_within_ri(graph, b, &blue).len() as u32);
+            }
+        }
+        let mut mergeset_blues: Vec<VertexId> = Vec::new();
+        let mut mergeset_reds: Vec<VertexId> = Vec::new();
+        for cand in ordered_mergeset {
+            let cand_anticone = ri.anticone_within_ri(graph, &cand, &blue);
+            let k_usize = k as usize;
+            let mut is_blue = cand_anticone.len() <= k_usize;
+            if is_blue {
+                for b in &cand_anticone {
+                    let cur = *anticone_size.get(b).unwrap_or(&0);
+                    if cur as usize + 1 > k_usize {
+                        is_blue = false;
+                        break;
+                    }
+                }
+            }
+            if is_blue {
+                for b in &cand_anticone {
+                    *anticone_size.entry(*b).or_insert(0) += 1;
+                }
+                anticone_size.insert(cand, cand_anticone.len() as u32);
+                blue.insert(cand);
+                mergeset_blues.push(cand);
+            } else {
+                mergeset_reds.push(cand);
+            }
+        }
+        (mergeset_blues, mergeset_reds, Some(anticone_size))
+    };
 
     // 4. blue_score = bs(sp) + 1 (sp'nin kendisi) + yeni maviler.
     let sp_data = data.get(&sp);
@@ -1426,13 +1462,16 @@ fn compute_vertex_data<W: Weigher>(
         .sum();
     let blue_work = sp_work + weigher.weight(graph, &sp) + mergeset_blue_work;
 
-    (GhostdagData {
-        blue_score,
-        blue_work,
-        selected_parent: Some(sp),
-        mergeset_blues,
-        mergeset_reds,
-    }, out_opt.unwrap_or_default())
+    (
+        GhostdagData {
+            blue_score,
+            blue_work,
+            selected_parent: Some(sp),
+            mergeset_blues,
+            mergeset_reds,
+        },
+        out_opt.unwrap_or_default(),
+    )
 }
 
 /// Ebeveynler içinde en yüksek blue-WORK'lü olanı seç; beraberlikte min-id
@@ -1710,34 +1749,60 @@ mod tests {
     #[test]
     #[ignore = "regresyon: FUZZ_TUR=2000 ile elle calistir"]
     fn fuzz_dogrula() {
-        let turlar: u64 = std::env::var("FUZZ_TUR").ok().and_then(|x| x.parse().ok()).unwrap_or(2000);
+        let turlar: u64 = std::env::var("FUZZ_TUR")
+            .ok()
+            .and_then(|x| x.parse().ok())
+            .unwrap_or(2000);
         let mut lcg: u64 = 0x9E3779B97F4A7C15;
-        let mut rng = || { lcg = lcg.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); lcg };
+        let mut rng = || {
+            lcg = lcg
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            lcg
+        };
         for tur in 0..turlar {
             let n = 5 + (rng() % 60) as usize;
             let mut g = Graph::devnet(NET);
-            let gen = signed(1, vec![], 1000, b"g"); let gid=*gen.id();
+            let gen = signed(1, vec![], 1000, b"g");
+            let gid = *gen.id();
             g.insert_synced(gen).unwrap();
-            let mut inc = Ghostdag::new_incremental(DEFAULT_K); inc.update_one(&g,&gid);
-            let mut ids=vec![gid]; let mut ts=1001u64;
+            let mut inc = Ghostdag::new_incremental(DEFAULT_K);
+            inc.update_one(&g, &gid);
+            let mut ids = vec![gid];
+            let mut ts = 1001u64;
             #[allow(clippy::explicit_counter_loop)]
             for i in 1..n {
-                let mevcut=ids.len(); let pmax=mevcut.min(8);
-                let pk=1+(rng()%pmax as u64) as usize;
-                let mut parents=Vec::new();
-                for _ in 0..pk { let idx=(rng()%mevcut as u64) as usize; let c=ids[idx]; if !parents.contains(&c){parents.push(c);} }
-                if parents.is_empty(){parents.push(ids[mevcut-1]);}
-                let seed=(1+(rng()%250)) as u8;
-                let v=signed(seed,parents,ts,format!("t{tur}v{i}").as_bytes()); ts+=1; let vid=*v.id();
-                if g.insert_synced(v).is_err(){continue;}
-                inc.update_one(&g,&vid); ids.push(vid);
+                let mevcut = ids.len();
+                let pmax = mevcut.min(8);
+                let pk = 1 + (rng() % pmax as u64) as usize;
+                let mut parents = Vec::new();
+                for _ in 0..pk {
+                    let idx = (rng() % mevcut as u64) as usize;
+                    let c = ids[idx];
+                    if !parents.contains(&c) {
+                        parents.push(c);
+                    }
+                }
+                if parents.is_empty() {
+                    parents.push(ids[mevcut - 1]);
+                }
+                let seed = (1 + (rng() % 250)) as u8;
+                let v = signed(seed, parents, ts, format!("t{tur}v{i}").as_bytes());
+                ts += 1;
+                let vid = *v.id();
+                if g.insert_synced(v).is_err() {
+                    continue;
+                }
+                inc.update_one(&g, &vid);
+                ids.push(vid);
             }
             let refr = Ghostdag::compute_default(&g);
             let d_inc = data_map_of(&inc, &g);
             let d_ref = data_map_of(&refr, &g);
             for (id, dref) in &d_ref {
                 let dinc = d_inc.get(id).expect("eksik");
-                if dinc.blue_score != dref.blue_score || dinc.mergeset_blues != dref.mergeset_blues {
+                if dinc.blue_score != dref.blue_score || dinc.mergeset_blues != dref.mergeset_blues
+                {
                     panic!("FUZZ FARK tur={} n={} v={:02x}{:02x}: inc_bs={} ref_bs={} inc_blues={} ref_blues={}",
                         tur, n, id[0], id[1], dinc.blue_score, dref.blue_score, dinc.mergeset_blues.len(), dref.mergeset_blues.len());
                 }
@@ -1750,28 +1815,54 @@ mod tests {
     #[ignore]
     fn fuzz_determinizm() {
         // DETERMINIZM FUZZ: ayni vertex kumesi, FARKLI ekleme sirasi -> AYNI sonuc.
-        let turlar: u64 = std::env::var("DET_TUR").ok().and_then(|x| x.parse().ok()).unwrap_or(2000);
+        let turlar: u64 = std::env::var("DET_TUR")
+            .ok()
+            .and_then(|x| x.parse().ok())
+            .unwrap_or(2000);
         let mut lcg: u64 = 0xD1B54A32D192ED03;
-        let mut rng = || { lcg = lcg.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); lcg };
+        let mut rng = || {
+            lcg = lcg
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            lcg
+        };
         for tur in 0..turlar {
-            if tur % 1000 == 0 { eprintln!("[det] {}/{} tur", tur, turlar); }
+            if tur % 1000 == 0 {
+                eprintln!("[det] {}/{} tur", tur, turlar);
+            }
             let n = 5 + (rng() % 60) as usize;
             let mut g0 = Graph::devnet(NET);
-            let gen = signed(1, vec![], 1000, b"g"); let gid = *gen.id();
+            let gen = signed(1, vec![], 1000, b"g");
+            let gid = *gen.id();
             g0.insert_synced(gen.clone()).unwrap();
-            let mut ids = vec![gid]; let mut ts = 1001u64;
+            let mut ids = vec![gid];
+            let mut ts = 1001u64;
             let mut verts: Vec<Vertex> = vec![gen];
             #[allow(clippy::explicit_counter_loop)]
             for i in 1..n {
-                let mevcut = ids.len(); let pmax = mevcut.min(8);
+                let mevcut = ids.len();
+                let pmax = mevcut.min(8);
                 let pk = 1 + (rng() % pmax as u64) as usize;
                 let mut parents = Vec::new();
-                for _ in 0..pk { let idx = (rng() % mevcut as u64) as usize; let c = ids[idx]; if !parents.contains(&c) { parents.push(c); } }
-                if parents.is_empty() { parents.push(ids[mevcut - 1]); }
+                for _ in 0..pk {
+                    let idx = (rng() % mevcut as u64) as usize;
+                    let c = ids[idx];
+                    if !parents.contains(&c) {
+                        parents.push(c);
+                    }
+                }
+                if parents.is_empty() {
+                    parents.push(ids[mevcut - 1]);
+                }
                 let seed = (1 + (rng() % 250)) as u8;
-                let v = signed(seed, parents, ts, format!("t{tur}v{i}").as_bytes()); ts += 1; let vid = *v.id();
-                if g0.insert_synced(v.clone()).is_err() { continue; }
-                ids.push(vid); verts.push(v);
+                let v = signed(seed, parents, ts, format!("t{tur}v{i}").as_bytes());
+                ts += 1;
+                let vid = *v.id();
+                if g0.insert_synced(v.clone()).is_err() {
+                    continue;
+                }
+                ids.push(vid);
+                verts.push(v);
             }
             // topolojik-gecerli ekleme (verilen ipucu sirasina gore, parent hazir olani ekle)
             let insert_ile = |ipucu: &[usize]| -> (Ghostdag, Graph) {
@@ -1779,22 +1870,33 @@ mod tests {
                 let mut inc = Ghostdag::new_incremental(DEFAULT_K);
                 let mut kalan: Vec<usize> = ipucu.to_vec();
                 loop {
-                    let mut yeni = Vec::new(); let mut ilerledi = false;
+                    let mut yeni = Vec::new();
+                    let mut ilerledi = false;
                     for &idx in &kalan {
                         let v = &verts[idx];
                         if v.parents().is_empty() || v.parents().iter().all(|p| g.contains(p)) {
                             let vid = *v.id();
-                            if g.insert_synced(v.clone()).is_ok() { inc.update_one(&g, &vid); ilerledi = true; }
-                        } else { yeni.push(idx); }
+                            if g.insert_synced(v.clone()).is_ok() {
+                                inc.update_one(&g, &vid);
+                                ilerledi = true;
+                            }
+                        } else {
+                            yeni.push(idx);
+                        }
                     }
                     kalan = yeni;
-                    if kalan.is_empty() || !ilerledi { break; }
+                    if kalan.is_empty() || !ilerledi {
+                        break;
+                    }
                 }
                 (inc, g)
             };
             let sira_a: Vec<usize> = (0..verts.len()).collect();
             let mut sira_b = sira_a.clone();
-            for i in (1..sira_b.len()).rev() { let j = (rng() % (i as u64 + 1)) as usize; sira_b.swap(i, j); }
+            for i in (1..sira_b.len()).rev() {
+                let j = (rng() % (i as u64 + 1)) as usize;
+                sira_b.swap(i, j);
+            }
             let (gd_a, ga) = insert_ile(&sira_a);
             let (gd_b, _gb) = insert_ile(&sira_b);
             let da = data_map_of(&gd_a, &ga);
@@ -1802,7 +1904,10 @@ mod tests {
             for (id, a) in &da {
                 let b = db.get(id).expect("det: eksik");
                 if a.blue_score != b.blue_score || a.mergeset_blues != b.mergeset_blues {
-                    panic!("DET FARK tur={} n={} v={:02x}{:02x}: a_bs={} b_bs={}", tur, n, id[0], id[1], a.blue_score, b.blue_score);
+                    panic!(
+                        "DET FARK tur={} n={} v={:02x}{:02x}: a_bs={} b_bs={}",
+                        tur, n, id[0], id[1], a.blue_score, b.blue_score
+                    );
                 }
             }
         }
@@ -1813,44 +1918,83 @@ mod tests {
     #[ignore]
     fn fuzz_invariant() {
         // PROPERTY FUZZ: INV1 monotonluk, INV2 mavi/kirmizi ayrik, INV3 k-cluster
-        let turlar: u64 = std::env::var("PROP_TUR").ok().and_then(|x| x.parse().ok()).unwrap_or(2000);
+        let turlar: u64 = std::env::var("PROP_TUR")
+            .ok()
+            .and_then(|x| x.parse().ok())
+            .unwrap_or(2000);
         let mut lcg: u64 = 0x2545F4914F6CDD1D;
-        let mut rng = || { lcg = lcg.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); lcg };
+        let mut rng = || {
+            lcg = lcg
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            lcg
+        };
         let k = DEFAULT_K as u32;
         for tur in 0..turlar {
-            if tur % 1000 == 0 { eprintln!("[prop] {}/{} tur", tur, turlar); }
+            if tur % 1000 == 0 {
+                eprintln!("[prop] {}/{} tur", tur, turlar);
+            }
             let n = 5 + (rng() % 60) as usize;
             let mut g = Graph::devnet(NET);
-            let gen = signed(1, vec![], 1000, b"g"); let gid = *gen.id();
+            let gen = signed(1, vec![], 1000, b"g");
+            let gid = *gen.id();
             g.insert_synced(gen).unwrap();
-            let mut inc = Ghostdag::new_incremental(DEFAULT_K); inc.update_one(&g, &gid);
-            let mut ids = vec![gid]; let mut ts = 1001u64;
+            let mut inc = Ghostdag::new_incremental(DEFAULT_K);
+            inc.update_one(&g, &gid);
+            let mut ids = vec![gid];
+            let mut ts = 1001u64;
             #[allow(clippy::explicit_counter_loop)]
             for i in 1..n {
-                let mevcut = ids.len(); let pmax = mevcut.min(8);
+                let mevcut = ids.len();
+                let pmax = mevcut.min(8);
                 let pk = 1 + (rng() % pmax as u64) as usize;
                 let mut parents = Vec::new();
-                for _ in 0..pk { let idx = (rng() % mevcut as u64) as usize; let c = ids[idx]; if !parents.contains(&c) { parents.push(c); } }
-                if parents.is_empty() { parents.push(ids[mevcut - 1]); }
+                for _ in 0..pk {
+                    let idx = (rng() % mevcut as u64) as usize;
+                    let c = ids[idx];
+                    if !parents.contains(&c) {
+                        parents.push(c);
+                    }
+                }
+                if parents.is_empty() {
+                    parents.push(ids[mevcut - 1]);
+                }
                 let seed = (1 + (rng() % 250)) as u8;
-                let v = signed(seed, parents, ts, format!("p{tur}v{i}").as_bytes()); ts += 1; let vid = *v.id();
-                if g.insert_synced(v).is_err() { continue; }
-                inc.update_one(&g, &vid); ids.push(vid);
+                let v = signed(seed, parents, ts, format!("p{tur}v{i}").as_bytes());
+                ts += 1;
+                let vid = *v.id();
+                if g.insert_synced(v).is_err() {
+                    continue;
+                }
+                inc.update_one(&g, &vid);
+                ids.push(vid);
             }
             let d = data_map_of(&inc, &g);
             for (id, gd) in &d {
                 for b in &gd.mergeset_blues {
-                    if gd.mergeset_reds.contains(b) { panic!("INV2 IHLAL tur={} v={:02x}{:02x}", tur, id[0], id[1]); }
+                    if gd.mergeset_reds.contains(b) {
+                        panic!("INV2 IHLAL tur={} v={:02x}{:02x}", tur, id[0], id[1]);
+                    }
                 }
                 if let Some(sp) = gd.selected_parent {
                     if let Some(spd) = d.get(&sp) {
-                        if spd.blue_score > gd.blue_score { panic!("INV1 IHLAL tur={} v={:02x}{:02x}: {}>{}", tur, id[0], id[1], spd.blue_score, gd.blue_score); }
+                        if spd.blue_score > gd.blue_score {
+                            panic!(
+                                "INV1 IHLAL tur={} v={:02x}{:02x}: {}>{}",
+                                tur, id[0], id[1], spd.blue_score, gd.blue_score
+                            );
+                        }
                     }
                 }
             }
             for (vid, harita) in inc.anticone_sizes.iter() {
                 for (bid, &sz) in harita.iter() {
-                    if sz > k { panic!("INV3 IHLAL tur={} v={:02x}{:02x} b={:02x}{:02x}: {}>{}", tur, vid[0], vid[1], bid[0], bid[1], sz, k); }
+                    if sz > k {
+                        panic!(
+                            "INV3 IHLAL tur={} v={:02x}{:02x} b={:02x}{:02x}: {}>{}",
+                            tur, vid[0], vid[1], bid[0], bid[1], sz, k
+                        );
+                    }
                 }
             }
         }
@@ -1862,63 +2006,135 @@ mod tests {
     fn fuzz_kalkan_corba() {
         // KAOS/CORBA FUZZ: karisik parti (gercek+sahte, farkli saldiri turleri ic ice).
         // Kalkan her ogeyi DOGRU ayiklamali: gercek gecer, sahte reddedilir, karismaz.
-        use crate::tx::{TokenKaydi, ayni_sembol_farkli_adres};
         use crate::registry::RecordRegistry;
-        let turlar: u64 = std::env::var("CORBA_TUR").ok().and_then(|x| x.parse().ok()).unwrap_or(2000);
+        use crate::tx::{ayni_sembol_farkli_adres, TokenKaydi};
+        let turlar: u64 = std::env::var("CORBA_TUR")
+            .ok()
+            .and_then(|x| x.parse().ok())
+            .unwrap_or(2000);
         let mut lcg: u64 = 0x853C49E6748FEA9B;
-        let mut rng = || { lcg = lcg.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); lcg };
-        let mut beklenen_kabul = 0u64; let mut beklenen_red = 0u64;
-        let mut gercek_kabul = 0u64; let mut gercek_red = 0u64;
+        let mut rng = || {
+            lcg = lcg
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            lcg
+        };
+        let mut beklenen_kabul = 0u64;
+        let mut beklenen_red = 0u64;
+        let mut gercek_kabul = 0u64;
+        let mut gercek_red = 0u64;
         for tur in 0..turlar {
-            if tur % 1000 == 0 { eprintln!("[corba] {}/{} tur (kabul={} red={})", tur, turlar, gercek_kabul, gercek_red); }
+            if tur % 1000 == 0 {
+                eprintln!(
+                    "[corba] {}/{} tur (kabul={} red={})",
+                    tur, turlar, gercek_kabul, gercek_red
+                );
+            }
             let parti = 3 + (rng() % 6) as usize;
             let mut reg = RecordRegistry::yeni();
-            let mut gercek_belge = [0u8; 32]; for x in gercek_belge.iter_mut() { *x = (rng() & 0xff) as u8; }
+            let mut gercek_belge = [0u8; 32];
+            for x in gercek_belge.iter_mut() {
+                *x = (rng() & 0xff) as u8;
+            }
             reg.kaydet(gercek_belge, [0x11; 20], 1000);
-            let mut t_adres = [0u8; 20]; for x in t_adres.iter_mut() { *x = (rng() & 0xff) as u8; }
-            let mut t_sembol = [0u8; 8]; for x in t_sembol.iter_mut() { *x = (rng() & 0xff) as u8; }
+            let mut t_adres = [0u8; 20];
+            for x in t_adres.iter_mut() {
+                *x = (rng() & 0xff) as u8;
+            }
+            let mut t_sembol = [0u8; 8];
+            for x in t_sembol.iter_mut() {
+                *x = (rng() & 0xff) as u8;
+            }
             let gercek_token = TokenKaydi::new(t_adres, t_sembol);
             for _ in 0..parti {
                 let saldiri = rng() % 6;
                 match saldiri {
                     0 => {
-                        let v = signed((1 + rng() % 200) as u8, vec![], 1000 + tur, format!("c{tur}").as_bytes());
+                        let v = signed(
+                            (1 + rng() % 200) as u8,
+                            vec![],
+                            1000 + tur,
+                            format!("c{tur}").as_bytes(),
+                        );
                         beklenen_kabul += 1;
-                        if v.verify().is_ok() { gercek_kabul += 1; } else { panic!("CORBA tur={}: GERCEK imza reddedildi!", tur); }
+                        if v.verify().is_ok() {
+                            gercek_kabul += 1;
+                        } else {
+                            panic!("CORBA tur={}: GERCEK imza reddedildi!", tur);
+                        }
                     }
                     1 => {
-                        let mut v = signed((1 + rng() % 200) as u8, vec![], 1000 + tur, format!("c{tur}").as_bytes());
-                        if rng() % 2 == 0 { v.tamper_signature([0xAB; 64]); } else { v.tamper_payload(b"tahrif".to_vec()); }
+                        let mut v = signed(
+                            (1 + rng() % 200) as u8,
+                            vec![],
+                            1000 + tur,
+                            format!("c{tur}").as_bytes(),
+                        );
+                        if rng() % 2 == 0 {
+                            v.tamper_signature([0xAB; 64]);
+                        } else {
+                            v.tamper_payload(b"tahrif".to_vec());
+                        }
                         beklenen_red += 1;
-                        if v.verify().is_err() { gercek_red += 1; } else { panic!("CORBA tur={}: SAHTE imza gecti!", tur); }
+                        if v.verify().is_err() {
+                            gercek_red += 1;
+                        } else {
+                            panic!("CORBA tur={}: SAHTE imza gecti!", tur);
+                        }
                     }
                     2 => {
                         let ayni = TokenKaydi::new(t_adres, t_sembol);
                         beklenen_kabul += 1;
-                        if !ayni_sembol_farkli_adres(&gercek_token, &ayni) { gercek_kabul += 1; } else { panic!("CORBA tur={}: GERCEK token taklit sayildi!", tur); }
+                        if !ayni_sembol_farkli_adres(&gercek_token, &ayni) {
+                            gercek_kabul += 1;
+                        } else {
+                            panic!("CORBA tur={}: GERCEK token taklit sayildi!", tur);
+                        }
                     }
                     3 => {
-                        let mut sahte_adres = [0u8; 20]; for x in sahte_adres.iter_mut() { *x = (rng() & 0xff) as u8; }
-                        while sahte_adres == t_adres { sahte_adres[0] = sahte_adres[0].wrapping_add(1); }
+                        let mut sahte_adres = [0u8; 20];
+                        for x in sahte_adres.iter_mut() {
+                            *x = (rng() & 0xff) as u8;
+                        }
+                        while sahte_adres == t_adres {
+                            sahte_adres[0] = sahte_adres[0].wrapping_add(1);
+                        }
                         let taklit = TokenKaydi::new(sahte_adres, t_sembol);
                         beklenen_red += 1;
-                        if ayni_sembol_farkli_adres(&gercek_token, &taklit) { gercek_red += 1; } else { panic!("CORBA tur={}: SAHTE token gecti!", tur); }
+                        if ayni_sembol_farkli_adres(&gercek_token, &taklit) {
+                            gercek_red += 1;
+                        } else {
+                            panic!("CORBA tur={}: SAHTE token gecti!", tur);
+                        }
                     }
                     4 => {
                         beklenen_kabul += 1;
-                        if reg.dogrula(&gercek_belge).is_some() { gercek_kabul += 1; } else { panic!("CORBA tur={}: GERCEK belge reddedildi!", tur); }
+                        if reg.dogrula(&gercek_belge).is_some() {
+                            gercek_kabul += 1;
+                        } else {
+                            panic!("CORBA tur={}: GERCEK belge reddedildi!", tur);
+                        }
                     }
                     _ => {
-                        let mut sahte = gercek_belge; let idx = (rng() % 32) as usize; sahte[idx] = sahte[idx].wrapping_add(1);
+                        let mut sahte = gercek_belge;
+                        let idx = (rng() % 32) as usize;
+                        sahte[idx] = sahte[idx].wrapping_add(1);
                         beklenen_red += 1;
-                        if sahte == gercek_belge || reg.dogrula(&sahte).is_none() { gercek_red += 1; } else { panic!("CORBA tur={}: SAHTE belge gecti!", tur); }
+                        if sahte == gercek_belge || reg.dogrula(&sahte).is_none() {
+                            gercek_red += 1;
+                        } else {
+                            panic!("CORBA tur={}: SAHTE belge gecti!", tur);
+                        }
                     }
                 }
             }
         }
         assert_eq!(beklenen_kabul, gercek_kabul, "kabul sayisi tutmadi");
         assert_eq!(beklenen_red, gercek_red, "red sayisi tutmadi");
-        eprintln!("CORBA OK: {} tur, kabul={} red={} (karisik yukte her oge dogru ayiklandi)", turlar, gercek_kabul, gercek_red);
+        eprintln!(
+            "CORBA OK: {} tur, kabul={} red={} (karisik yukte her oge dogru ayiklandi)",
+            turlar, gercek_kabul, gercek_red
+        );
     }
 
     #[test]
@@ -1953,7 +2169,8 @@ mod tests {
             let mut fark = 0;
             for (id, dref) in &d_ref {
                 let dinc = d_inc.get(id).expect("eksik");
-                if dinc.blue_score != dref.blue_score || dinc.mergeset_blues != dref.mergeset_blues {
+                if dinc.blue_score != dref.blue_score || dinc.mergeset_blues != dref.mergeset_blues
+                {
                     fark += 1;
                 }
             }
@@ -1966,7 +2183,8 @@ mod tests {
     #[ignore]
     fn torba_stres() {
         use std::time::Instant;
-        let olcekler: Vec<usize> = std::env::var("TORBA_N").ok()
+        let olcekler: Vec<usize> = std::env::var("TORBA_N")
+            .ok()
             .map(|x| x.split(',').filter_map(|t| t.trim().parse().ok()).collect())
             .unwrap_or_else(|| vec![20_000usize, 40_000, 80_000, 160_000]);
         for &n in &olcekler {
@@ -1982,7 +2200,9 @@ mod tests {
             #[allow(clippy::explicit_counter_loop)]
             for i in 1..n {
                 let mut parents = vec![ids[ids.len() - 1]];
-                if ids.len() >= 2 { parents.push(ids[ids.len() - 2]); }
+                if ids.len() >= 2 {
+                    parents.push(ids[ids.len() - 2]);
+                }
                 parents.sort_unstable();
                 parents.dedup();
                 let v = signed((i % 250) as u8 + 1, parents, ts, b"x");
@@ -1991,7 +2211,16 @@ mod tests {
                 g.insert_synced(v).unwrap();
                 gd.update_one(&g, &vid);
                 ids.push(vid);
-                if i % 10000 == 0 { let e = t_build.elapsed().as_secs_f64(); eprintln!("  [ingest] {}/{} t={:.1}s ({:.0} v/s)", i, n, e, i as f64 / e.max(1e-9)); }
+                if i % 10000 == 0 {
+                    let e = t_build.elapsed().as_secs_f64();
+                    eprintln!(
+                        "  [ingest] {}/{} t={:.1}s ({:.0} v/s)",
+                        i,
+                        n,
+                        e,
+                        i as f64 / e.max(1e-9)
+                    );
+                }
             }
             let total_s = t_build.elapsed().as_secs_f64();
             let tps = n as f64 / total_s.max(1e-9);
@@ -2006,9 +2235,25 @@ mod tests {
             let uu = U_UP.load(std::sync::atomic::Ordering::Relaxed);
             let tboy = TORBA_BOY.load(std::sync::atomic::Ordering::Relaxed);
             let tsay = TORBA_SAY.load(std::sync::atomic::Ordering::Relaxed);
-            eprintln!("   TORBA: ort_boyut={:.1} (toplam={} say={})", tboy as f64 / tsay.max(1) as f64, tboy, tsay);
-            eprintln!("   UPDATE_ONE(ms): anti_kaydet={:.0} interval={:.0} torba={:.0} up={:.0}", ua as f64/1e6, ui as f64/1e6, ut as f64/1e6, uu as f64/1e6);
-            eprintln!("   ZAMAN(ms): blue_set={:.0} mergeset={:.0} candidate={:.0}", tb as f64/1e6, tm as f64/1e6, tcd as f64/1e6);
+            eprintln!(
+                "   TORBA: ort_boyut={:.1} (toplam={} say={})",
+                tboy as f64 / tsay.max(1) as f64,
+                tboy,
+                tsay
+            );
+            eprintln!(
+                "   UPDATE_ONE(ms): anti_kaydet={:.0} interval={:.0} torba={:.0} up={:.0}",
+                ua as f64 / 1e6,
+                ui as f64 / 1e6,
+                ut as f64 / 1e6,
+                uu as f64 / 1e6
+            );
+            eprintln!(
+                "   ZAMAN(ms): blue_set={:.0} mergeset={:.0} candidate={:.0}",
+                tb as f64 / 1e6,
+                tm as f64 / 1e6,
+                tcd as f64 / 1e6
+            );
             eprintln!("   PROFIL: cand_dongusu(b)={}", cc);
         }
     }
@@ -2016,9 +2261,12 @@ mod tests {
     #[test]
     #[ignore]
     fn imza_paralel_bench() {
-        use std::time::Instant;
         use rayon::prelude::*;
-        let n: usize = std::env::var("IMZA_N").ok().and_then(|x| x.parse().ok()).unwrap_or(100_000);
+        use std::time::Instant;
+        let n: usize = std::env::var("IMZA_N")
+            .ok()
+            .and_then(|x| x.parse().ok())
+            .unwrap_or(100_000);
         // n vertex uret (imzali)
         let mut vs = Vec::with_capacity(n);
         let mut ts = 1000u64;
@@ -2029,16 +2277,26 @@ mod tests {
         }
         // TEK TEK verify
         let t0 = Instant::now();
-        for v in &vs { v.verify().unwrap(); }
+        for v in &vs {
+            v.verify().unwrap();
+        }
         let tek = t0.elapsed().as_secs_f64();
         // PARALEL verify (rayon, 18 cekirdek)
         let t1 = Instant::now();
-        vs.par_iter().for_each(|v| { v.verify().unwrap(); });
+        vs.par_iter().for_each(|v| {
+            v.verify().unwrap();
+        });
         let par = t1.elapsed().as_secs_f64();
-        eprintln!("IMZA n={} TEK={:.2}s ({:.0}/s) PARALEL={:.2}s ({:.0}/s) HIZLANMA={:.1}x",
-            n, tek, n as f64/tek, par, n as f64/par, tek/par);
+        eprintln!(
+            "IMZA n={} TEK={:.2}s ({:.0}/s) PARALEL={:.2}s ({:.0}/s) HIZLANMA={:.1}x",
+            n,
+            tek,
+            n as f64 / tek,
+            par,
+            n as f64 / par,
+            tek / par
+        );
     }
-
 
     #[test]
     #[ignore]

@@ -828,33 +828,65 @@ mod tests {
     #[ignore]
     fn fuzz_kalkan_gecersiz_vertex() {
         // ADVERSARIAL FUZZ: vertex dogrulama kalkani (verify).
-        let turlar: u64 = std::env::var("VERTEX_TUR").ok().and_then(|x| x.parse().ok()).unwrap_or(2000);
+        let turlar: u64 = std::env::var("VERTEX_TUR")
+            .ok()
+            .and_then(|x| x.parse().ok())
+            .unwrap_or(2000);
         let mut lcg: u64 = 0x3C6EF372FE94F82A;
-        let mut rng = || { lcg = lcg.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); lcg };
+        let mut rng = || {
+            lcg = lcg
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            lcg
+        };
         for tur in 0..turlar {
-            if tur % 1000 == 0 { eprintln!("[vertex] {}/{} tur", tur, turlar); }
+            if tur % 1000 == 0 {
+                eprintln!("[vertex] {}/{} tur", tur, turlar);
+            }
             let key = make_key_from_seed((1 + rng() % 200) as u8);
             let pcount = (rng() % 4) as usize;
             let mut parents: Vec<VertexId> = Vec::new();
-            for i in 0..pcount { parents.push([(i as u8 + 1); 32]); }
+            for i in 0..pcount {
+                parents.push([(i as u8 + 1); 32]);
+            }
             let payload_len = (rng() % 32) as usize;
             let payload: Vec<u8> = (0..payload_len).map(|_| (rng() & 0xff) as u8).collect();
             let ts = 1 + rng();
-            let gecerli = Vertex::new_signed(NET_TEST, parents.clone(), payload.clone(), ts, &key).unwrap();
+            let gecerli =
+                Vertex::new_signed(NET_TEST, parents.clone(), payload.clone(), ts, &key).unwrap();
             if gecerli.verify().is_err() {
                 panic!("KALKAN HATASI tur={}: GECERLI vertex reddedildi", tur);
             }
             let saldiri = rng() % 5;
-            let mut v = Vertex::new_signed(NET_TEST, parents.clone(), payload.clone(), ts, &key).unwrap();
+            let mut v =
+                Vertex::new_signed(NET_TEST, parents.clone(), payload.clone(), ts, &key).unwrap();
             let sonuc = match saldiri {
-                0 => { v.tamper_signature([(rng() & 0xff) as u8; 64]); v.verify() }
-                1 => { v.tamper_payload(b"tahrif-edildi".to_vec()); v.verify() }
-                2 => { v.tamper_id([(rng() & 0xff) as u8; 32]); v.verify() }
-                3 => { v.tamper_oversized_payload(); v.verify() }
-                _ => { v.tamper_oversized_parents(); v.verify() }
+                0 => {
+                    v.tamper_signature([(rng() & 0xff) as u8; 64]);
+                    v.verify()
+                }
+                1 => {
+                    v.tamper_payload(b"tahrif-edildi".to_vec());
+                    v.verify()
+                }
+                2 => {
+                    v.tamper_id([(rng() & 0xff) as u8; 32]);
+                    v.verify()
+                }
+                3 => {
+                    v.tamper_oversized_payload();
+                    v.verify()
+                }
+                _ => {
+                    v.tamper_oversized_parents();
+                    v.verify()
+                }
             };
             if sonuc.is_ok() {
-                panic!("KALKAN DELINDI tur={}: bozuk vertex (saldiri={}) verify'dan GECTI!", tur, saldiri);
+                panic!(
+                    "KALKAN DELINDI tur={}: bozuk vertex (saldiri={}) verify'dan GECTI!",
+                    tur, saldiri
+                );
             }
         }
         eprintln!("VERTEX OK: {} tur, tum bozuk vertex'ler reddedildi", turlar);

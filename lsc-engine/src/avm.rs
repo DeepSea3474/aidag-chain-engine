@@ -1313,7 +1313,8 @@ mod tests {
         deploy_data.extend_from_slice(&arz32);
         let mut db = AidagDatabase::yeni();
         let sahip = [0xAAu8; 20];
-        let d = avm_calistir(&mut db, &sahip, &[0u8; 20], 0, &deploy_data, 100).expect("KUBR deploy");
+        let d =
+            avm_calistir(&mut db, &sahip, &[0u8; 20], 0, &deploy_data, 100).expect("KUBR deploy");
         let kubr = d.olusan_adres.expect("kontrat adresi");
         println!("KUBR: deploy -> 0x{}", hex_encode(&kubr));
         let mut bo = Vec::new();
@@ -1328,17 +1329,29 @@ mod tests {
         let mut pu = Vec::new();
         pu.extend_from_slice(&keccak256(b"purity()")[0..4]);
         let cikti = avm_call_oku(&db, &[0u8; 20], &kubr, &pu).expect("purity");
-        assert_eq!(U256::from_be_slice(&cikti), U256::from(9999u64), "saflik 9999 olmali");
+        assert_eq!(
+            U256::from_be_slice(&cikti),
+            U256::from(9999u64),
+            "saflik 9999 olmali"
+        );
         println!("KUBR: saflik = 9999 (%99.99)");
         let mut mg = Vec::new();
         mg.extend_from_slice(&keccak256(b"mgPerToken()")[0..4]);
         let cikti = avm_call_oku(&db, &[0u8; 20], &kubr, &mg).expect("mgPerToken");
-        assert_eq!(U256::from_be_slice(&cikti), U256::from(1000u64), "1 token = 1000 mg olmali");
+        assert_eq!(
+            U256::from_be_slice(&cikti),
+            U256::from(1000u64),
+            "1 token = 1000 mg olmali"
+        );
         println!("KUBR: mgPerToken = 1000 (1 gram)");
         let mut tt = Vec::new();
         tt.extend_from_slice(&keccak256(b"tamTeminatliMi()")[0..4]);
         let cikti = avm_call_oku(&db, &[0u8; 20], &kubr, &tt).expect("tamTeminatliMi");
-        assert_eq!(U256::from_be_slice(&cikti), U256::from(1u64), "tam teminatli olmali");
+        assert_eq!(
+            U256::from_be_slice(&cikti),
+            U256::from(1u64),
+            "tam teminatli olmali"
+        );
         println!("KUBR: tam teminatli = evet");
         let alici = [0xBBu8; 20];
         let mut tr = Vec::new();
@@ -1357,8 +1370,11 @@ mod tests {
         al32[12..32].copy_from_slice(&alici);
         bo2.extend_from_slice(&al32);
         let cikti = avm_call_oku(&db, &[0u8; 20], &kubr, &bo2).expect("balanceOf alici");
-        assert_eq!(U256::from_be_slice(&cikti), yarim, "alici 500 token (gram) almali");
+        assert_eq!(
+            U256::from_be_slice(&cikti),
+            yarim,
+            "alici 500 token (gram) almali"
+        );
         println!("KUBR KANIT: Altin RWA token AVM'de calisti — deploy, arz, saflik, teminat, transfer hepsi dogru.");
     }
-
 }

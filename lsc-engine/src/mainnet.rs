@@ -130,7 +130,10 @@ mod tests {
         // Anahtari yukle ya da uret+kaydet (idempotent → hep ayni genesis).
         let seed: [u8; 32] = if path.exists() {
             let data = std::fs::read(&path).expect("kurucu.key okunamadi");
-            assert!(data.len() == 33 && data[0] == 1, "kurucu.key format [1][32seed] olmali");
+            assert!(
+                data.len() == 33 && data[0] == 1,
+                "kurucu.key format [1][32seed] olmali"
+            );
             let mut s = [0u8; 32];
             s.copy_from_slice(&data[1..33]);
             s
@@ -169,7 +172,10 @@ mod tests {
         eprintln!("MAINNET_KURUCU_PUBKEY_HEX = \"{}\"", hex_encode(&pubkey));
         eprintln!("MAINNET_KURUCU_ADRES_HEX  = \"{}\"", hex_encode(&adres));
         eprintln!("MAINNET_GENESIS_ID_HEX    = \"{}\"", hex_encode(&id));
-        eprintln!("MAINNET_GENESIS_WIRE_HEX  = \"{}\"", hex_encode(&wire_bytes));
+        eprintln!(
+            "MAINNET_GENESIS_WIRE_HEX  = \"{}\"",
+            hex_encode(&wire_bytes)
+        );
         eprintln!("====================================================================\n");
     }
 
@@ -185,9 +191,17 @@ mod tests {
         let v = wire::decode(&wire_bytes).expect("baked genesis decode");
         v.verify().expect("baked genesis imza/id dogrulanmali");
         assert_eq!(*v.id(), genesis_id(), "baked wire id != MAINNET_GENESIS_ID");
-        assert_eq!(v.network_id(), MAINNET_NETWORK_ID, "genesis network_id != 3474");
+        assert_eq!(
+            v.network_id(),
+            MAINNET_NETWORK_ID,
+            "genesis network_id != 3474"
+        );
         assert!(v.parents().is_empty(), "genesis parent'siz olmali");
-        assert_eq!(v.timestamp(), MAINNET_GENESIS_ZAMANI, "genesis zamani != sabit");
+        assert_eq!(
+            v.timestamp(),
+            MAINNET_GENESIS_ZAMANI,
+            "genesis zamani != sabit"
+        );
         assert_eq!(
             public_key_to_adres(v.public_key()),
             kurucu_adres(),

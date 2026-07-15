@@ -192,9 +192,13 @@ pub struct VestingKaydi {
 
 impl VestingKaydi {
     pub fn acilmis(&self, simdi: u64) -> Tutar {
-        if simdi < self.baslangic + self.cliff_sure { return 0; }
+        if simdi < self.baslangic + self.cliff_sure {
+            return 0;
+        }
         let gecen = simdi.saturating_sub(self.baslangic);
-        if gecen >= self.toplam_sure { return self.toplam; }
+        if gecen >= self.toplam_sure {
+            return self.toplam;
+        }
         self.toplam * (gecen as u128) / (self.toplam_sure as u128)
     }
     pub fn kilitli(&self, simdi: u64) -> Tutar {
@@ -230,7 +234,10 @@ impl BakiyeRegistry {
     }
     /// Bir adresin su an KILITLI miktari.
     pub fn vesting_kilitli(&self, adres: &[u8; 20], simdi: u64) -> Tutar {
-        self.vesting.get(adres).map(|v| v.kilitli(simdi)).unwrap_or(0)
+        self.vesting
+            .get(adres)
+            .map(|v| v.kilitli(simdi))
+            .unwrap_or(0)
     }
     /// Zincir zamanini ayarla (transfer'de vesting kontrolu icin).
     pub fn zaman_ayarla(&mut self, simdi: u64) {
@@ -503,22 +510,29 @@ mod tests {
         let alici = [0x22u8; 20];
         reg.test_bakiye_ekle(kurucu, 1000);
         let baslangic = 1_000_000u64;
-        reg.vesting_ekle(kurucu, VestingKaydi {
-            toplam: 1000,
-            baslangic,
-            cliff_sure: 180 * 86400,
-            toplam_sure: 730 * 86400,
-        });
+        reg.vesting_ekle(
+            kurucu,
+            VestingKaydi {
+                toplam: 1000,
+                baslangic,
+                cliff_sure: 180 * 86400,
+                toplam_sure: 730 * 86400,
+            },
+        );
         // Cliff icinde (3. ay) -> kilitli, transfer REDDEDILMELI
         reg.zaman_ayarla(baslangic + 90 * 86400);
         let s1 = reg.transfer(&kurucu, &alici, 100);
-        assert!(matches!(s1, TransferSonuc::YetersizBakiye { .. }),
-            "cliff icinde -> transfer reddedilmeli");
+        assert!(
+            matches!(s1, TransferSonuc::YetersizBakiye { .. }),
+            "cliff icinde -> transfer reddedilmeli"
+        );
         // 2 yil sonra -> acildi, transfer BASARILI
         reg.zaman_ayarla(baslangic + 730 * 86400);
         let s2 = reg.transfer(&kurucu, &alici, 100);
-        assert!(matches!(s2, TransferSonuc::Basarili { .. }),
-            "vesting bitti -> transfer basarili");
+        assert!(
+            matches!(s2, TransferSonuc::Basarili { .. }),
+            "vesting bitti -> transfer basarili"
+        );
         // Yari yolda kismen kilitli
         let k = reg.vesting_kilitli(&kurucu, baslangic + 365 * 86400);
         assert!(k > 0, "yari yolda kismen kilitli olmali");
@@ -647,16 +661,30 @@ mod tests {
     fn fuzz_kalkan_bakiye() {
         // ADVERSARIAL FUZZ: bakiye/transfer kalkani. EN KRITIK: toplam arz SABIT.
         use super::{BakiyeRegistry, TransferSonuc};
-        let turlar: u64 = std::env::var("BAKIYE_TUR").ok().and_then(|x| x.parse().ok()).unwrap_or(2000);
+        let turlar: u64 = std::env::var("BAKIYE_TUR")
+            .ok()
+            .and_then(|x| x.parse().ok())
+            .unwrap_or(2000);
         let mut lcg: u64 = 0x8CB92BA72F3D8DD7;
-        let mut rng = || { lcg = lcg.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); lcg };
+        let mut rng = || {
+            lcg = lcg
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            lcg
+        };
         for tur in 0..turlar {
-            if tur % 1000 == 0 { eprintln!("[bakiye] {}/{} tur", tur, turlar); }
+            if tur % 1000 == 0 {
+                eprintln!("[bakiye] {}/{} tur", tur, turlar);
+            }
             let mut reg = BakiyeRegistry::yeni();
             let adres_sayisi = 2 + (rng() % 5) as usize;
             let mut adresler: Vec<[u8; 20]> = Vec::new();
             for i in 0..adres_sayisi {
-                let mut a = [0u8; 20]; a[0] = i as u8; for x in a.iter_mut().skip(1) { *x = (rng() & 0xff) as u8; }
+                let mut a = [0u8; 20];
+                a[0] = i as u8;
+                for x in a.iter_mut().skip(1) {
+                    *x = (rng() & 0xff) as u8;
+                }
                 adresler.push(a);
                 reg.test_bakiye_ekle(a, (rng() % 1_000_000) as u128);
             }
@@ -671,26 +699,51 @@ mod tests {
                 match reg.transfer(&gonderen, &alici, miktar) {
                     TransferSonuc::Basarili { .. } => {
                         if gonderen != alici {
-                            if reg.bakiye(&gonderen) != onceki_g - miktar { panic!("KALKAN DELINDI tur={}: gonderenden yanlis dustu", tur); }
-                            if reg.bakiye(&alici) != onceki_a + miktar { panic!("KALKAN DELINDI tur={}: aliciya yanlis eklendi", tur); }
+                            if reg.bakiye(&gonderen) != onceki_g - miktar {
+                                panic!("KALKAN DELINDI tur={}: gonderenden yanlis dustu", tur);
+                            }
+                            if reg.bakiye(&alici) != onceki_a + miktar {
+                                panic!("KALKAN DELINDI tur={}: aliciya yanlis eklendi", tur);
+                            }
                         }
                     }
                     TransferSonuc::YetersizBakiye { .. } => {
-                        if reg.bakiye(&gonderen) != onceki_g { panic!("KALKAN DELINDI tur={}: yetersiz reddedildi ama bakiye degisti", tur); }
-                        if onceki_g >= miktar && miktar > 0 && gonderen != alici { panic!("KALKAN HATASI tur={}: yeterliydi ama yetersiz dendi", tur); }
+                        if reg.bakiye(&gonderen) != onceki_g {
+                            panic!(
+                                "KALKAN DELINDI tur={}: yetersiz reddedildi ama bakiye degisti",
+                                tur
+                            );
+                        }
+                        if onceki_g >= miktar && miktar > 0 && gonderen != alici {
+                            panic!("KALKAN HATASI tur={}: yeterliydi ama yetersiz dendi", tur);
+                        }
                     }
                     TransferSonuc::GecersizMiktar => {
-                        if miktar > 0 && gonderen != alici && reg.bakiye(&alici).checked_add(miktar).is_some() {
-                            panic!("KALKAN HATASI tur={}: gecerli transfer GecersizMiktar dendi", tur);
+                        if miktar > 0
+                            && gonderen != alici
+                            && reg.bakiye(&alici).checked_add(miktar).is_some()
+                        {
+                            panic!(
+                                "KALKAN HATASI tur={}: gecerli transfer GecersizMiktar dendi",
+                                tur
+                            );
                         }
                     }
                 }
                 if reg.toplam_arz() != baslangic_arz {
-                    panic!("KALKAN DELINDI tur={}: ARZ DEGISTI! bas={} simdi={}", tur, baslangic_arz, reg.toplam_arz());
+                    panic!(
+                        "KALKAN DELINDI tur={}: ARZ DEGISTI! bas={} simdi={}",
+                        tur,
+                        baslangic_arz,
+                        reg.toplam_arz()
+                    );
                 }
             }
         }
-        eprintln!("BAKIYE OK: {} tur, arz korundu, yetersiz bakiye reddedildi", turlar);
+        eprintln!(
+            "BAKIYE OK: {} tur, arz korundu, yetersiz bakiye reddedildi",
+            turlar
+        );
     }
 
     #[test]
@@ -985,18 +1038,32 @@ mod tests {
     fn fuzz_kalkan_replay() {
         // ADVERSARIAL FUZZ: replay/cift-harcama kalkani (NonceRegistry).
         use super::NonceRegistry;
-        let turlar: u64 = std::env::var("NONCE_TUR").ok().and_then(|x| x.parse().ok()).unwrap_or(2000);
+        let turlar: u64 = std::env::var("NONCE_TUR")
+            .ok()
+            .and_then(|x| x.parse().ok())
+            .unwrap_or(2000);
         let mut lcg: u64 = 0xC2B2AE3D27D4EB4F;
-        let mut rng = || { lcg = lcg.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); lcg };
+        let mut rng = || {
+            lcg = lcg
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            lcg
+        };
         for tur in 0..turlar {
-            if tur % 1000 == 0 { eprintln!("[nonce] {}/{} tur", tur, turlar); }
+            if tur % 1000 == 0 {
+                eprintln!("[nonce] {}/{} tur", tur, turlar);
+            }
             let mut reg = NonceRegistry::yeni();
             let adres_sayisi = 1 + (rng() % 4) as usize;
             let mut adresler: Vec<[u8; 20]> = Vec::new();
             let mut beklenen: Vec<u64> = Vec::new();
             for _ in 0..adres_sayisi {
-                let mut a = [0u8; 20]; for x in a.iter_mut() { *x = (rng() & 0xff) as u8; }
-                adresler.push(a); beklenen.push(0);
+                let mut a = [0u8; 20];
+                for x in a.iter_mut() {
+                    *x = (rng() & 0xff) as u8;
+                }
+                adresler.push(a);
+                beklenen.push(0);
             }
             let islem_sayisi = 5 + (rng() % 20) as usize;
             for _ in 0..islem_sayisi {
@@ -1006,21 +1073,36 @@ mod tests {
                 let senaryo = rng() % 3;
                 let gelen = match senaryo {
                     0 => exp,
-                    1 => if exp > 0 { exp - 1 } else { exp + 1 },
+                    1 => {
+                        if exp > 0 {
+                            exp - 1
+                        } else {
+                            exp + 1
+                        }
+                    }
                     _ => exp + 1 + (rng() % 5),
                 };
                 let kabul = reg.dogru_mu(&adres, gelen);
                 let olmali = gelen == exp;
                 if kabul != olmali {
-                    panic!("KALKAN DELINDI tur={}: nonce={} beklenen={} kalkan={} olmali={}", tur, gelen, exp, kabul, olmali);
+                    panic!(
+                        "KALKAN DELINDI tur={}: nonce={} beklenen={} kalkan={} olmali={}",
+                        tur, gelen, exp, kabul, olmali
+                    );
                 }
-                if kabul { reg.ilerlet(&adres); beklenen[idx] += 1; }
+                if kabul {
+                    reg.ilerlet(&adres);
+                    beklenen[idx] += 1;
+                }
                 if exp > 0 && reg.dogru_mu(&adres, exp - 1) {
                     panic!("KALKAN DELINDI tur={}: kullanilmis nonce {} tekrar kabul edildi (replay gecti!)", tur, exp - 1);
                 }
             }
         }
-        eprintln!("NONCE OK: {} tur, replay ve atlama reddedildi, dogru nonce ilerledi", turlar);
+        eprintln!(
+            "NONCE OK: {} tur, replay ve atlama reddedildi, dogru nonce ilerledi",
+            turlar
+        );
     }
 }
 
@@ -1270,13 +1352,35 @@ mod on_satis_testleri {
         // ADVERSARIAL FUZZ: belge/diploma kalkani (RecordRegistry).
         use super::RecordRegistry;
         // hash = ham 32-bayt (mevcut testlerle tutarli; keccak katmani ayri).
-        let turlar: u64 = std::env::var("BELGE_TUR").ok().and_then(|x| x.parse().ok()).unwrap_or(2000);
+        let turlar: u64 = std::env::var("BELGE_TUR")
+            .ok()
+            .and_then(|x| x.parse().ok())
+            .unwrap_or(2000);
         let mut lcg: u64 = 0x9E6C63D0676A9A99;
-        let mut rng = || { lcg = lcg.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); lcg };
-        let h32 = |rng: &mut dyn FnMut() -> u64| { let mut a = [0u8; 32]; for x in a.iter_mut() { *x = (rng() & 0xff) as u8; } a };
-        let a20 = |rng: &mut dyn FnMut() -> u64| { let mut a = [0u8; 20]; for x in a.iter_mut() { *x = (rng() & 0xff) as u8; } a };
+        let mut rng = || {
+            lcg = lcg
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            lcg
+        };
+        let h32 = |rng: &mut dyn FnMut() -> u64| {
+            let mut a = [0u8; 32];
+            for x in a.iter_mut() {
+                *x = (rng() & 0xff) as u8;
+            }
+            a
+        };
+        let a20 = |rng: &mut dyn FnMut() -> u64| {
+            let mut a = [0u8; 20];
+            for x in a.iter_mut() {
+                *x = (rng() & 0xff) as u8;
+            }
+            a
+        };
         for tur in 0..turlar {
-            if tur % 1000 == 0 { eprintln!("[belge] {}/{} tur", tur, turlar); }
+            if tur % 1000 == 0 {
+                eprintln!("[belge] {}/{} tur", tur, turlar);
+            }
             let mut reg = RecordRegistry::yeni();
             let gercek_hash = h32(&mut rng);
             let kaydeden = a20(&mut rng);
@@ -1287,7 +1391,9 @@ mod on_satis_testleri {
             }
             // 2: sahte (kayitsiz) hash reddedilmeli
             let mut sahte = h32(&mut rng);
-            while sahte == gercek_hash { sahte = h32(&mut rng); }
+            while sahte == gercek_hash {
+                sahte = h32(&mut rng);
+            }
             if reg.dogrula(&sahte).is_some() {
                 panic!("KALKAN DELINDI tur={}: sahte belge dogrulandi!", tur);
             }
@@ -1296,7 +1402,10 @@ mod on_satis_testleri {
             let idx = (rng() % 32) as usize;
             tahrif[idx] = tahrif[idx].wrapping_add(1);
             if tahrif != gercek_hash && reg.dogrula(&tahrif).is_some() {
-                panic!("KALKAN DELINDI tur={}: tahrif edilmis belge dogrulandi!", tur);
+                panic!(
+                    "KALKAN DELINDI tur={}: tahrif edilmis belge dogrulandi!",
+                    tur
+                );
             }
             // 4: ilk kayit kazanir — ayni hash farkli kaydeden ile ezilmemeli
             let baska = a20(&mut rng);
@@ -1307,6 +1416,9 @@ mod on_satis_testleri {
                 panic!("KALKAN DELINDI tur={}: ilk kaydeden degisti", tur);
             }
         }
-        eprintln!("BELGE OK: {} tur, sahte/tahrif reddedildi, ilk kayit korundu", turlar);
+        eprintln!(
+            "BELGE OK: {} tur, sahte/tahrif reddedildi, ilk kayit korundu",
+            turlar
+        );
     }
 }

@@ -308,18 +308,30 @@ pub async fn run_node(
         let adr = |k: &str| -> Option<[u8; 20]> {
             let h = std::env::var(k).ok()?;
             let b = hex::decode(h.trim().trim_start_matches("0x")).ok()?;
-            if b.len() == 20 { let mut a = [0u8; 20]; a.copy_from_slice(&b); Some(a) } else { None }
+            if b.len() == 20 {
+                let mut a = [0u8; 20];
+                a.copy_from_slice(&b);
+                Some(a)
+            } else {
+                None
+            }
         };
         let adresler = [
-            adr("LSC_GEN_EKOSISTEM"), adr("LSC_GEN_HAZINE"), adr("LSC_GEN_LIKIDITE"),
-            adr("LSC_GEN_TOPLULUK"), adr("LSC_GEN_KURUCU"), adr("LSC_GEN_DESTEKCI"),
+            adr("LSC_GEN_EKOSISTEM"),
+            adr("LSC_GEN_HAZINE"),
+            adr("LSC_GEN_LIKIDITE"),
+            adr("LSC_GEN_TOPLULUK"),
+            adr("LSC_GEN_KURUCU"),
+            adr("LSC_GEN_DESTEKCI"),
         ];
         if adresler.iter().all(|x| x.is_some()) {
             // Ust satirdaki `all(is_some)` garantisi altinda hepsi Some; panige
             // yol acmadan sabit diziyi doldur (None asla gerceklesmez -> 0 kalmaz).
             let mut a = [[0u8; 20]; 6];
             for (i, adr) in adresler.iter().enumerate() {
-                if let Some(v) = adr { a[i] = *v; }
+                if let Some(v) = adr {
+                    a[i] = *v;
+                }
             }
             let dagitim = lsc_engine::genesis::GenesisDagitim::planla(a);
             if dagitim.kapali_mi() {
@@ -334,11 +346,17 @@ pub async fn run_node(
                 let dilim_list = dagitim.dilimler();
                 for (idx, (adres, miktar)) in dilim_list.iter().enumerate() {
                     st.test_bakiye_ekle(*adres, *miktar);
-                    if let Some((cliff_sure, toplam_sure)) = lsc_engine::genesis::dilim_vesting(idx) {
-                        st.vesting_ekle(*adres, lsc_engine::registry::VestingKaydi {
-                            toplam: *miktar, baslangic: vesting_bas,
-                            cliff_sure, toplam_sure,
-                        });
+                    if let Some((cliff_sure, toplam_sure)) = lsc_engine::genesis::dilim_vesting(idx)
+                    {
+                        st.vesting_ekle(
+                            *adres,
+                            lsc_engine::registry::VestingKaydi {
+                                toplam: *miktar,
+                                baslangic: vesting_bas,
+                                cliff_sure,
+                                toplam_sure,
+                            },
+                        );
                     }
                 }
                 st.vesting_zaman_ayarla(vesting_bas);
@@ -520,7 +538,11 @@ pub async fn run_node(
                 match st.ingest(&bytes, now) {
                     Ok(id) => tracing::info!(
                         "Genesis {}: id={}, vertex_sayisi={}",
-                        if mainnet { "yuklendi (pinli)" } else { "uretildi" },
+                        if mainnet {
+                            "yuklendi (pinli)"
+                        } else {
+                            "uretildi"
+                        },
                         hex::encode(&id[..8]),
                         st.vertex_count()
                     ),

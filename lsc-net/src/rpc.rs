@@ -773,44 +773,64 @@ async fn eth_rpc(State(st): State<RpcState>, Json(istek): Json<Value>) -> Json<V
         // eth_getTransactionByHash: MetaMask islem takibi icin sorar.
         // Islem sendRawTransaction'da vertex'e girdi; hash'i geri dogrularz.
         "eth_getTransactionByHash" => {
-            let h = istek.get("params").and_then(|p| p.as_array())
-                .and_then(|a| a.first()).and_then(|v| v.as_str()).unwrap_or("");
-            let bn = { let node = st.node.read().await; node.vertex_count() as u64 };
-            ok(&id, json!({
-                "hash": h,
-                "blockNumber": format!("0x{:x}", bn),
-                "blockHash": format!("0x{:064x}", bn),
-                "transactionIndex": "0x0",
-                "from": "0x0000000000000000000000000000000000000000",
-                "to": "0x0000000000000000000000000000000000000000",
-                "value": "0x0",
-                "gas": "0x5208",
-                "gasPrice": "0x3b9aca00",
-                "nonce": "0x0",
-                "input": "0x"
-            }))
+            let h = istek
+                .get("params")
+                .and_then(|p| p.as_array())
+                .and_then(|a| a.first())
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let bn = {
+                let node = st.node.read().await;
+                node.vertex_count() as u64
+            };
+            ok(
+                &id,
+                json!({
+                    "hash": h,
+                    "blockNumber": format!("0x{:x}", bn),
+                    "blockHash": format!("0x{:064x}", bn),
+                    "transactionIndex": "0x0",
+                    "from": "0x0000000000000000000000000000000000000000",
+                    "to": "0x0000000000000000000000000000000000000000",
+                    "value": "0x0",
+                    "gas": "0x5208",
+                    "gasPrice": "0x3b9aca00",
+                    "nonce": "0x0",
+                    "input": "0x"
+                }),
+            )
         }
 
         // eth_getTransactionReceipt: MetaMask "islem onaylandi mi?" icin sorar.
         // Islem zaten kabul edildi (vertex'e girdi) -> status=0x1 (basarili).
         "eth_getTransactionReceipt" => {
-            let h = istek.get("params").and_then(|p| p.as_array())
-                .and_then(|a| a.first()).and_then(|v| v.as_str()).unwrap_or("");
-            let bn = { let node = st.node.read().await; node.vertex_count() as u64 };
-            ok(&id, json!({
-                "transactionHash": h,
-                "blockNumber": format!("0x{:x}", bn),
-                "blockHash": format!("0x{:064x}", bn),
-                "transactionIndex": "0x0",
-                "from": "0x0000000000000000000000000000000000000000",
-                "to": "0x0000000000000000000000000000000000000000",
-                "cumulativeGasUsed": "0x5208",
-                "gasUsed": "0x5208",
-                "contractAddress": serde_json::Value::Null,
-                "logs": [],
-                "logsBloom": format!("0x{}", "0".repeat(512)),
-                "status": "0x1"
-            }))
+            let h = istek
+                .get("params")
+                .and_then(|p| p.as_array())
+                .and_then(|a| a.first())
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let bn = {
+                let node = st.node.read().await;
+                node.vertex_count() as u64
+            };
+            ok(
+                &id,
+                json!({
+                    "transactionHash": h,
+                    "blockNumber": format!("0x{:x}", bn),
+                    "blockHash": format!("0x{:064x}", bn),
+                    "transactionIndex": "0x0",
+                    "from": "0x0000000000000000000000000000000000000000",
+                    "to": "0x0000000000000000000000000000000000000000",
+                    "cumulativeGasUsed": "0x5208",
+                    "gasUsed": "0x5208",
+                    "contractAddress": serde_json::Value::Null,
+                    "logs": [],
+                    "logsBloom": format!("0x{}", "0".repeat(512)),
+                    "status": "0x1"
+                }),
+            )
         }
 
         // eth_gasPrice: gas fiyati. Testnette dusuk sabit deger (MetaMask sorar).

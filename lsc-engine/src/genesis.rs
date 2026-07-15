@@ -150,11 +150,26 @@ mod tests {
         // kurucu+destekçi 6ay cliff+2yıl. Regresyon kilidi (plan değişirse test kırılır).
         assert_eq!(dilim_vesting(0), None, "ekosistem açık olmalı");
         assert_eq!(dilim_vesting(1), None, "hazine (genesis) açık olmalı");
-        assert_eq!(dilim_vesting(2), Some((0, VESTING_2YIL)), "likidite 2yıl cliffsiz");
+        assert_eq!(
+            dilim_vesting(2),
+            Some((0, VESTING_2YIL)),
+            "likidite 2yıl cliffsiz"
+        );
         assert_eq!(dilim_vesting(3), None, "topluluk açık olmalı");
-        assert_eq!(dilim_vesting(4), Some((CLIFF_6AY, VESTING_2YIL)), "kurucu 6ay+2yıl");
-        assert_eq!(dilim_vesting(5), Some((CLIFF_6AY, VESTING_2YIL)), "destekçi 6ay+2yıl");
-        assert_eq!(DILIM_KURUCU, 4, "kurucu index'i dilimler() sırasıyla tutarlı");
+        assert_eq!(
+            dilim_vesting(4),
+            Some((CLIFF_6AY, VESTING_2YIL)),
+            "kurucu 6ay+2yıl"
+        );
+        assert_eq!(
+            dilim_vesting(5),
+            Some((CLIFF_6AY, VESTING_2YIL)),
+            "destekçi 6ay+2yıl"
+        );
+        assert_eq!(
+            DILIM_KURUCU, 4,
+            "kurucu index'i dilimler() sırasıyla tutarlı"
+        );
     }
 
     #[test]

@@ -659,8 +659,7 @@ impl NodeState {
         // APPEND FAST-PATH: yeni sira, son uygulanan siranin uzantisi mi?
         // Oyleyse onceki state gecerli; sadece YENI kuyrugu isle (sifirlama yok).
         let onceki = &self.son_uygulanan_sira;
-        let append_mi = yeni_sira.len() >= onceki.len()
-            && yeni_sira[..onceki.len()] == onceki[..];
+        let append_mi = yeni_sira.len() >= onceki.len() && yeni_sira[..onceki.len()] == onceki[..];
 
         if append_mi && !onceki.is_empty() {
             let baslangic = onceki.len();
@@ -713,7 +712,9 @@ impl NodeState {
 
         // 3) BELIRLENIMCI sira ile tum vertex'leri yeniden isle.
         for id in &sira {
-            let Some(v) = self.graph.get(id) else { continue };
+            let Some(v) = self.graph.get(id) else {
+                continue;
+            };
             let payload: Vec<u8> = v.payload().to_vec();
             let signer: [u8; 32] = *v.public_key();
             let zaman: u64 = v.timestamp();
@@ -905,9 +906,9 @@ impl NodeState {
                             //    hic reserve edilmedi; gas_price=0 revm-ici, kesinti node'da).
                             //  * BASARISIZ tx'te de gas KESILIR + nonce ILERLER -> "bedava basarisiz
                             //    tx" DoS'u kapanir. Deger transferi yalnizca basari + deger>0'da.
-                            let azami_ucret = crate::avm::gas_ucreti_hesapla(
-                                crate::avm::AVM_GAS_LIMIT,
-                            ) as crate::registry::Tutar;
+                            let azami_ucret =
+                                crate::avm::gas_ucreti_hesapla(crate::avm::AVM_GAS_LIMIT)
+                                    as crate::registry::Tutar;
                             if self.bakiye_registry.bakiye(&gonderen) >= c.deger
                                 && self.lsc_registry.bakiye(&gonderen) >= azami_ucret
                             {
@@ -1302,7 +1303,11 @@ mod tests {
         let ps_a = StakeKaydi::new(adr_a, 1000).encode();
         let vs_a = Vertex::new_signed(NET, vec![gid], ps_a, now, &sk_a).expect("vs_a");
         node.ingest_networked(&wire::encode(&vs_a), now);
-        assert_eq!(node.stake_miktari(&adr_a), 1000, "adr_a stake DAG'dan geldi");
+        assert_eq!(
+            node.stake_miktari(&adr_a),
+            1000,
+            "adr_a stake DAG'dan geldi"
+        );
 
         let p1 = TokenKaydi::new([0xAA; 20], sym("USDC")).encode();
         let v1 = Vertex::new_signed(NET, vec![*vs_a.id()], p1, now + 1, &sk_a).expect("v1");
@@ -2173,7 +2178,8 @@ mod tests {
         // 2) AYNI nonce=0 ile FARKLI vertex (timestamp+1) -> REPLAY.
         //    beklenen artik 1; nonce=0 eslesmiyor -> bakiye DEGISMEZ.
         let p_replay = TransferKaydi::new(alici, 300, 0).encode();
-        let v_replay = Vertex::new_signed(NET, vec![*v0.id()], p_replay, now + 1, &sk5).expect("vr");
+        let v_replay =
+            Vertex::new_signed(NET, vec![*v0.id()], p_replay, now + 1, &sk5).expect("vr");
         node.ingest_networked(&wire::encode(&v_replay), now + 1);
         assert_eq!(
             node.bakiye(&gonderen),
@@ -2337,7 +2343,11 @@ mod tests {
         assert!(dusen > 0, "deploy gas'i kesilmis olmali (gercek gas_used)");
         let yak = node.lsc_bakiye(&[0u8; 20]);
         let hav = node.lsc_bakiye(&crate::avm::GELISTIRME_HAVUZU);
-        assert_eq!(yak + hav, dusen, "gas = yakim + gelistirme havuzu (kayipsiz bolusum)");
+        assert_eq!(
+            yak + hav,
+            dusen,
+            "gas = yakim + gelistirme havuzu (kayipsiz bolusum)"
+        );
         // KANIT 3: toplam arz korundu
         assert_eq!(node.lsc_toplam_arzi(), arz_basta, "toplam LSC arzi korundu");
     }
@@ -2387,7 +2397,11 @@ mod tests {
         let v_depo =
             Vertex::new_signed(NET, vec![*v_deploy.id()], payload, now, &sk).expect("depozito");
         node.ingest_networked(&wire::encode(&v_depo), now);
-        assert_eq!(node.beklenen_nonce(&gonderen), 2, "depozito sonrasi nonce 2");
+        assert_eq!(
+            node.beklenen_nonce(&gonderen),
+            2,
+            "depozito sonrasi nonce 2"
+        );
         assert_eq!(node.bakiye(&kasa), 500_000, "Kasa 500k AIDAG tuttu");
         assert_eq!(node.bakiye(&gonderen), 500_000, "gonderen 500k'ya dustu");
 
@@ -2409,8 +2423,16 @@ mod tests {
             200_000,
             "B1: alicinin GERCEK bakiyesi kontrat-ici transferle artti (eski kodda 0 = donmus)"
         );
-        assert_eq!(node.bakiye(&kasa), 300_000, "Kasa 500k-200k = 300k'ya dustu");
-        assert_eq!(node.bakiye(&gonderen), 500_000, "gonderen cek'ten etkilenmedi");
+        assert_eq!(
+            node.bakiye(&kasa),
+            300_000,
+            "Kasa 500k-200k = 300k'ya dustu"
+        );
+        assert_eq!(
+            node.bakiye(&gonderen),
+            500_000,
+            "gonderen cek'ten etkilenmedi"
+        );
         // ARZ KORUMASI: hicbir asamada AIDAG yaratilmadi/yok olmadi.
         assert_eq!(
             node.toplam_bakiye_arzi(),
@@ -2663,8 +2685,7 @@ mod tests {
         calldata.extend_from_slice(belge.as_slice());
         let bakiye_call_oncesi = node.lsc_bakiye(&gonderen);
         let p_call = AvmCagri::new(kontrat, 0, 1, calldata).encode();
-        let v1 = Vertex::new_signed(NET, vec![*v0.id()], p_call, now, &sk)
-            .expect("call v");
+        let v1 = Vertex::new_signed(NET, vec![*v0.id()], p_call, now, &sk).expect("call v");
         node.ingest_networked(&wire::encode(&v1), now);
 
         // 4) KANIT: call islendi -> nonce 2, gas kesildi
@@ -3137,8 +3158,16 @@ mod tests {
         );
         assert_eq!(n1.bakiye(&gonderen), 200, "node1: gonderen 200");
 
-        assert_eq!(n1.bakiye(&alici_a), n2.bakiye(&alici_a), "YAKINSAMA alici_a");
-        assert_eq!(n1.bakiye(&alici_b), n2.bakiye(&alici_b), "YAKINSAMA alici_b");
+        assert_eq!(
+            n1.bakiye(&alici_a),
+            n2.bakiye(&alici_a),
+            "YAKINSAMA alici_a"
+        );
+        assert_eq!(
+            n1.bakiye(&alici_b),
+            n2.bakiye(&alici_b),
+            "YAKINSAMA alici_b"
+        );
         assert_eq!(
             n1.bakiye(&gonderen),
             n2.bakiye(&gonderen),
@@ -3208,8 +3237,6 @@ mod tests {
         assert_eq!(n2.toplam_bakiye_arzi(), 1000, "node2 arz sabit");
     }
 
-
-
     // INVARIANT: artimli (append fast-path + reorg fallback) sonucu, HER ZAMAN
     // tam-yeniden-hesap ile AYNI olmali. Rastgele DAG yapilari uret; her
     // adimda iki node karsilastir: (A) artimli yol (normal ingest),
@@ -3223,7 +3250,12 @@ mod tests {
 
         // Deterministik pseudo-random (sabit tohum -> tekrarlanabilir).
         let mut rng: u64 = 0x1234_5678_9abc_def0;
-        let mut next = || { rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17; rng };
+        let mut next = || {
+            rng ^= rng << 13;
+            rng ^= rng >> 7;
+            rng ^= rng << 17;
+            rng
+        };
 
         let sk = SigningKey::from_bytes(&[9u8; 32]);
         let gonderen = crate::registry::public_key_to_adres(&sk.verifying_key().to_bytes());
@@ -3247,7 +3279,9 @@ mod tests {
             parents.push(p1);
             if tips.len() > 1 && next() % 3 == 0 {
                 let p2 = tips[(next() as usize) % tips.len()];
-                if p2 != p1 { parents.push(p2); }
+                if p2 != p1 {
+                    parents.push(p2);
+                }
             }
             parents.sort();
             parents.dedup();
@@ -3276,19 +3310,23 @@ mod tests {
 
             // KARSILASTIR: artimli (a) == tam-hesap (b)
             assert_eq!(
-                a.bakiye(&gonderen), b.bakiye(&gonderen),
+                a.bakiye(&gonderen),
+                b.bakiye(&gonderen),
                 "adim {adim}: gonderen bakiye artimli != tam"
             );
             assert_eq!(
-                a.bakiye(&[0x55; 20]), b.bakiye(&[0x55; 20]),
+                a.bakiye(&[0x55; 20]),
+                b.bakiye(&[0x55; 20]),
                 "adim {adim}: alici bakiye artimli != tam"
             );
             assert_eq!(
-                a.beklenen_nonce(&gonderen), b.beklenen_nonce(&gonderen),
+                a.beklenen_nonce(&gonderen),
+                b.beklenen_nonce(&gonderen),
                 "adim {adim}: nonce artimli != tam"
             );
             assert_eq!(
-                a.toplam_bakiye_arzi(), b.toplam_bakiye_arzi(),
+                a.toplam_bakiye_arzi(),
+                b.toplam_bakiye_arzi(),
                 "adim {adim}: ARZ artimli != tam"
             );
         }
@@ -3357,26 +3395,37 @@ mod tests {
             }
 
             adim += 1;
-            if alinan == 0 || offset >= total { 
+            if alinan == 0 || offset >= total {
                 // total, YENI ekleme sonrasi degismis olabilir; bir tur daha dene.
                 let guncel_total = peer.export_vertices().len();
-                if offset >= guncel_total { break; }
+                if offset >= guncel_total {
+                    break;
+                }
             }
-            if adim > 50 { break; } // sonsuz dongu guvenligi
+            if adim > 50 {
+                break;
+            } // sonsuz dongu guvenligi
         }
 
         // KANIT: ceken, peer'daki TUM vertex'lere sahip mi?
-        let peer_ids: std::collections::BTreeSet<VertexId> =
-            peer.export_vertices().iter()
-                .filter_map(|b| crate::dag::wire::decode(b).ok().map(|v| *v.id()))
-                .collect();
-        let ceken_ids: std::collections::BTreeSet<VertexId> =
-            ceken.export_vertices().iter()
-                .filter_map(|b| crate::dag::wire::decode(b).ok().map(|v| *v.id()))
-                .collect();
+        let peer_ids: std::collections::BTreeSet<VertexId> = peer
+            .export_vertices()
+            .iter()
+            .filter_map(|b| crate::dag::wire::decode(b).ok().map(|v| *v.id()))
+            .collect();
+        let ceken_ids: std::collections::BTreeSet<VertexId> = ceken
+            .export_vertices()
+            .iter()
+            .filter_map(|b| crate::dag::wire::decode(b).ok().map(|v| *v.id()))
+            .collect();
 
         let eksik: Vec<_> = peer_ids.difference(&ceken_ids).collect();
-        eprintln!("[SYNC] peer={} ceken={} eksik={}", peer_ids.len(), ceken_ids.len(), eksik.len());
+        eprintln!(
+            "[SYNC] peer={} ceken={} eksik={}",
+            peer_ids.len(),
+            ceken_ids.len(),
+            eksik.len()
+        );
         assert!(
             eksik.is_empty(),
             "SYNC ATLADI: ceken'de {} vertex eksik (offset-kaymasi bug'i)",
