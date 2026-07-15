@@ -38,6 +38,12 @@ avm-sozlesmeler/*.bin
 !avm-sozlesmeler/Token.sol
 avm-sozlesmeler/token-cikti/
 
+# AVM testlerine include_str! ile gomulu bytecode'lar: temiz CI checkout'unda da
+# derlenebilmesi icin izlenmeli (aksi halde .bin uretilmeden cargo test derlenmez).
+!avm-sozlesmeler/BelgeDamgasi_sol_BelgeDamgasi.bin
+!avm-sozlesmeler/Kasa.sol
+!avm-sozlesmeler/Kasa.bin
+
 # Owner/faucet anahtari
 *anahtar*
 faucet_anahtar.txt

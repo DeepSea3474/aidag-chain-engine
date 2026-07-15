@@ -277,6 +277,23 @@ impl BakiyeRegistry {
         }
     }
 
+    /// KOPRU 2 (AVM): TUM AIDAG bakiyelerini (adres->tutar) dondur.
+    /// EVM'e calistirmadan ONCE tam gorunum vermek icin (avm_db seed).
+    pub fn tum_bakiyeler(&self) -> &HashMap<[u8; 20], Tutar> {
+        &self.bakiyeler
+    }
+
+    /// KOPRU 2 (AVM geri-yansitma / B1): EVM sonrasi AIDAG bakiyelerini deftere
+    /// KALICI aynala. Kontrat-ici tum native hareketler (payable/withdraw/split)
+    /// boylece gercek deftere gecer -> fon donmasi biter.
+    /// ARZ KORUMASI: cagiran, avm_db'yi calistirmadan ONCE bu defterin TAM
+    /// kopyasiyla seed etmis olmali; EVM value-korumalidir (gas_price=0, native
+    /// yaratmaz/yakmaz) -> sum(kaynak) == onceki toplam_arz. Vesting kilit-katmani
+    /// AYRIDIR (vesting map'e dokunulmaz; yalnizca ham bakiyeler guncellenir).
+    pub fn aidag_aynala(&mut self, kaynak: &HashMap<[u8; 20], Tutar>) {
+        self.bakiyeler = kaynak.clone();
+    }
+
     /// Defterdeki toplam serbest AIDAG (arz denetimi/test icin).
     pub fn toplam_arz(&self) -> Tutar {
         self.bakiyeler.values().copied().sum()

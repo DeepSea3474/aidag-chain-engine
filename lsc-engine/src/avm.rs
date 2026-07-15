@@ -64,6 +64,19 @@ impl AidagDatabase {
         self.aidag_bakiyeler.get(adres).copied().unwrap_or(0)
     }
 
+    /// KOPRU 2 (B1): TUM AIDAG bakiyelerini kaynak defterden yukle. EVM'e calistirma
+    /// ONCESI TAM gorunum verir -> kontrat, ucuncu-taraflar dahil her hesabin dogru
+    /// bakiyesini gorur. Mevcut aidag_bakiyeler TAMAMEN degistirilir; KOD/STORAGE
+    /// korunur (deploy edilmis kontratlar kalici kalir).
+    pub fn aidag_yukle_hepsi(&mut self, kaynak: &HashMap<[u8; 20], crate::registry::Tutar>) {
+        self.aidag_bakiyeler = kaynak.clone();
+    }
+
+    /// KOPRU 2 (B1): EVM sonrasi TUM AIDAG bakiyelerini dondur (deftere geri aynalamak icin).
+    pub fn aidag_tumu(&self) -> &HashMap<[u8; 20], crate::registry::Tutar> {
+        &self.aidag_bakiyeler
+    }
+
     /// KOPRU 5: bir adrese sozlesme kodu (bytecode) koy (deploy/test).
     pub fn kod_koy(&mut self, adres: [u8; 20], kod: Bytecode) {
         self.kodlar.insert(adres, kod);

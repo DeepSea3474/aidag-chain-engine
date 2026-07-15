@@ -911,9 +911,12 @@ impl NodeState {
                             if self.bakiye_registry.bakiye(&gonderen) >= c.deger
                                 && self.lsc_registry.bakiye(&gonderen) >= azami_ucret
                             {
-                                // gonderenin LSC'sini avm_db'ye yukle (EVM kontrat mantigi gormesi icin).
-                                let bak = self.bakiye_registry.bakiye(&gonderen);
-                                self.avm_db.aidag_koy(gonderen, bak);
+                                // B1 (SEED): EVM'e TAM AIDAG gorunumu ver. Yalniz gonderen
+                                // degil, TUM hesaplar yuklenir ki kontrat-ici hareketler
+                                // (payable/withdraw/ucuncu-tarafa odeme) dogru bakiyelerle
+                                // yurusun. gas_price=0 -> EVM native yaratmaz/yakmaz.
+                                self.avm_db
+                                    .aidag_yukle_hepsi(self.bakiye_registry.tum_bakiyeler());
                                 // KONTRAT calistir: deploy (hedef=sifir) ya da call. deger EVM'e
                                 // verilir ki kontrat mantigi (payable vb.) dogru tetiklensin.
                                 let sonuc = crate::avm::avm_calistir(
@@ -940,12 +943,14 @@ impl NodeState {
                                     );
                                     // nonce HER DURUMDA ilerler (basarisiz tx replay'i de engellenir).
                                     self.nonce_registry.ilerlet(&gonderen);
-                                    // Deger hareketi YALNIZCA basarili yurutmede (ARZ KORUMALI).
-                                    if r.basarili && c.deger > 0 {
-                                        let _ = self
-                                            .bakiye_registry
-                                            .transfer(&gonderen, &c.hedef, c.deger);
-                                    }
+                                    // B1 (MIRROR): EVM'in urettigi TUM AIDAG state-diff'i
+                                    // gercek deftere geri aynala. Ust-seviye `deger` dahil TUM
+                                    // kontrat-ici hareketler burada yansir -> fon donmasi biter.
+                                    // Basarisiz/revert'te EVM state'i geri sarilmis olur ->
+                                    // aynalama seed ile ayni kalir (guvenli no-op). Eski
+                                    // ust-seviye `transfer` KALDIRILDI (deger'i EVM zaten tasidi;
+                                    // aksi halde CIFT sayim olurdu).
+                                    self.bakiye_registry.aidag_aynala(self.avm_db.aidag_tumu());
                                 }
                             }
                         }
@@ -2335,6 +2340,83 @@ mod tests {
         assert_eq!(yak + hav, dusen, "gas = yakim + gelistirme havuzu (kayipsiz bolusum)");
         // KANIT 3: toplam arz korundu
         assert_eq!(node.lsc_toplam_arzi(), arz_basta, "toplam LSC arzi korundu");
+    }
+
+    // B1 KANIT (fon donmasi COZULDU): kontrat-tutulan native AIDAG ucuncu tarafa
+    // gonderilince gercek defter (bakiye_registry) GUNCELLENIR. Eski kodda kontrat-ici
+    // hareket yalniz avm_db'de kalir, alicinin gercek bakiyesi ARTMAZ -> fon donar.
+    // Senaryo: Kasa deploy -> depozito(500k) -> cek(alici, 200k). Kanit: alici gercek
+    // bakiyesi 200k olur, Kasa 300k'ya duser, AIDAG toplam arzi degismez.
+    #[test]
+    fn avm_kontrat_ici_transfer_gercek_deftere_yansir_b1() {
+        use crate::registry::public_key_to_adres;
+        use crate::tx::AvmCagri;
+        let now = 1_000_000;
+        let mut node = NodeState::new_devnet(NET);
+        let (gen, gid) = genesis_bytes(1, now);
+        node.ingest_networked(&gen, now);
+
+        let sk = SigningKey::from_bytes(&[0x42u8; 32]);
+        let gonderen = public_key_to_adres(&sk.verifying_key().to_bytes());
+        let alici = [0x22u8; 20]; // ucuncu taraf (baslangicta 0 AIDAG)
+
+        // gas (LSC) + teminat (AIDAG) bakiyesi ver.
+        node.lsc_test_bakiye_ekle(gonderen, 100_000_000_000_000_000);
+        node.test_bakiye_ekle(gonderen, 1_000_000); // AIDAG
+        let aidag_arz_basta = node.toplam_bakiye_arzi();
+        assert_eq!(aidag_arz_basta, 1_000_000, "baslangic AIDAG arzi");
+
+        // --- 1) DEPLOY Kasa (nonce=0) ---
+        let bin_hex = include_str!("../../avm-sozlesmeler/Kasa.bin").trim();
+        let deploy_kod: Vec<u8> = (0..bin_hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&bin_hex[i..i + 2], 16).unwrap())
+            .collect();
+        let payload = AvmCagri::new([0u8; 20], 0, 0, deploy_kod).encode();
+        let v_deploy = Vertex::new_signed(NET, vec![gid], payload, now, &sk).expect("deploy");
+        node.ingest_networked(&wire::encode(&v_deploy), now);
+        assert_eq!(node.beklenen_nonce(&gonderen), 1, "deploy sonrasi nonce 1");
+        let kontratlar = node.avm_kontrat_adresleri();
+        assert_eq!(kontratlar.len(), 1, "tek kontrat deploy edildi");
+        let kasa = kontratlar[0];
+
+        // --- 2) depozito() ile Kasa'ya 500k AIDAG yatir (nonce=1, deger=500k) ---
+        // DAG zinciri: parent = deploy vertex (sira: deploy -> depozito -> cek).
+        let depozito_data = vec![0xa8, 0x19, 0xfd, 0xf8]; // depozito()
+        let payload = AvmCagri::new(kasa, 500_000, 1, depozito_data).encode();
+        let v_depo =
+            Vertex::new_signed(NET, vec![*v_deploy.id()], payload, now, &sk).expect("depozito");
+        node.ingest_networked(&wire::encode(&v_depo), now);
+        assert_eq!(node.beklenen_nonce(&gonderen), 2, "depozito sonrasi nonce 2");
+        assert_eq!(node.bakiye(&kasa), 500_000, "Kasa 500k AIDAG tuttu");
+        assert_eq!(node.bakiye(&gonderen), 500_000, "gonderen 500k'ya dustu");
+
+        // --- 3) cek(alici, 200k): Kasa kontrat-ici olarak alici'ya gonderir (nonce=2) ---
+        let mut cek_data = vec![0x8c, 0x7b, 0x1f, 0xb7]; // cek(address,uint256)
+        cek_data.extend_from_slice(&[0u8; 12]); // address soldan 12 sifir dolgu
+        cek_data.extend_from_slice(&alici); // 20 bayt adres
+        let mut amt = [0u8; 32];
+        amt[24..32].copy_from_slice(&200_000u64.to_be_bytes()); // uint256 big-endian
+        cek_data.extend_from_slice(&amt);
+        let payload = AvmCagri::new(kasa, 0, 2, cek_data).encode();
+        let v_cek = Vertex::new_signed(NET, vec![*v_depo.id()], payload, now, &sk).expect("cek");
+        node.ingest_networked(&wire::encode(&v_cek), now);
+        assert_eq!(node.beklenen_nonce(&gonderen), 3, "cek sonrasi nonce 3");
+
+        // KANIT (B1): kontrat-ici transfer GERCEK deftere yansidi.
+        assert_eq!(
+            node.bakiye(&alici),
+            200_000,
+            "B1: alicinin GERCEK bakiyesi kontrat-ici transferle artti (eski kodda 0 = donmus)"
+        );
+        assert_eq!(node.bakiye(&kasa), 300_000, "Kasa 500k-200k = 300k'ya dustu");
+        assert_eq!(node.bakiye(&gonderen), 500_000, "gonderen cek'ten etkilenmedi");
+        // ARZ KORUMASI: hicbir asamada AIDAG yaratilmadi/yok olmadi.
+        assert_eq!(
+            node.toplam_bakiye_arzi(),
+            aidag_arz_basta,
+            "AIDAG toplam arzi korundu (500k+300k+200k=1M)"
+        );
     }
 
     // KOPRU 5 (KALICILIK): kontrat deploy -> export -> YENI node'da replay ->
