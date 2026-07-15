@@ -898,11 +898,18 @@ impl NodeState {
                             self.nonce_registry.ilerlet(&gonderen);
                         } else {
                             // --- DATA DOLU (CANLI): KONTRAT calistirma. Kod/storage avm_db'de KALICI.
-                            // Gas sabit kesilir + (deger>0 ise) deger gonderen->hedef ARZ-KORUMALI
-                            // lsc_registry.transfer ile tasinir. DETERMINIZM: zaman=vertex.
-                            let lsc_gerekli = ucret as crate::registry::Tutar;
+                            // GAS (B2 duzeltmesi): sabit 21000 DEGIL, GERCEK gas_used'dan ucret.
+                            //  * Upfront: kullanici gas TAVANINI (AVM_GAS_LIMIT) LSC olarak
+                            //    karsilayabilmeli (aksi halde islem calistirilmaz).
+                            //  * Kesinti GERCEK gas_used'dan (fazlasi kesilmez, refund yok cunku
+                            //    hic reserve edilmedi; gas_price=0 revm-ici, kesinti node'da).
+                            //  * BASARISIZ tx'te de gas KESILIR + nonce ILERLER -> "bedava basarisiz
+                            //    tx" DoS'u kapanir. Deger transferi yalnizca basari + deger>0'da.
+                            let azami_ucret = crate::avm::gas_ucreti_hesapla(
+                                crate::avm::AVM_GAS_LIMIT,
+                            ) as crate::registry::Tutar;
                             if self.bakiye_registry.bakiye(&gonderen) >= c.deger
-                                && self.lsc_registry.bakiye(&gonderen) >= lsc_gerekli
+                                && self.lsc_registry.bakiye(&gonderen) >= azami_ucret
                             {
                                 // gonderenin LSC'sini avm_db'ye yukle (EVM kontrat mantigi gormesi icin).
                                 let bak = self.bakiye_registry.bakiye(&gonderen);
@@ -918,26 +925,26 @@ impl NodeState {
                                     zaman,
                                 );
                                 if let Ok(r) = sonuc {
-                                    if r.basarili {
-                                        // 1) LSC deger hareketi: gonderen -> hedef (ARZ KORUMALI).
-                                        //    deger=0 ise transfer no-op olur (guvenli).
-                                        if c.deger > 0 {
-                                            let _ = self
-                                                .bakiye_registry
-                                                .transfer(&gonderen, &c.hedef, c.deger);
-                                        }
-                                        // 2) gas kes (guvenli yol): %50 yak + %50 gelistirme
-                                        let _ = self.lsc_registry.transfer(
-                                            &gonderen,
-                                            &crate::avm::YAKIM_ADRESI,
-                                            yakilan as crate::registry::Tutar,
-                                        );
-                                        let _ = self.lsc_registry.transfer(
-                                            &gonderen,
-                                            &crate::avm::GELISTIRME_HAVUZU,
-                                            gelistirme as crate::registry::Tutar,
-                                        );
-                                        self.nonce_registry.ilerlet(&gonderen);
+                                    // GERCEK gas_used'dan ucret (basari/basarisiz FARK ETMEZ).
+                                    let ucret_ger = crate::avm::gas_ucreti_hesapla(r.gas_used);
+                                    let (yak_g, gel_g) = crate::avm::gas_ucreti_bol(ucret_ger);
+                                    let _ = self.lsc_registry.transfer(
+                                        &gonderen,
+                                        &crate::avm::YAKIM_ADRESI,
+                                        yak_g as crate::registry::Tutar,
+                                    );
+                                    let _ = self.lsc_registry.transfer(
+                                        &gonderen,
+                                        &crate::avm::GELISTIRME_HAVUZU,
+                                        gel_g as crate::registry::Tutar,
+                                    );
+                                    // nonce HER DURUMDA ilerler (basarisiz tx replay'i de engellenir).
+                                    self.nonce_registry.ilerlet(&gonderen);
+                                    // Deger hareketi YALNIZCA basarili yurutmede (ARZ KORUMALI).
+                                    if r.basarili && c.deger > 0 {
+                                        let _ = self
+                                            .bakiye_registry
+                                            .transfer(&gonderen, &c.hedef, c.deger);
                                     }
                                 }
                             }
@@ -2319,22 +2326,13 @@ mod tests {
             1,
             "deploy sonrasi nonce 1 olmali"
         );
-        // KANIT 2: gas kesildi (21000 LSC: yakim + havuz)
-        assert_eq!(
-            node.lsc_bakiye(&gonderen),
-            bakiye_basta - 21_000_000_000_000,
-            "gas kesilmis olmali"
-        );
-        assert_eq!(
-            node.lsc_bakiye(&[0u8; 20]),
-            10_500_000_000_000,
-            "10500 yakildi"
-        );
-        assert_eq!(
-            node.lsc_bakiye(&crate::avm::GELISTIRME_HAVUZU),
-            10_500_000_000_000,
-            "10500 havuz"
-        );
+        // KANIT 2: GERCEK gas_used kesildi (sabit 21000 DEGIL — deploy daha fazla gas).
+        // Dayaniklilik: kesinti > 0, yakim+havuz = kesinti, arz korunur.
+        let dusen = bakiye_basta - node.lsc_bakiye(&gonderen);
+        assert!(dusen > 0, "deploy gas'i kesilmis olmali (gercek gas_used)");
+        let yak = node.lsc_bakiye(&[0u8; 20]);
+        let hav = node.lsc_bakiye(&crate::avm::GELISTIRME_HAVUZU);
+        assert_eq!(yak + hav, dusen, "gas = yakim + gelistirme havuzu (kayipsiz bolusum)");
         // KANIT 3: toplam arz korundu
         assert_eq!(node.lsc_toplam_arzi(), arz_basta, "toplam LSC arzi korundu");
     }
@@ -2593,10 +2591,10 @@ mod tests {
             2,
             "call sonrasi nonce 2 olmali"
         );
-        assert_eq!(
-            node.lsc_bakiye(&gonderen),
-            bakiye_call_oncesi - 21_000_000_000_000,
-            "call gas kesildi"
+        // GERCEK gas_used kesildi (call'un gercek maliyeti). Dayaniklilik: azaldi.
+        assert!(
+            node.lsc_bakiye(&gonderen) < bakiye_call_oncesi,
+            "call gas kesildi (gercek gas_used)"
         );
     }
 
@@ -2634,10 +2632,9 @@ mod tests {
             a_once - 5000,
             "gonderen AIDAG dustu (deger)"
         );
-        assert_eq!(
-            node.lsc_bakiye(&gonderen),
-            l_once - 21_000_000_000_000,
-            "gonderen LSC gas dustu"
+        assert!(
+            node.lsc_bakiye(&gonderen) < l_once,
+            "gonderen LSC gas dustu (gercek gas_used)"
         );
         assert_eq!(
             node.bakiye(&gonderen) + node.bakiye(&hedef),

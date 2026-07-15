@@ -216,6 +216,11 @@ pub const GELISTIRME_HAVUZU: [u8; 20] = [
 
 pub const GAS_FIYATI_LSC: u64 = 1_000_000_000; // 1 gwei/gas (gercek zincir seviyesi; mainnette dinamik).
 
+/// AVM islem gas TAVANI (gas_limit). revm bu tavanda kesilir (runaway/DoS siniri).
+/// Kullanici islemi calistirmadan ONCE bu kadar gas'i (LSC olarak) karsilayabilmeli
+/// (upfront affordability); GERCEK kesinti `gas_used`'dan yapilir (fazlasi kesilmez).
+pub const AVM_GAS_LIMIT: u64 = 3_000_000;
+
 /// Gas ucretini hesapla. gas_used -> toplam LSC ucreti.
 pub fn gas_ucreti_hesapla(gas_used: u64) -> u64 {
     gas_used.saturating_mul(GAS_FIYATI_LSC)
@@ -275,7 +280,7 @@ pub fn avm_calistir(
         .kind(kind)
         .value(U256::from(deger))
         .data(Bytes::from(data.to_vec()))
-        .gas_limit(3_000_000)
+        .gas_limit(AVM_GAS_LIMIT)
         .gas_price(0)
         .build()
         .map_err(|_| "tx olusturulamadi")?;
