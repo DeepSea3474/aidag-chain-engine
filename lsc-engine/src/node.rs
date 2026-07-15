@@ -269,19 +269,6 @@ impl NodeState {
         crate::avm::avm_call_oku(&self.avm_db, gonderen, hedef, data)
     }
 
-    /// eth_sendRawTransaction: ham imzali Ethereum tx'i AVM'de calistir (KALICI).
-    /// Doner: tx_hash (32 bayt). Gonderen imzadan kurtarilir (guvenli).
-    /// NOT: su an AVM state'e kalici yazar; DAG vertex entegrasyonu sonraki adim.
-    pub fn eth_ham_tx_isle(&mut self, raw: &[u8], zaman: u64) -> Result<[u8; 32], &'static str> {
-        // Gonderen'in LSC (gas) bakiyesini avm_db'ye yukle (kontrat mantigi gormesi icin)
-        if let Ok(islem) = crate::avm::ham_eth_tx_coz(raw) {
-            let bak = self.lsc_registry.bakiye(&islem.gonderen);
-            self.avm_db.lsc_koy(islem.gonderen, bak);
-        }
-        let (tx_hash, _sonuc) = crate::avm::ham_eth_tx_isle(&mut self.avm_db, raw, zaman)?;
-        Ok(tx_hash)
-    }
-
     /// Kac farkli adresin LSC bakiyesi var.
     pub fn lsc_hesap_sayisi(&self) -> usize {
         self.lsc_registry.hesap_sayisi()
@@ -1065,48 +1052,42 @@ impl NodeState {
                 if let Some(raw) = crate::tx::ham_eth_tx_coz_payload(payload) {
                     if let Ok(islem) = crate::avm::ham_eth_tx_coz(raw) {
                         let gonderen = islem.gonderen;
-                        let hedef = islem.hedef.unwrap_or([0u8; 20]);
                         // Nonce replay korumasi (canli+replay ayni)
                         if self.nonce_registry.dogru_mu(&gonderen, islem.nonce) {
-                            const ETH_GAS: u64 = 21_000;
-                            let ucret = crate::avm::gas_ucreti_hesapla(ETH_GAS);
-                            let ucret_t = ucret as crate::registry::Tutar;
-                            // Yeterlilik: AIDAG (deger) + LSC (gas), ayri defter
-                            let aidag_yeter = self.bakiye_registry.bakiye(&gonderen) >= islem.deger;
-                            let lsc_yeter = self.lsc_registry.bakiye(&gonderen) >= ucret_t;
-                            if aidag_yeter && lsc_yeter {
-                                // EVM'e gonderen+hedef AIDAG yukle (kontrat mantigi + basari karari)
+                            // B2: upfront affordability gas TAVANINA (AVM_GAS_LIMIT) gore;
+                            // GERCEK kesinti gas_used'dan. AIDAG (deger) + LSC (gas) ayri defter.
+                            let azami_ucret =
+                                crate::avm::gas_ucreti_hesapla(crate::avm::AVM_GAS_LIMIT)
+                                    as crate::registry::Tutar;
+                            if self.bakiye_registry.bakiye(&gonderen) >= islem.deger
+                                && self.lsc_registry.bakiye(&gonderen) >= azami_ucret
+                            {
+                                // B1 (SEED): EVM'e TAM AIDAG gorunumu ver (kontrat-ici
+                                // hareketler ucuncu-taraflar dahil dogru bakiyelerle yurusun).
                                 self.avm_db
-                                    .aidag_koy(gonderen, self.bakiye_registry.bakiye(&gonderen));
-                                self.avm_db
-                                    .aidag_koy(hedef, self.bakiye_registry.bakiye(&hedef));
+                                    .aidag_yukle_hepsi(self.bakiye_registry.tum_bakiyeler());
                                 if let Ok((_h, r)) =
                                     crate::avm::ham_eth_tx_isle(&mut self.avm_db, raw, zaman)
                                 {
-                                    if r.basarili {
-                                        // DEGER = AIDAG (arz-korumali)
-                                        if islem.deger > 0 {
-                                            let _ = self.bakiye_registry.transfer(
-                                                &gonderen,
-                                                &hedef,
-                                                islem.deger,
-                                            );
-                                        }
-                                        // GAS = LSC (%50 yak + %50 gelistirme)
-                                        let (yakilan, gelistirme) =
-                                            crate::avm::gas_ucreti_bol(ucret);
-                                        let _ = self.lsc_registry.transfer(
-                                            &gonderen,
-                                            &crate::avm::YAKIM_ADRESI,
-                                            yakilan as crate::registry::Tutar,
-                                        );
-                                        let _ = self.lsc_registry.transfer(
-                                            &gonderen,
-                                            &crate::avm::GELISTIRME_HAVUZU,
-                                            gelistirme as crate::registry::Tutar,
-                                        );
-                                        self.nonce_registry.ilerlet(&gonderen);
-                                    }
+                                    // B2: GERCEK gas_used (basari/basarisiz FARK ETMEZ) -> LSC.
+                                    let ucret_ger = crate::avm::gas_ucreti_hesapla(r.gas_used);
+                                    let (yak_g, gel_g) = crate::avm::gas_ucreti_bol(ucret_ger);
+                                    let _ = self.lsc_registry.transfer(
+                                        &gonderen,
+                                        &crate::avm::YAKIM_ADRESI,
+                                        yak_g as crate::registry::Tutar,
+                                    );
+                                    let _ = self.lsc_registry.transfer(
+                                        &gonderen,
+                                        &crate::avm::GELISTIRME_HAVUZU,
+                                        gel_g as crate::registry::Tutar,
+                                    );
+                                    // nonce HER DURUMDA ilerler (basarisiz tx replay'i de engellenir).
+                                    self.nonce_registry.ilerlet(&gonderen);
+                                    // B1 (MIRROR): EVM'in urettigi TUM AIDAG state-diff'i (ust
+                                    // seviye deger dahil) gercek deftere aynala -> fon donmasi biter.
+                                    // Eski ust-seviye transfer KALDIRILDI (cift sayim olurdu).
+                                    self.bakiye_registry.aidag_aynala(self.avm_db.aidag_tumu());
                                 }
                             }
                         }
@@ -2490,6 +2471,107 @@ mod tests {
         );
         assert_ne!(adresler[0], adresler[1], "iki kontrat adresi FARKLI");
         assert_eq!(node.beklenen_nonce(&gonderen), 2, "iki deploy -> nonce 2");
+    }
+
+    // B2(HAM_ETH)+B1 KANIT (raw-eth / MetaMask yolu, tip=12): imzali eth tx'lerle
+    // Kasa deploy -> depozito(500k) -> cek(alici,200k). Kontrat-ici AIDAG hareketi
+    // GERCEK deftere yansir (fon donmasi biter), gercek gas_used kesilir, arz korunur.
+    // AVM_CAGRI ile AYNI cekirdek (avm_calistir + seed + aynala).
+    #[test]
+    fn ham_eth_kontrat_ici_transfer_gercek_deftere_yansir_b1_b2() {
+        use alloy_consensus::{SignableTransaction, TxLegacy};
+        use alloy_eips::eip2718::Encodable2718;
+        use alloy_primitives::{Signature, TxKind as ATxKind, U256 as AU256};
+        use alloy_signer::SignerSync;
+        use alloy_signer_local::PrivateKeySigner;
+
+        let now = 1_000_000;
+        let mut node = NodeState::new_devnet(NET);
+        let (gen, gid) = genesis_bytes(1, now);
+        node.ingest_networked(&gen, now);
+
+        // Eth imzalayan (gonderen imzadan kurtarilir) + vertex imzalayan (relayer, ayri).
+        let eth: PrivateKeySigner =
+            "0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318"
+                .parse()
+                .unwrap();
+        let gonderen = crate::avm::evm_to_adres(&eth.address());
+        let vsk = SigningKey::from_bytes(&[0x88u8; 32]);
+
+        node.lsc_test_bakiye_ekle(gonderen, 100_000_000_000_000_000); // gas (LSC)
+        node.test_bakiye_ekle(gonderen, 1_000_000); // AIDAG (deger)
+        let arz_basta = node.toplam_bakiye_arzi();
+        let alici = [0x22u8; 20];
+
+        // imzali raw eth tx (EIP-2718) uret.
+        let raw_eth = |nonce: u64, to: ATxKind, value: u128, input: Vec<u8>| -> Vec<u8> {
+            let tx = TxLegacy {
+                chain_id: Some(NET as u64),
+                nonce,
+                gas_price: 0,
+                gas_limit: 3_000_000,
+                to,
+                value: AU256::from(value),
+                input: input.into(),
+            };
+            let imza: Signature = eth.sign_hash_sync(&tx.signature_hash()).unwrap();
+            let zarf: alloy_consensus::TxEnvelope = tx.into_signed(imza).into();
+            zarf.encoded_2718()
+        };
+
+        let bin_hex = include_str!("../../avm-sozlesmeler/Kasa.bin").trim();
+        let kod: Vec<u8> = (0..bin_hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&bin_hex[i..i + 2], 16).unwrap())
+            .collect();
+
+        // 1) DEPLOY (eth nonce=0)
+        let raw1 = raw_eth(0, ATxKind::Create, 0, kod);
+        let pl1 = crate::tx::ham_eth_tx_payload(&raw1);
+        let v1 = Vertex::new_signed(NET, vec![gid], pl1, now, &vsk).expect("deploy");
+        node.ingest_networked(&wire::encode(&v1), now);
+        let kasa = node.avm_kontrat_adresleri()[0];
+
+        // 2) depozito() (eth nonce=1, value=500k AIDAG)
+        let raw2 = raw_eth(
+            1,
+            ATxKind::Call(crate::avm::adres_to_evm(&kasa)),
+            500_000,
+            vec![0xa8, 0x19, 0xfd, 0xf8],
+        );
+        let pl2 = crate::tx::ham_eth_tx_payload(&raw2);
+        let v2 = Vertex::new_signed(NET, vec![*v1.id()], pl2, now, &vsk).expect("depozito");
+        node.ingest_networked(&wire::encode(&v2), now);
+        assert_eq!(
+            node.bakiye(&kasa),
+            500_000,
+            "Kasa 500k tuttu (raw-eth depozito)"
+        );
+
+        // 3) cek(alici, 200k) (eth nonce=2)
+        let mut cek = vec![0x8c, 0x7b, 0x1f, 0xb7];
+        cek.extend_from_slice(&[0u8; 12]);
+        cek.extend_from_slice(&alici);
+        let mut amt = [0u8; 32];
+        amt[24..32].copy_from_slice(&200_000u64.to_be_bytes());
+        cek.extend_from_slice(&amt);
+        let raw3 = raw_eth(2, ATxKind::Call(crate::avm::adres_to_evm(&kasa)), 0, cek);
+        let pl3 = crate::tx::ham_eth_tx_payload(&raw3);
+        let v3 = Vertex::new_signed(NET, vec![*v2.id()], pl3, now, &vsk).expect("cek");
+        node.ingest_networked(&wire::encode(&v3), now);
+
+        // KANIT (B1 raw-eth): kontrat-ici transfer GERCEK deftere yansidi.
+        assert_eq!(
+            node.bakiye(&alici),
+            200_000,
+            "B1(raw-eth): alici gercek bakiyesi kontrat-ici transferle 200k oldu"
+        );
+        assert_eq!(node.bakiye(&kasa), 300_000, "Kasa 300k'ya dustu");
+        assert_eq!(
+            node.toplam_bakiye_arzi(),
+            arz_basta,
+            "AIDAG toplam arzi korundu (raw-eth yolu)"
+        );
     }
 
     // KOPRU 5 (KALICILIK): kontrat deploy -> export -> YENI node'da replay ->
