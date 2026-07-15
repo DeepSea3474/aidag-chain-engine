@@ -767,9 +767,67 @@ mod tests {
         assert_eq!(slot0.present_value, U256::from(42u64), "slot 0 = 42 olmali");
     }
 
+    // C2 KANIT (front-running onleme): IKI FARKLI adres AYNI belge hash'ini BAGIMSIZ
+    // kaydedebilir. Eski global-key + ilk-gelen-kazanir'da ikinci kayit REDDEDILIRDI
+    // (saldirgan mempool'da gorup sahiplenir). Namespace ile ikisi de kendi damgasini tutar.
+    #[test]
+    fn belge_damgasi_front_running_onlenir_c2() {
+        use revm::primitives::{keccak256, U256};
+        let bin_hex =
+            include_str!("../../avm-sozlesmeler/BelgeDamgasi_sol_BelgeDamgasi.bin").trim();
+        let deploy_kod = hex_decode(bin_hex);
+        let mut db = AidagDatabase::yeni();
+        let deployer = [0x01u8; 20];
+        let d = avm_calistir(&mut db, &deployer, &[0u8; 20], 0, &deploy_kod, 100).expect("deploy");
+        let kontrat = d.olusan_adres.expect("kontrat");
+
+        let hash = keccak256(b"ayni belge: sozlesme #1");
+        let sel_kaydet = &keccak256(b"kaydet(bytes32)")[0..4];
+        let mut kaydet_data = Vec::new();
+        kaydet_data.extend_from_slice(sel_kaydet);
+        kaydet_data.extend_from_slice(hash.as_slice());
+
+        let alice = [0xA1u8; 20];
+        let bob = [0xB0u8; 20]; // farkli kullanici / saldirgan
+
+        // Alice kaydeder (nonce 0)
+        let ra =
+            avm_calistir(&mut db, &alice, &kontrat, 0, &kaydet_data, 101).expect("alice kaydet");
+        assert!(ra.basarili, "alice kaydi basarili");
+        // Bob AYNI hash'i kaydeder -> ESKI kodda REVERT olurdu; namespace ile BASARILI.
+        let rb = avm_calistir(&mut db, &bob, &kontrat, 0, &kaydet_data, 102).expect("bob kaydet");
+        assert!(
+            rb.basarili,
+            "C2: bob ayni hash'i BAGIMSIZ kaydedebilir (front-run sahiplik gaspi yok)"
+        );
+
+        // dogrula(kim, hash) -> bool varMi
+        let sel_dogrula = &keccak256(b"dogrula(address,bytes32)")[0..4];
+        let dogrula = |kim: [u8; 20]| -> bool {
+            let mut dd = Vec::new();
+            dd.extend_from_slice(sel_dogrula);
+            let mut a32 = [0u8; 32];
+            a32[12..32].copy_from_slice(&kim);
+            dd.extend_from_slice(&a32);
+            dd.extend_from_slice(hash.as_slice());
+            let cikti = avm_call_oku(&db, &[0u8; 20], &kontrat, &dd).expect("dogrula");
+            cikti.get(31).copied().unwrap_or(0) == 1
+        };
+        assert!(dogrula(alice), "alice KENDI damgasini gorur");
+        assert!(dogrula(bob), "bob KENDI damgasini gorur");
+
+        // toplamKayit == 2 (iki bagimsiz kayit)
+        let sel_top = &keccak256(b"toplamKayit()")[0..4];
+        let cikti = avm_call_oku(&db, &[0u8; 20], &kontrat, sel_top).expect("toplamKayit");
+        assert_eq!(
+            U256::from_be_slice(&cikti),
+            U256::from(2u64),
+            "iki bagimsiz kayit (front-run engellendi)"
+        );
+    }
+
     // KOPRU 5 KURUMSAL KANIT: gercek Solidity sozlesmesi (BelgeDamgasi).
-    // deploy -> kaydet(hash) -> dogrula(hash)=true -> ayni hash tekrar kaydet=RED.
-    // Bytecode solcjs 0.8.35 ile derlendi (avm-sozlesmeler/BelgeDamgasi.sol).
+    // deploy -> kaydet(hash) -> dogrula(kaydeden,hash)=true -> ayni (adres,hash) tekrar=RED.
     #[test]
     fn kopru5_belge_damgasi_kurumsal() {
         use revm::primitives::{keccak256, Bytes, TxKind};
@@ -817,7 +875,8 @@ mod tests {
 
         // 3) Fonksiyon selector'lari (revm keccak256)
         let sel_kaydet = &keccak256(b"kaydet(bytes32)")[0..4];
-        let sel_dogrula = &keccak256(b"dogrula(bytes32)")[0..4];
+        // C2: dogrula artik (address kaydeden, bytes32 hash) alir (namespace).
+        let sel_dogrula = &keccak256(b"dogrula(address,bytes32)")[0..4];
 
         // Ornek belge hash'i (32 bayt)
         let belge_hash = keccak256(b"AIDAG ornek belge: diploma #2026-001");
@@ -838,9 +897,12 @@ mod tests {
         println!("KURUMSAL: 1. kayit basarili={}", r1.is_success());
         assert!(r1.is_success(), "ilk kayit basarili olmali");
 
-        // 5) DOGRULA(belge_hash) -> varMi=true bekliyoruz
+        // 5) DOGRULA(kurum, belge_hash) -> varMi=true bekliyoruz
         let mut data2 = Vec::new();
         data2.extend_from_slice(sel_dogrula);
+        let mut kurum32 = [0u8; 32];
+        kurum32[12..32].copy_from_slice(&kurum);
+        data2.extend_from_slice(&kurum32);
         data2.extend_from_slice(belge_hash.as_slice());
         let dogrula_tx = TxEnv::builder()
             .caller(adres_to_evm(&kurum))
