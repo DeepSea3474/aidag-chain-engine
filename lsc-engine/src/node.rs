@@ -134,14 +134,14 @@ impl NodeState {
     /// decode → insert → ghostdag update. Hata aşama tipini korur.
     pub fn ingest(&mut self, bytes: &[u8], now: u64) -> Result<VertexId, IngestError> {
         let id = ingest_bytes(&mut self.graph, &mut self.ghostdag, bytes, now)?;
-        // KALKAN: ingest basarili -> payload tip=2 (TokenKaydi) ise registry'ye
-        // yonlendir. ingest_networked/synced integrate_vertex'ten gecer (kalkan
-        // orada); ingest AYRI yoldan (pipeline::ingest_bytes) gider, bu yuzden
-        // kalkani BURADA da cagiririz -> URETICI de kendi token'ini isler
-        // (A ve B tutarli: ikisi de registry'ye yazar).
-        if let Ok(v) = wire::decode(bytes) {
-            self.kalkana_yonlendir(v.payload(), v.public_key(), v.timestamp(), false);
-        }
+        // DURUM = ghostdag.total_order()'dan TURETILIR (belirlenimci, idempotent).
+        // KRITIK (K1): eskiden burada dogrudan `kalkana_yonlendir` cagriliyordu AMA
+        // `son_uygulanan_sira` guncellenmiyordu; sonraki `durumu_yeniden_uygula`
+        // append fast-path'i AYNI vertex'i TEKRAR isliyordu. Nonce'suz STAKE bu
+        // yuzden CIFT sayiliyordu (transferler nonce ile korunuyordu, stake degil)
+        // -> uretici dugum agdan ayrisiyordu (konsensus bolunmesi). Cozum: ingest de
+        // tek yol olan total_order-turevi yeniden-uygulamaya guvenir (idempotent).
+        self.durumu_yeniden_uygula();
         Ok(id)
     }
 
