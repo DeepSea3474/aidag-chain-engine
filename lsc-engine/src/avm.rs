@@ -1469,6 +1469,110 @@ mod tests {
         );
     }
 
+    // C4 KANIT (KUBR hardening): sifir-adres reddi + ownership devri + approve-race
+    // (increase/decreaseAllowance) dogru calisir.
+    #[test]
+    fn kubr_hardening_zero_address_ownership_allowance_c4() {
+        use revm::primitives::{keccak256, U256};
+        let bin_hex = include_str!("kubr_bytecode.hex").trim();
+        let mut deploy_data = hex_decode(bin_hex);
+        let custodian = [0x11u8; 20];
+        let mut c32 = [0u8; 32];
+        c32[12..32].copy_from_slice(&custodian);
+        deploy_data.extend_from_slice(&c32);
+        let ilk_arz = U256::from(1000u64) * U256::from(10u64).pow(U256::from(18u64));
+        let mut a32 = [0u8; 32];
+        a32.copy_from_slice(&ilk_arz.to_be_bytes::<32>());
+        deploy_data.extend_from_slice(&a32);
+
+        let mut db = AidagDatabase::yeni();
+        let sahip = [0xAAu8; 20];
+        let d = avm_calistir(&mut db, &sahip, &[0u8; 20], 0, &deploy_data, 100).expect("deploy");
+        let kubr = d.olusan_adres.expect("kontrat");
+
+        // 1) transfer(address(0), 100) -> REVERT (C4 zero-address korumasi)
+        let mut tr = Vec::new();
+        tr.extend_from_slice(&keccak256(b"transfer(address,uint256)")[0..4]);
+        tr.extend_from_slice(&[0u8; 32]); // to = 0x0
+        let mut m = [0u8; 32];
+        m[24..32].copy_from_slice(&100u64.to_be_bytes());
+        tr.extend_from_slice(&m);
+        let r = avm_calistir(&mut db, &sahip, &kubr, 0, &tr, 101).expect("transfer call");
+        assert!(!r.basarili, "C4: sifir adrese transfer REVERT etmeli");
+
+        // 2) increaseAllowance x2 (100+100) - decreaseAllowance(50) -> 150
+        let spender = [0xCCu8; 20];
+        let mut sp32 = [0u8; 32];
+        sp32[12..32].copy_from_slice(&spender);
+        let allow_call = |db: &mut AidagDatabase, imza: &[u8], miktar: u64, zaman: u64| -> bool {
+            let mut d = Vec::new();
+            d.extend_from_slice(&keccak256(imza)[0..4]);
+            d.extend_from_slice(&sp32);
+            let mut m = [0u8; 32];
+            m[24..32].copy_from_slice(&miktar.to_be_bytes());
+            d.extend_from_slice(&m);
+            avm_calistir(db, &sahip, &kubr, 0, &d, zaman)
+                .expect("allow")
+                .basarili
+        };
+        assert!(allow_call(
+            &mut db,
+            b"increaseAllowance(address,uint256)",
+            100,
+            102
+        ));
+        assert!(allow_call(
+            &mut db,
+            b"increaseAllowance(address,uint256)",
+            100,
+            103
+        ));
+        assert!(allow_call(
+            &mut db,
+            b"decreaseAllowance(address,uint256)",
+            50,
+            104
+        ));
+        let mut al = Vec::new();
+        al.extend_from_slice(&keccak256(b"allowance(address,address)")[0..4]);
+        let mut o32 = [0u8; 32];
+        o32[12..32].copy_from_slice(&sahip);
+        al.extend_from_slice(&o32);
+        al.extend_from_slice(&sp32);
+        let cikti = avm_call_oku(&db, &[0u8; 20], &kubr, &al).expect("allowance");
+        assert_eq!(
+            U256::from_be_slice(&cikti),
+            U256::from(150u64),
+            "C4: 100+100-50 = 150 (approve-race guvenli increase/decrease)"
+        );
+
+        // 3) transferOwnership(0x0) -> REVERT; transferOwnership(yeni) -> owner degisir
+        let mut to0 = Vec::new();
+        to0.extend_from_slice(&keccak256(b"transferOwnership(address)")[0..4]);
+        to0.extend_from_slice(&[0u8; 32]);
+        let r = avm_calistir(&mut db, &sahip, &kubr, 0, &to0, 105).expect("to0");
+        assert!(
+            !r.basarili,
+            "C4: sifir adrese ownership devri REVERT etmeli"
+        );
+
+        let yeni = [0xEEu8; 20];
+        let mut to = Vec::new();
+        to.extend_from_slice(&keccak256(b"transferOwnership(address)")[0..4]);
+        let mut y32 = [0u8; 32];
+        y32[12..32].copy_from_slice(&yeni);
+        to.extend_from_slice(&y32);
+        assert!(
+            avm_calistir(&mut db, &sahip, &kubr, 0, &to, 106)
+                .expect("to")
+                .basarili,
+            "gecerli ownership devri basarili"
+        );
+        let cikti =
+            avm_call_oku(&db, &[0u8; 20], &kubr, &keccak256(b"owner()")[0..4]).expect("owner");
+        assert_eq!(&cikti[12..32], &yeni, "C4: owner yeni adrese devredildi");
+    }
+
     // ============================================================
     // KUBR — Degerli Maden RWA Token (Altin) AVM entegrasyon testi
     // 1 KUBR = 1 gram altin. ERC20 + RWA teminat meta-verisi.
