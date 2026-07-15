@@ -983,19 +983,38 @@ impl NodeState {
                             if aidag_ok {
                                 // 2) LSC hediye (AIDAG basariliysa). Hediye basarisiz olsa bile
                                 //    AIDAG gitti -> kayit tutulur (asil urun AIDAG'dir).
-                                if d.lsc_hediye > 0 {
-                                    let _ = self.lsc_registry.transfer(
+                                // A4 (SEFFAFLIK): transfer sonucu KONTROL edilir; kayda GERCEKTEN
+                                // gonderilen tutar yazilir. Owner LSC'si yetersizse hediye gitmez
+                                // ve kayda 0 yazilir -> "gonderildi" YALANI kaydedilmez.
+                                // DETERMINIZM: owner bakiyesi tum dugumlerde ayni -> gonderilen
+                                // tutar da ayni -> on_satis_registry ayrisimaz.
+                                let lsc_gonderilen = if d.lsc_hediye > 0 {
+                                    match self.lsc_registry.transfer(
                                         &cagiran,
                                         &d.alici,
                                         d.lsc_hediye,
-                                    );
-                                }
-                                // 3) KAYDET: sadece AIDAG GERCEKTEN gittiyse. Kayit = gercek dagitim.
+                                    ) {
+                                        crate::registry::TransferSonuc::Basarili { .. } => {
+                                            d.lsc_hediye
+                                        }
+                                        _ => {
+                                            eprintln!(
+                                                "[UYARI] ON SATIS LSC HEDIYE BASARISIZ: owner LSC bakiyesi yetersiz olabilir. odeme_ref={}, istenen_lsc={}. AIDAG dagitildi; hediye 0 kaydedildi.",
+                                                d.odeme_ref, d.lsc_hediye
+                                            );
+                                            0
+                                        }
+                                    }
+                                } else {
+                                    0
+                                };
+                                // 3) KAYDET: AIDAG gercekten gitti + GERCEK hediye tutari.
+                                //    Kayit = gercek dagitim (seffaf).
                                 let _ = self.on_satis_registry.kaydet(
                                     d.odeme_ref,
                                     d.alici,
                                     d.aidag,
-                                    d.lsc_hediye,
+                                    lsc_gonderilen,
                                     zaman,
                                 );
                             } else {
@@ -2495,6 +2514,51 @@ mod tests {
             src.vertex_count(),
             dst.vertex_count(),
             "DAG replay ile birebir"
+        );
+    }
+
+    // A4 KANIT (seffaflik): owner AIDAG'i yeterli ama LSC HEDIYESI icin bakiyesi
+    // YETERSIZ. AIDAG dagitilir; ama kayit GERCEKTEN gonderilen hediyeyi (0) saklar,
+    // istenen (buyuk) tutari DEGIL. "Gonderildi" yalani zincire yazilmaz.
+    #[test]
+    fn on_satis_lsc_hediye_yetersizse_kayit_gercegi_yansitir_a4() {
+        use crate::registry::public_key_to_adres;
+        use crate::tx::OnSatisDagitim;
+        let now = 1_000_000;
+        let mut node = NodeState::new_devnet(NET);
+        let (gen, gid) = genesis_bytes(1, now);
+        node.ingest_networked(&gen, now);
+
+        let sk = SigningKey::from_bytes(&[0x77u8; 32]);
+        let owner = public_key_to_adres(&sk.verifying_key().to_bytes());
+        node.faucet_owner_ayarla(owner);
+        node.test_bakiye_ekle(owner, 1_000_000); // AIDAG: bol
+        node.lsc_test_bakiye_ekle(owner, 5); // LSC: YETERSIZ (hediye 10_000 istenecek)
+
+        let alici = [0x55u8; 20];
+        let odeme_ref = 4242u64;
+
+        // Owner: aliciya 5000 AIDAG + 10_000 LSC hediye. AIDAG gider, LSC hediye GITMEZ.
+        let payload = OnSatisDagitim::new(alici, 5000, 10_000, odeme_ref).encode();
+        let v = Vertex::new_signed(NET, vec![gid], payload, now, &sk).expect("on satis");
+        node.ingest_networked(&wire::encode(&v), now);
+
+        // KANIT 1: AIDAG dagitildi (asil urun).
+        assert_eq!(node.bakiye(&alici), 5000, "alici AIDAG aldi");
+        // KANIT 2: LSC hediye GITMEDI (owner bakiyesi yetersizdi).
+        assert_eq!(
+            node.lsc_bakiye(&alici),
+            0,
+            "LSC hediye gitmedi (owner yetersiz)"
+        );
+        // KANIT 3 (A4): kayit GERCEGI yansitir -> lsc_hediye=0, istenen 10_000 DEGIL.
+        let k = node
+            .on_satis_sorgula(odeme_ref)
+            .expect("kayit olusmali (AIDAG gitti)");
+        assert_eq!(k.aidag, 5000, "kayit: gercek AIDAG");
+        assert_eq!(
+            k.lsc_hediye, 0,
+            "A4: kayit GERCEK hediyeyi (0) saklar, 'gonderildi' yalanini DEGIL"
         );
     }
 
