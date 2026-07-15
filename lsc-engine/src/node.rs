@@ -3189,4 +3189,94 @@ mod tests {
             );
         }
     }
+
+    // ===============================================================
+    // SYNC SAGLAMLIK: chunked/offset-tabanli sync, sync SIRASINDA
+    // peer'a yeni (kucuk-id'li) vertex girerse vertex ATLAR mi?
+    // export_vertices() id-sirali topolojik sira dondurur; yeni kucuk-id'li
+    // vertex listenin ORTASINA girer -> offset tabanli devam istegi kayabilir.
+    // Bu test ag katmanini (libp2p) DEGIL, sync MANTIGINI izole dener.
+    // ===============================================================
+    #[test]
+    fn sync_sirasinda_eklenen_vertex_atlanmaz() {
+        use crate::tx::TransferKaydi;
+        let now = 1_000_000u64;
+        let net = NET;
+        let kucuk_chunk = 3usize; // SYNC_CHUNK'i kucultup senaryoyu tetikle
+
+        // --- PEER node: kaynak. Genesis + bir zincir uret. ---
+        let mut peer = NodeState::new_devnet(net);
+        let (gen, gid) = genesis_bytes(1, now);
+        peer.ingest_networked(&gen, now);
+
+        // sk secimi: id'leri KONTROL edemeyiz (blake3), ama cok vertex uretip
+        // sync ortasinda yeni ekleyerek kaymayi tetikleriz.
+        let sk = SigningKey::from_bytes(&[3u8; 32]);
+        let mut parent = gid;
+        for i in 0..8u64 {
+            let pl = TransferKaydi::new([0x11; 20], 1, i).encode();
+            let v = Vertex::new_signed(net, vec![parent], pl, now + 1 + i, &sk).expect("v");
+            parent = *v.id();
+            peer.ingest_networked(&wire::encode(&v), now + 1 + i);
+        }
+
+        // --- CEKEN node: bos (sadece genesis). Chunked sync simule et. ---
+        let mut ceken = NodeState::new_devnet(net);
+        ceken.ingest_networked(&gen, now);
+
+        // SIMULASYON: gercek ag dongusundeki offset mantiginin AYNISI.
+        // 1) ilk parcayi peer.export_vertices()[offset..offset+chunk] al
+        // 2) ceken'e ingest et
+        // 3) offset += alinan
+        // 4) SYNC ORTASINDA: peer'a YENI vertex ekle (kucuk-id olabilir)
+        // 5) devam et: peer.export_vertices() YENIDEN cagirilir (gercekte de oyle)
+        let mut offset = 0usize;
+        let mut adim = 0;
+        let mut eklendi = false;
+        loop {
+            let all = peer.export_vertices();
+            let total = all.len();
+            let parca: Vec<Vec<u8>> = all.into_iter().skip(offset).take(kucuk_chunk).collect();
+            let alinan = parca.len();
+            for byt in &parca {
+                ceken.ingest_synced(byt);
+            }
+            offset += alinan;
+
+            // Ilk parcadan sonra, sync BITMEDEN peer'a yeni vertex ekle (bir kez).
+            if !eklendi && adim == 0 {
+                let pl = TransferKaydi::new([0x22; 20], 1, 100).encode();
+                let v = Vertex::new_signed(net, vec![parent], pl, now + 500, &sk).expect("yeni");
+                parent = *v.id();
+                peer.ingest_networked(&wire::encode(&v), now + 500);
+                eklendi = true;
+            }
+
+            adim += 1;
+            if alinan == 0 || offset >= total { 
+                // total, YENI ekleme sonrasi degismis olabilir; bir tur daha dene.
+                let guncel_total = peer.export_vertices().len();
+                if offset >= guncel_total { break; }
+            }
+            if adim > 50 { break; } // sonsuz dongu guvenligi
+        }
+
+        // KANIT: ceken, peer'daki TUM vertex'lere sahip mi?
+        let peer_ids: std::collections::BTreeSet<VertexId> =
+            peer.export_vertices().iter()
+                .filter_map(|b| crate::dag::wire::decode(b).ok().map(|v| *v.id()))
+                .collect();
+        let ceken_ids: std::collections::BTreeSet<VertexId> =
+            ceken.export_vertices().iter()
+                .filter_map(|b| crate::dag::wire::decode(b).ok().map(|v| *v.id()))
+                .collect();
+
+        let eksik: Vec<_> = peer_ids.difference(&ceken_ids).collect();
+        eprintln!("[SYNC] peer={} ceken={} eksik={}", peer_ids.len(), ceken_ids.len(), eksik.len());
+        assert!(
+            eksik.is_empty(),
+            "SYNC ATLADI: ceken'de {} vertex eksik (offset-kaymasi bug'i)",
+            eksik.len()
+        );
+    }
 }
