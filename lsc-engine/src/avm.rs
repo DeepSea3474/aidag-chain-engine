@@ -1352,6 +1352,61 @@ mod tests {
         println!("HAM ETH TX ISLE KANIT: imzali tx -> ERC-20 transfer AVM'de calisti.");
     }
 
+    // C3 KANIT (RWA teminat matematigi): kesirli token arzinda truncation ARTIK
+    // az-teminati "tam teminatli" gostermez. carp-sonra-bol + gereksinim tavana yuvarli.
+    #[test]
+    fn kubr_teminat_orani_truncation_yok_c3() {
+        use revm::primitives::{keccak256, U256};
+        let bin_hex = include_str!("kubr_bytecode.hex").trim();
+        let mut deploy_data = hex_decode(bin_hex);
+        let custodian = [0x11u8; 20];
+        let mut cust32 = [0u8; 32];
+        cust32[12..32].copy_from_slice(&custodian);
+        deploy_data.extend_from_slice(&cust32);
+        // 1.5 token = 1.5e18 (KESIRLI: eski floor bunu 1 token'a yuvarlardi).
+        let bir = U256::from(10u64).pow(U256::from(18u64));
+        let ilk_arz = bir + bir / U256::from(2u64); // 1.5e18
+        let mut arz32 = [0u8; 32];
+        arz32.copy_from_slice(&ilk_arz.to_be_bytes::<32>());
+        deploy_data.extend_from_slice(&arz32);
+
+        let mut db = AidagDatabase::yeni();
+        let sahip = [0xAAu8; 20];
+        let d =
+            avm_calistir(&mut db, &sahip, &[0u8; 20], 0, &deploy_data, 100).expect("KUBR deploy");
+        let kubr = d.olusan_adres.expect("kontrat adresi");
+
+        // KANIT 1 (satir 44): collateralMg = (1.5e18 * 1000)/1e18 = 1500 (carp-sonra-bol).
+        // Eski buggy floor: (1.5e18/1e18)*1000 = 1000.
+        let mut cm = Vec::new();
+        cm.extend_from_slice(&keccak256(b"collateralMg()")[0..4]);
+        let cikti = avm_call_oku(&db, &[0u8; 20], &kubr, &cm).expect("collateralMg");
+        assert_eq!(
+            U256::from_be_slice(&cikti),
+            U256::from(1500u64),
+            "C3: baslangic teminati carp-sonra-bol ile 1500mg (eski buggy floor: 1000)"
+        );
+
+        // owner setCollateral(1400): 1.5 token icin 1500mg gerekli; 1400 YETERSIZ.
+        let mut sc = Vec::new();
+        sc.extend_from_slice(&keccak256(b"setCollateral(uint256)")[0..4]);
+        let mut v32 = [0u8; 32];
+        v32[24..32].copy_from_slice(&1400u64.to_be_bytes());
+        sc.extend_from_slice(&v32);
+        let _ = avm_calistir(&mut db, &sahip, &kubr, 0, &sc, 101).expect("setCollateral");
+
+        // KANIT 2 (satir 83): gerekenMg = ceil(1.5e18*1000/1e18)=1500 > 1400 -> FALSE.
+        // Eski buggy: gerekenMg=(1.5e18/1e18)*1000=1000 <= 1400 -> TRUE (az-teminat maskesi).
+        let mut tt = Vec::new();
+        tt.extend_from_slice(&keccak256(b"tamTeminatliMi()")[0..4]);
+        let cikti = avm_call_oku(&db, &[0u8; 20], &kubr, &tt).expect("tamTeminatliMi");
+        assert_eq!(
+            U256::from_be_slice(&cikti),
+            U256::ZERO,
+            "C3: az-teminat (1400<1500) 'tam teminatli' GOSTERILMEZ (eski buggy: gosterirdi)"
+        );
+    }
+
     // ============================================================
     // KUBR — Degerli Maden RWA Token (Altin) AVM entegrasyon testi
     // 1 KUBR = 1 gram altin. ERC20 + RWA teminat meta-verisi.

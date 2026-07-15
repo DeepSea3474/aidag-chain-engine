@@ -41,7 +41,9 @@ contract KUBR {
         totalSupply = _ilkArz;
         balanceOf[msg.sender] = _ilkArz;
         // teminat: her token 1 gram = 1000 mg. Ilk arz kadar teminat beklenir.
-        collateralMg = (_ilkArz / (10 ** 18)) * mgPerToken;
+        // C3: ONCE carp sonra bol (truncation'i onle). Baslangic teminatini FAZLA
+        // gostermemek icin floor (deposit edilenden fazla altin iddia edilmez).
+        collateralMg = (_ilkArz * mgPerToken) / (10 ** 18);
         emit Transfer(address(0), msg.sender, _ilkArz);
     }
 
@@ -80,7 +82,10 @@ contract KUBR {
     /// @notice Teminat orani: teminat (mg) >= arz (token) * mgPerToken olmali.
     /// @return teminatli mi (her token'in arkasinda altin var mi)
     function tamTeminatliMi() external view returns (bool) {
-        uint256 gerekenMg = (totalSupply / (10 ** 18)) * mgPerToken;
+        // C3: ONCE carp sonra bol (truncation'i onle) + TAVANA yuvarla. Kesirli
+        // token'lari yutan floor, az-teminati "tam teminatli" gosterirdi. Ceil ->
+        // gereksinim muhafazakar (fazla teminat ister), az-teminat maskelenmez.
+        uint256 gerekenMg = (totalSupply * mgPerToken + (10 ** 18 - 1)) / (10 ** 18);
         return collateralMg >= gerekenMg;
     }
 }
