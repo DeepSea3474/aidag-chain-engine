@@ -35,6 +35,10 @@ pub struct AidagDatabase {
     kodlar: HashMap<[u8; 20], Bytecode>,
     /// KOPRU 5: (adres, slot) -> deger. Sozlesme kalici depolama.
     depo: HashMap<([u8; 20], U256), U256>,
+    /// KOPRU 5 (B3): adres -> EVM hesap nonce'u. CREATE adresi keccak(gonderen, nonce)
+    /// oldugu icin KALICI olmali; aksi halde bir hesap hep nonce=0 ile ayni adresi
+    /// uretir -> tek kontrat deploy edebilir (adres cakismasi).
+    nonce_lar: HashMap<[u8; 20], u64>,
 }
 
 impl AidagDatabase {
@@ -44,7 +48,18 @@ impl AidagDatabase {
             aidag_bakiyeler: HashMap::new(),
             kodlar: HashMap::new(),
             depo: HashMap::new(),
+            nonce_lar: HashMap::new(),
         }
+    }
+
+    /// KOPRU 5 (B3): bir adresin EVM hesap nonce'unu oku (CREATE adres turetimi +
+    /// revm'e beslenen tx nonce'u). Yoksa 0.
+    pub fn nonce_oku(&self, adres: &[u8; 20]) -> u64 {
+        self.nonce_lar.get(adres).copied().unwrap_or(0)
+    }
+    /// KOPRU 5 (B3): bir adresin EVM nonce'unu koy (test/kurulum).
+    pub fn nonce_koy(&mut self, adres: [u8; 20], nonce: u64) {
+        self.nonce_lar.insert(adres, nonce);
     }
     /// Test/kurulum: bir adrese LSC bakiyesi koy (EVM bunu gorecek).
     pub fn lsc_koy(&mut self, adres: [u8; 20], miktar: crate::registry::Tutar) {
@@ -145,10 +160,13 @@ impl Database for AidagDatabase {
             Some(b) => (b.hash_slow(), Some(b.clone())),
             None => (KECCAK_EMPTY, None),
         };
+        // B3: KALICI nonce (CREATE adres turetimi + revm nonce dogrulamasi).
+        let nonce = self.nonce_lar.get(&adres).copied().unwrap_or(0);
         Ok(Some(AccountInfo {
             balance: U256::from(bakiye),
             code_hash,
             code,
+            nonce,
             ..Default::default()
         }))
     }
@@ -208,6 +226,11 @@ impl DatabaseCommit for AidagDatabase {
             for (slot, deger) in account.storage.iter() {
                 self.depo.insert((adres, *slot), deger.present_value);
             }
+
+            // 4) Nonce (B3): KALICI. Boylece ayni hesabin sonraki deploy'u FARKLI
+            //    CREATE adresi uretir (adres cakismasi biter) + revm nonce dogrulamasi
+            //    tutarli kalir. Replay'de deterministik yeniden kurulur.
+            self.nonce_lar.insert(adres, account.info.nonce);
         }
     }
 }
@@ -281,6 +304,12 @@ pub fn avm_calistir(
         TxKind::Call(adres_to_evm(hedef))
     };
 
+    // B3: cagiran hesabin KALICI EVM nonce'u. revm'e beslenir ki (a) nonce
+    // dogrulamasi gecsin (basic() ayni degeri doner) ve (b) CREATE adresi
+    // keccak(gonderen, nonce) ile HER deploy'da FARKLI cikssin. db tasindiktan
+    // sonra okunamaz -> ONCE oku.
+    let o_nonce = db.nonce_oku(gonderen);
+
     // DETERMINIZM: blok timestamp'ini vertex zamanina sabitle.
     let mut ctx = Context::mainnet().with_db(std::mem::replace(db, AidagDatabase::yeni()));
     ctx.modify_block(|b| {
@@ -290,6 +319,7 @@ pub fn avm_calistir(
 
     let tx = TxEnv::builder()
         .caller(adres_to_evm(gonderen))
+        .nonce(o_nonce)
         .kind(kind)
         .value(U256::from(deger))
         .data(Bytes::from(data.to_vec()))
@@ -736,7 +766,13 @@ mod tests {
         let mut db = AidagDatabase::yeni();
         db.lsc_koy(kurum, 100_000_000);
 
-        let mut evm = Context::mainnet().with_db(db).build_mainnet();
+        // B3: bu smoke-test ayni caller'dan deploy+coklu call yapar; nonce artik
+        // KALICI (basic() artan nonce doner). Nonce dogrulamasini kapat -> test
+        // kontrat mantigina odaklanir (replay korumasi zaten DAG nonce_registry'de).
+        let mut evm = Context::mainnet()
+            .with_db(db)
+            .modify_cfg_chained(|c| c.disable_nonce_check = true)
+            .build_mainnet();
 
         // 2) DEPLOY (TxKind::Create) - revm constructor calistirir, runtime kod yerlesir
         let deploy_tx = TxEnv::builder()
@@ -995,7 +1031,12 @@ mod tests {
 
         let mut db = AidagDatabase::yeni();
         db.lsc_koy(deployer, 100_000_000);
-        let mut evm = Context::mainnet().with_db(db).build_mainnet();
+        // B3: ayni caller'dan deploy+coklu call; nonce dogrulamasini kapat (replay
+        // korumasi DAG nonce_registry'de). Bkz. kopru5_belge_damgasi_kurumsal.
+        let mut evm = Context::mainnet()
+            .with_db(db)
+            .modify_cfg_chained(|c| c.disable_nonce_check = true)
+            .build_mainnet();
 
         // DEPLOY: bytecode + constructor arg (arz, 32 bayt)
         let mut deploy_data = hex_decode(bin_hex);

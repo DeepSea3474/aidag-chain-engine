@@ -2460,6 +2460,55 @@ mod tests {
         );
     }
 
+    // B3 KANIT (deploy nonce kaliciligi): AYNI hesap IKI kontrat deploy edince
+    // FARKLI adres olusur (EVM nonce artar -> keccak(gonderen, nonce) degisir).
+    // Eski kodda nonce hep 0 -> ayni adres -> ikinci deploy birinciyi EZER
+    // (bir hesap pratikte tek kontrat deploy edebilirdi).
+    #[test]
+    fn avm_ayni_hesap_iki_kontrat_deploy_edebilir_b3() {
+        use crate::registry::public_key_to_adres;
+        use crate::tx::AvmCagri;
+        let now = 1_000_000;
+        let mut node = NodeState::new_devnet(NET);
+        let (gen, gid) = genesis_bytes(1, now);
+        node.ingest_networked(&gen, now);
+
+        let sk = SigningKey::from_bytes(&[0x99u8; 32]);
+        let gonderen = public_key_to_adres(&sk.verifying_key().to_bytes());
+        node.lsc_test_bakiye_ekle(gonderen, 100_000_000_000_000_000);
+
+        let bin_hex = include_str!("../../avm-sozlesmeler/Kasa.bin").trim();
+        let kod: Vec<u8> = (0..bin_hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&bin_hex[i..i + 2], 16).unwrap())
+            .collect();
+
+        // DEPLOY #1 (nonce=0)
+        let p1 = AvmCagri::new([0u8; 20], 0, 0, kod.clone()).encode();
+        let v1 = Vertex::new_signed(NET, vec![gid], p1, now, &sk).expect("deploy1");
+        node.ingest_networked(&wire::encode(&v1), now);
+        assert_eq!(
+            node.avm_kontrat_adresleri().len(),
+            1,
+            "ilk deploy: 1 kontrat"
+        );
+
+        // DEPLOY #2 (nonce=1, zincir: parent = deploy1)
+        let p2 = AvmCagri::new([0u8; 20], 0, 1, kod).encode();
+        let v2 = Vertex::new_signed(NET, vec![*v1.id()], p2, now, &sk).expect("deploy2");
+        node.ingest_networked(&wire::encode(&v2), now);
+
+        // KANIT (B3): iki AYRI kontrat adresi (nonce artti -> farkli CREATE adresi).
+        let adresler = node.avm_kontrat_adresleri();
+        assert_eq!(
+            adresler.len(),
+            2,
+            "B3: ayni hesap IKI kontrat deploy etti (eski kodda 1 = adres cakismasi)"
+        );
+        assert_ne!(adresler[0], adresler[1], "iki kontrat adresi FARKLI");
+        assert_eq!(node.beklenen_nonce(&gonderen), 2, "iki deploy -> nonce 2");
+    }
+
     // KOPRU 5 (KALICILIK): kontrat deploy -> export -> YENI node'da replay ->
     // kontrat kodu YENI node'da da OLUSMALI. AVM state'i DAG replay'i ile kalici.
     // Bu, "dugum yeniden baslayinca sozlesme kaybolmaz" kaniti.
