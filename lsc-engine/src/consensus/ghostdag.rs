@@ -195,17 +195,11 @@ pub struct Ghostdag {
     /// Bir mavinin guncel boyutu, sp-zincirinde geriye aranarak bulunur (Kaspa
     /// blue_anticone_size). Renklendirme baslangic dongusunu (10390 cagri) elemek icin.
     anticone_sizes: BTreeMap<VertexId, BTreeMap<VertexId, u32>>,
-    /// BINARY LIFTING (yan-veri): her vertex icin sp-zincirinde 2^j atalar.
-    /// up[v][0] = v'nin sp'si, up[v][j] = up[ up[v][j-1] ][j-1]. cand'in atasini
-    /// sp-zincirinde O(log n) sicramayla bulmak icin. iv/torba gibi GhostdagData'ya
-    /// DOKUNMAZ. Henuz PASIF (doldurulmuyor, kullanilmiyor).
-    up: BTreeMap<VertexId, Vec<VertexId>>,
     /// KALICI sp-agac cocuk listesi: her vertex -> selected-parent'i o vertex
     /// olan cocuklar (id-sirali). Lokal rebuild (alt-agac yeniden numaralama)
     /// icin gerekli; iv/torba gibi GhostdagData'yi/konsensusu ETKILEMEZ.
     /// Henuz PASIF (dolduruluyor ama lokal rebuild devrede degil).
     children_sp: BTreeMap<VertexId, BTreeSet<VertexId>>,
-    boyut_map: BTreeMap<VertexId, BTreeMap<VertexId, u32>>,
 }
 
 impl Ghostdag {
@@ -237,9 +231,7 @@ impl Ghostdag {
             iv_next: BTreeMap::new(),
             torba: BTreeMap::new(),
             anticone_sizes: BTreeMap::new(),
-            up: BTreeMap::new(),
             children_sp: BTreeMap::new(),
-            boyut_map: BTreeMap::new(),
         }
     }
 
@@ -254,9 +246,7 @@ impl Ghostdag {
             iv_next: BTreeMap::new(),
             torba: BTreeMap::new(),
             anticone_sizes: BTreeMap::new(),
-            up: BTreeMap::new(),
             children_sp: BTreeMap::new(),
-            boyut_map: BTreeMap::new(),
         }
     }
 
@@ -478,38 +468,6 @@ impl Ghostdag {
         U_UP.fetch_add(_tu.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
     }
 
-    /// Tek vertex icin inkremental torba: sp-atasinin torbasini devral + kendi
-    /// sp-olmayan parent'larini ekle + sikistir. torba_hesapla'nin tek-vertex hali.
-    /// BINARY LIFTING doldur: v icin sp-zincirinde 2^j atalar.
-    /// up[v][0] = sp; up[v][j] = up[ up[v][j-1] ][j-1] (mevcut oldugu surece).
-    /// Inkremental: v islendiginde cagrilir, atalari zaten dolu (topo sira).
-    fn up_guncelle_tek(&mut self, v: &VertexId, sp: Option<VertexId>) {
-        let sp = match sp {
-            Some(s) => s,
-            None => {
-                // sp yok (genesis): bos tablo.
-                self.up.insert(*v, Vec::new());
-                return;
-            }
-        };
-        let mut tablo: Vec<VertexId> = Vec::new();
-        tablo.push(sp); // up[v][0] = sp
-                        // up[v][j] = up[ tablo[j-1] ][j-1]
-        let mut j = 1;
-        loop {
-            let onceki = tablo[j - 1];
-            // onceki'nin 2^(j-1) atasi var mi?
-            match self.up.get(&onceki).and_then(|t| t.get(j - 1)).copied() {
-                Some(ata) => {
-                    tablo.push(ata);
-                    j += 1;
-                }
-                None => break, // daha fazla atlanamiyor (koke ulasildi)
-            }
-        }
-        self.up.insert(*v, tablo);
-    }
-
     fn torba_guncelle_tek(&mut self, graph: &Graph, v: &VertexId, sp: Option<VertexId>) {
         // Ic mantik VertexId ile (birebir eski); SADECE depolama (start,id) cifti.
         let mut bag: BTreeSet<VertexId> = BTreeSet::new();
@@ -569,12 +527,6 @@ impl Ghostdag {
     /// Kullanılan k.
     pub fn k(&self) -> KType {
         self.k
-    }
-
-    /// TEST: binary lifting up tablosuna erisim.
-    #[cfg(test)]
-    fn up_ref(&self) -> &BTreeMap<VertexId, Vec<VertexId>> {
-        &self.up
     }
 
     /// Bir vertex'in GHOSTDAG verisi.
@@ -1252,87 +1204,22 @@ impl<'a> ReachIndex<'a> {
     }
 }
 
-/// YENI: Kaspa-mantikli renklendirme (izole). Eskiye DOKUNMAZ. Baslangic dongusu YOK;
-/// her aday icin sp-zinciri yurunur, cand'in atasi olan zincir blokuna ulasinca durulur.
-/// Donus: (mergeset_blues, mergeset_reds, bu vertex'in mavilerinin anticone boyutlari).
-/// BINARY LIFTING ile cand'in atasi olan ILK sp-zinciri blogunu bul (O(log n)).
-/// Eski chain'in KRITIK 1'de durdugu blogun AYNISINI dondurmeli. Izole, test icin.
-/// sp'den baslar; cand'in atasi olmayan en yuksek bloga sicrar, sonra 1 adim = ata.
-#[allow(dead_code)]
-fn ata_bul_up(
-    sp: &VertexId,
-    cand: &VertexId,
-    up: &BTreeMap<VertexId, Vec<VertexId>>,
-    ri: &ReachIndex,
-    graph: &Graph,
-) -> Option<VertexId> {
-    // sp zaten cand'in atasi ise, eski chain ilk adimda durur -> sp.
-    if ri.atalik(graph, sp, cand) {
-        return Some(*sp);
-    }
-    // sp cand'in atasi degil. sp-zincirinde, cand'in atasi OLMAYAN en yuksek bloga sicra.
-    let mut cur = *sp;
-    while let Some(tablo) = up.get(&cur) {
-        let mut atladi = false;
-        // buyukten kucuge: en buyuk guvenli sicramayi yap.
-        for j in (0..tablo.len()).rev() {
-            let aday = tablo[j];
-            // aday hala cand'in atasi DEGIL ise, oraya sicra (guvenli).
-            if !ri.atalik(graph, &aday, cand) {
-                cur = aday;
-                atladi = true;
-                break;
-            }
-        }
-        if !atladi {
-            break; // hicbir sicrama guvenli degil -> cur'un sp'si (up[cur][0]) ata.
-        }
-    }
-    // cur, cand'in atasi degil; up[cur][0] cand'in atasi olan ilk blok.
-    up.get(&cur).and_then(|t| t.first()).copied()
-}
-
 // MAVI BONCUK: AIDAG'in kendi renklendirme sistemi. coloring_kaspa'nin chain-dongusu
 // (sp-zinciri mergeset_blues toplama) GHOSTDAG invariant'i kirilinca anticone'u eksik
 // sayiyordu (69ef: 14 vs gercek 23 -> overcount). Mavi boncuk, cand'in anticone'unu
 // blue_view icinde DOGRUDAN, SAF-dogrulanmis atalik ile sayar (torba yanlis-pozitifinden
 // bagimsiz). blue kumesi her mavi eklendikce buyur (compute_default ile ayni matematik).
-static MB_INIT_SAY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static MB_CAND_SAY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-static BAS_ADIM: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-static ODA_NZ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static T_BLUE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static T_MERGE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static T_CAND: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-static T_SIGN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-static T_INSERT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-static T_GD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static U_ANTI: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static U_IV: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static U_TORBA: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static U_UP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static TORBA_BOY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static TORBA_SAY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-static ODA_TOP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-fn blue_anticone_size(
-    b: &VertexId,
-    sp: &VertexId,
-    data: &BTreeMap<VertexId, GhostdagData>,
-    anticone_sizes: &BTreeMap<VertexId, BTreeMap<VertexId, u32>>,
-) -> Option<u32> {
-    // Geriye yuru, b iceren ILK (en yakin/guncel) kayitta dur.
-    let mut cur = Some(*sp);
-    while let Some(c) = cur {
-        BAS_ADIM.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if let Some(sz) = anticone_sizes.get(&c).and_then(|m| m.get(b)) {
-            return Some(*sz);
-        }
-        cur = data.get(&c).and_then(|d| d.selected_parent);
-    }
-    None
-}
 
 fn mavi_boncuk(
     graph: &Graph,
@@ -1342,7 +1229,6 @@ fn mavi_boncuk(
     data: &BTreeMap<VertexId, GhostdagData>,
     ri: &ReachIndex,
     _anticone_sizes: &BTreeMap<VertexId, BTreeMap<VertexId, u32>>,
-    boyut_map: &BTreeMap<VertexId, BTreeMap<VertexId, u32>>,
 ) -> (Vec<VertexId>, Vec<VertexId>, BTreeMap<VertexId, u32>) {
     let k_usize = k as usize;
     let _tm = std::time::Instant::now();
@@ -1419,121 +1305,6 @@ fn mavi_boncuk(
     (mergeset_blues, mergeset_reds, boyut)
 }
 
-fn coloring_kaspa(
-    graph: &Graph,
-    id: &VertexId,
-    sp: &VertexId,
-    k: KType,
-    data: &BTreeMap<VertexId, GhostdagData>,
-    ri: &ReachIndex,
-    anticone_sizes: &BTreeMap<VertexId, BTreeMap<VertexId, u32>>,
-) -> (Vec<VertexId>, Vec<VertexId>, BTreeMap<VertexId, u32>) {
-    let k_usize = k as usize;
-    let mergeset_unordered = ri.mergeset_of(graph, id, sp);
-    let ordered_mergeset = topo_order_subset(graph, &mergeset_unordered);
-
-    let mut yeni_sizes: BTreeMap<VertexId, u32> = BTreeMap::new();
-    yeni_sizes.insert(*sp, 0);
-
-    let mut mergeset_blues: Vec<VertexId> = Vec::new();
-    let mut mergeset_reds: Vec<VertexId> = Vec::new();
-
-    for cand in &ordered_mergeset {
-        // KASPA KISAYOLU: sp + k mavi zaten yerlestiyse (mergeset_blues sp'siz oldugu
-        // icin esik = k), fazlasi k-cluster geregi kirmizi. Chain'e hic girme.
-        // (Kaspa check_blue_candidate: mergeset_blues K+1 ise Red; bizde sp ayri -> k.)
-        if mergeset_blues.len() >= k_usize {
-            mergeset_reds.push(*cand);
-            continue;
-        }
-        // GUVENLI ATLAMA: cand'in TUM parent'lari sp'nin atasi/kendisi ise anticone BOS
-        // (sp hepsini gorur). Olcum: bu kosulda anticone HEP 0 (dolu_kosul=0, guvenli).
-        // Chain'e girme: cand mavi, boyut 0 - chain'in bos durumda uretecegiyle BIREBIR.
-        let atla = graph
-            .get(cand)
-            .map(|vx| {
-                vx.parents()
-                    .iter()
-                    .all(|pp| pp == sp || ri.atalik(graph, pp, sp))
-            })
-            .unwrap_or(false);
-        if atla {
-            yeni_sizes.insert(*cand, 0);
-            mergeset_blues.push(*cand);
-            continue;
-        }
-        let mut cand_anticone_size: usize = 0;
-        let mut cand_yeni_kayitlar: Vec<(VertexId, u32)> = Vec::new();
-        let mut is_blue = true;
-
-        let mut chain_cur = Some(*sp);
-        while let Some(chain_block) = chain_cur {
-            // KRITIK 1: chain_block cand'in atasi ise, kalan zincir cand'in gecmisinde.
-            if ri.atalik(graph, &chain_block, cand) {
-                break;
-            }
-            if let Some(cb_data) = data.get(&chain_block) {
-                for peer in &cb_data.mergeset_blues {
-                    if ri.atalik(graph, peer, cand) {
-                        continue; // peer cand'in gecmisinde -> anticone'da degil.
-                    }
-                    cand_anticone_size += 1;
-                    if cand_anticone_size > k_usize {
-                        is_blue = false;
-                        break;
-                    }
-                    // KRITIK 3: peer'in mevcut boyutu - once yeni_sizes, sonra sp-zinciri.
-                    let peer_sz = {
-                        let mut bulunan: Option<u32> = yeni_sizes.get(peer).copied();
-                        if bulunan.is_none() {
-                            let mut cur = Some(*sp);
-                            while let Some(v) = cur {
-                                if let Some(m) = anticone_sizes.get(&v) {
-                                    if let Some(&sz) = m.get(peer) {
-                                        bulunan = Some(sz);
-                                        break;
-                                    }
-                                }
-                                cur = data.get(&v).and_then(|d| d.selected_parent);
-                            }
-                        }
-                        bulunan.unwrap_or(0)
-                    };
-                    // KRITIK 2: peer zaten k komsuya sahipse, cand eklenince k'yi asar.
-                    if peer_sz as usize == k_usize {
-                        is_blue = false;
-                        break;
-                    }
-                    cand_yeni_kayitlar.push((*peer, peer_sz + 1));
-                }
-            }
-            if !is_blue {
-                break;
-            }
-            chain_cur = data.get(&chain_block).and_then(|d| d.selected_parent);
-        }
-
-        if is_blue {
-            for (peer, yeni_sz) in cand_yeni_kayitlar {
-                yeni_sizes.insert(peer, yeni_sz);
-            }
-            yeni_sizes.insert(*cand, cand_anticone_size as u32);
-            mergeset_blues.push(*cand);
-        } else {
-            mergeset_reds.push(*cand);
-        }
-    }
-
-    let mut out: BTreeMap<VertexId, u32> = BTreeMap::new();
-    out.insert(*sp, 0);
-    for b in &mergeset_blues {
-        if let Some(&sz) = yeni_sizes.get(b) {
-            out.insert(*b, sz);
-        }
-    }
-    (mergeset_blues, mergeset_reds, out)
-}
-
 // Konsensus cekirdegi: 8 parametrenin hepsi GHOSTDAG hesabi icin gerekli
 // (graph, id, k, weigher, data, iv, torba, anticone). Struct'a gruplamak
 // referans/omur yonetimini gereksiz karmasiklastirirdi -> bilerek allow.
@@ -1600,7 +1371,7 @@ fn compute_vertex_data<W: Weigher>(
     // (fuzz_dogrula 2000 tur + birebir testler kanitladi); bit-bit compute-vs-update korunur.
     let (mergeset_blues, mergeset_reds, out_opt): (Vec<VertexId>, Vec<VertexId>, Option<BTreeMap<VertexId, u32>>) =
         if let Some(asz) = anticone_sizes {
-            let (b, r, out_mb) = mavi_boncuk(graph, id, &sp, k, data, &ri, asz, asz);
+            let (b, r, out_mb) = mavi_boncuk(graph, id, &sp, k, data, &ri, asz);
             (b, r, Some(out_mb))
         } else {
             let mut blue: BTreeSet<VertexId> = if ordered_mergeset.is_empty() {
@@ -1949,6 +1720,7 @@ mod tests {
             g.insert_synced(gen).unwrap();
             let mut inc = Ghostdag::new_incremental(DEFAULT_K); inc.update_one(&g,&gid);
             let mut ids=vec![gid]; let mut ts=1001u64;
+            #[allow(clippy::explicit_counter_loop)]
             for i in 1..n {
                 let mevcut=ids.len(); let pmax=mevcut.min(8);
                 let pk=1+(rng()%pmax as u64) as usize;
@@ -1989,6 +1761,7 @@ mod tests {
             g0.insert_synced(gen.clone()).unwrap();
             let mut ids = vec![gid]; let mut ts = 1001u64;
             let mut verts: Vec<Vertex> = vec![gen];
+            #[allow(clippy::explicit_counter_loop)]
             for i in 1..n {
                 let mevcut = ids.len(); let pmax = mevcut.min(8);
                 let pk = 1 + (rng() % pmax as u64) as usize;
@@ -2052,6 +1825,7 @@ mod tests {
             g.insert_synced(gen).unwrap();
             let mut inc = Ghostdag::new_incremental(DEFAULT_K); inc.update_one(&g, &gid);
             let mut ids = vec![gid]; let mut ts = 1001u64;
+            #[allow(clippy::explicit_counter_loop)]
             for i in 1..n {
                 let mevcut = ids.len(); let pmax = mevcut.min(8);
                 let pk = 1 + (rng() % pmax as u64) as usize;
@@ -2205,39 +1979,27 @@ mod tests {
             let mut gd = Ghostdag::new_incremental(DEFAULT_K);
             gd.update_one(&g, &gid);
             let t_build = Instant::now();
+            #[allow(clippy::explicit_counter_loop)]
             for i in 1..n {
                 let mut parents = vec![ids[ids.len() - 1]];
                 if ids.len() >= 2 { parents.push(ids[ids.len() - 2]); }
                 parents.sort_unstable();
                 parents.dedup();
-                let _ts0 = Instant::now();
                 let v = signed((i % 250) as u8 + 1, parents, ts, b"x");
-                T_SIGN.fetch_add(_ts0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
                 ts += 1;
                 let vid = *v.id();
-                let _ti0 = Instant::now();
                 g.insert_synced(v).unwrap();
-                T_INSERT.fetch_add(_ti0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
-                let _tg0 = Instant::now();
                 gd.update_one(&g, &vid);
-                T_GD.fetch_add(_tg0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
                 ids.push(vid);
                 if i % 10000 == 0 { let e = t_build.elapsed().as_secs_f64(); eprintln!("  [ingest] {}/{} t={:.1}s ({:.0} v/s)", i, n, e, i as f64 / e.max(1e-9)); }
             }
             let total_s = t_build.elapsed().as_secs_f64();
             let tps = n as f64 / total_s.max(1e-9);
             eprintln!("n={:>9} toplam={:.1}s TPS={:.0} (insert + artimli GHOSTDAG per-vertex = node gercek akisi)", n, total_s, tps);
-            let ic = MB_INIT_SAY.load(std::sync::atomic::Ordering::Relaxed);
             let cc = MB_CAND_SAY.load(std::sync::atomic::Ordering::Relaxed);
-            let ba = BAS_ADIM.load(std::sync::atomic::Ordering::Relaxed);
-            let onz = ODA_NZ.load(std::sync::atomic::Ordering::Relaxed);
-            let otop = ODA_TOP.load(std::sync::atomic::Ordering::Relaxed);
             let tb = T_BLUE.load(std::sync::atomic::Ordering::Relaxed);
             let tm = T_MERGE.load(std::sync::atomic::Ordering::Relaxed);
             let tcd = T_CAND.load(std::sync::atomic::Ordering::Relaxed);
-            let tsg = T_SIGN.load(std::sync::atomic::Ordering::Relaxed);
-            let tin = T_INSERT.load(std::sync::atomic::Ordering::Relaxed);
-            let tgd = T_GD.load(std::sync::atomic::Ordering::Relaxed);
             let ua = U_ANTI.load(std::sync::atomic::Ordering::Relaxed);
             let ui = U_IV.load(std::sync::atomic::Ordering::Relaxed);
             let ut = U_TORBA.load(std::sync::atomic::Ordering::Relaxed);
@@ -2246,10 +2008,8 @@ mod tests {
             let tsay = TORBA_SAY.load(std::sync::atomic::Ordering::Relaxed);
             eprintln!("   TORBA: ort_boyut={:.1} (toplam={} say={})", tboy as f64 / tsay.max(1) as f64, tboy, tsay);
             eprintln!("   UPDATE_ONE(ms): anti_kaydet={:.0} interval={:.0} torba={:.0} up={:.0}", ua as f64/1e6, ui as f64/1e6, ut as f64/1e6, uu as f64/1e6);
-            eprintln!("   ANA(ms): imza_uretim={:.0} insert+dogrula={:.0} ghostdag={:.0}", tsg as f64/1e6, tin as f64/1e6, tgd as f64/1e6);
             eprintln!("   ZAMAN(ms): blue_set={:.0} mergeset={:.0} candidate={:.0}", tb as f64/1e6, tm as f64/1e6, tcd as f64/1e6);
-            eprintln!("   ODA: sifir-olmayan={} toplam_blue={} (oran={:.3})", onz, otop, onz as f64 / otop.max(1) as f64);
-            eprintln!("   PROFIL: baslangic_dongusu(a)={} cand_dongusu(b)={} blue_anticone_ADIM={} (saf_iliskisiz + sp-zinciri adimlari)", ic, cc, ba);
+            eprintln!("   PROFIL: cand_dongusu(b)={}", cc);
         }
     }
 
@@ -2262,6 +2022,7 @@ mod tests {
         // n vertex uret (imzali)
         let mut vs = Vec::with_capacity(n);
         let mut ts = 1000u64;
+        #[allow(clippy::explicit_counter_loop)]
         for i in 0..n {
             vs.push(signed((i % 250) as u8 + 1, vec![], ts, b"x"));
             ts += 1;
@@ -2390,209 +2151,6 @@ mod tests {
             rec_sure.as_secs_f64() / torba_sure.as_secs_f64().max(1e-9),
             dogru_say
         );
-    }
-
-    #[test]
-    #[ignore]
-    fn ata_bul_up_eski_chain_ile_birebir() {
-        // ata_bul_up (binary lifting), eski blok-blok chain yuruyusunun KRITIK 1'de
-        // durdugu ata'nin AYNISINI buluyor mu? Cesitli DAG'larda bit-bit.
-        let senaryolar: Vec<(usize, usize)> = vec![(3, 2), (5, 3), (6, 5), (10, 2), (12, 3)];
-        for (kat, w) in senaryolar {
-            let mut g = Graph::devnet(NET);
-            let gen = signed(1, vec![], 1000, b"gen");
-            let gid = *gen.id();
-            g.insert_synced(gen).unwrap();
-            let mut prev = vec![gid];
-            let mut ts = 1001u64;
-            for _r in 0..kat {
-                let mut bu = Vec::new();
-                let mut parents = prev.clone();
-                parents.sort_unstable();
-                for j in 0..w {
-                    let v = signed((j % 250) as u8 + 1, parents.clone(), ts, b"x");
-                    ts += 1;
-                    let vid = *v.id();
-                    g.insert_synced(v).unwrap();
-                    bu.push(vid);
-                }
-                prev = bu;
-            }
-            // Inkremental Ghostdag (update yolu) ile up tablosunu kur.
-            let mut gd = Ghostdag::new_incremental(DEFAULT_K);
-            gd.update(&g);
-            let data = data_map_of(&gd, &g);
-            let iv = sp_tree_intervals(&data);
-            let topo = super::topological_order(&g);
-            let torba = torba_hesapla(&g, &data, &topo, &iv);
-            let ri = ReachIndex {
-                iv: &iv,
-                bridges: None,
-                torba: Some(&torba),
-            };
-
-            for v in &topo {
-                let gdata = match data.get(v) {
-                    Some(d) => d,
-                    None => continue,
-                };
-                let sp = match gdata.selected_parent {
-                    Some(s) => s,
-                    None => continue,
-                };
-                let mergeset = ri.mergeset_of(&g, v, &sp);
-                let ordered = topo_order_subset(&g, &mergeset);
-                for cand in &ordered {
-                    // ESKI: blok blok chain yuru, cand'in atasi olan ilk blogu bul.
-                    let mut eski_ata = None;
-                    let mut cur = Some(sp);
-                    while let Some(cb) = cur {
-                        if ri.atalik(&g, &cb, cand) {
-                            eski_ata = Some(cb);
-                            break;
-                        }
-                        cur = data.get(&cb).and_then(|d| d.selected_parent);
-                    }
-                    // YENI: ata_bul_up.
-                    let yeni_ata = ata_bul_up(&sp, cand, gd.up_ref(), &ri, &g);
-                    assert_eq!(
-                        eski_ata, yeni_ata,
-                        "ata farkli kat={kat} w={w} cand={cand:?}"
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn coloring_kaspa_genis_birebir() {
-        // coloring_kaspa'yi COK CESITLI DAG'da eski renklendirme ile kiyasla.
-        // Tek desen yeterli kanit degil (konsensus kalbi) -> diamond, zincir, yogun,
-        // seyrek, farkli genislik. Hepsinde mergeset_blues+reds BIREBIR olmali.
-        let senaryolar: Vec<(usize, usize)> = vec![
-            (3, 2), // dar paralel
-            (5, 3),
-            (6, 5),  // genis paralel
-            (10, 2), // uzun seyrek
-            (4, 4),
-            (12, 3),
-        ];
-        for (kat, w) in senaryolar {
-            let mut g = Graph::devnet(NET);
-            let gen = signed(1, vec![], 1000, b"gen");
-            let gid = *gen.id();
-            g.insert_synced(gen).unwrap();
-            let mut prev = vec![gid];
-            let mut ts = 1001u64;
-            for _r in 0..kat {
-                let mut bu = Vec::new();
-                let mut parents = prev.clone();
-                parents.sort_unstable();
-                for j in 0..w {
-                    let v = signed((j % 250) as u8 + 1, parents.clone(), ts, b"x");
-                    ts += 1;
-                    let vid = *v.id();
-                    g.insert_synced(v).unwrap();
-                    bu.push(vid);
-                }
-                prev = bu;
-            }
-            let gd = Ghostdag::compute_default(&g);
-            let data = data_map_of(&gd, &g);
-            let iv = sp_tree_intervals(&data);
-            let topo = super::topological_order(&g);
-            let torba = torba_hesapla(&g, &data, &topo, &iv);
-            let ri = ReachIndex {
-                iv: &iv,
-                bridges: None,
-                torba: Some(&torba),
-            };
-            let mut anti: BTreeMap<VertexId, BTreeMap<VertexId, u32>> = BTreeMap::new();
-            for v in &topo {
-                let gdata = match data.get(v) {
-                    Some(d) => d,
-                    None => continue,
-                };
-                let sp = match gdata.selected_parent {
-                    Some(s) => s,
-                    None => {
-                        anti.insert(*v, BTreeMap::new());
-                        continue;
-                    }
-                };
-                let (blues, reds, out) = coloring_kaspa(&g, v, &sp, gd.k(), &data, &ri, &anti);
-                anti.insert(*v, out);
-                assert_eq!(
-                    blues, gdata.mergeset_blues,
-                    "blues farkli kat={kat} w={w} v={v:?}"
-                );
-                assert_eq!(
-                    reds, gdata.mergeset_reds,
-                    "reds farkli kat={kat} w={w} v={v:?}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn coloring_kaspa_eski_ile_birebir() {
-        // coloring_kaspa (sp-zinciri yuruyusu), eski compute_vertex_data renklendirmesi
-        // ile BIREBIR mi? mergeset_blues + mergeset_reds esit olmali. Paralel DAG + zincir.
-        let mut g = Graph::devnet(NET);
-        let gen = signed(1, vec![], 1000, b"gen");
-        let gid = *gen.id();
-        g.insert_synced(gen).unwrap();
-        let mut prev = vec![gid];
-        let mut ts = 1001u64;
-        for _k in 0..8 {
-            let mut bu = Vec::new();
-            let mut parents = prev.clone();
-            parents.sort_unstable();
-            for j in 0..4 {
-                let v = signed(j + 1, parents.clone(), ts, b"x");
-                ts += 1;
-                let vid = *v.id();
-                g.insert_synced(v).unwrap();
-                bu.push(vid);
-            }
-            prev = bu;
-        }
-        // Eski yol: tam compute (her vertex icin GhostdagData).
-        let gd = Ghostdag::compute_default(&g);
-        let data = data_map_of(&gd, &g);
-        let iv = sp_tree_intervals(&data);
-        let topo = super::topological_order(&g);
-        let torba = torba_hesapla(&g, &data, &topo, &iv);
-        let ri = ReachIndex {
-            iv: &iv,
-            bridges: None,
-            torba: Some(&torba),
-        };
-
-        // Her vertex icin coloring_kaspa'yi cagir, eski GhostdagData ile kiyasla.
-        // anticone_sizes'i topo sirada kademeli kur (her vertex kendi out'unu ekler).
-        let mut anti: BTreeMap<VertexId, BTreeMap<VertexId, u32>> = BTreeMap::new();
-        for v in &topo {
-            let gdata = match data.get(v) {
-                Some(d) => d,
-                None => continue,
-            };
-            let sp = match gdata.selected_parent {
-                Some(s) => s,
-                None => {
-                    anti.insert(*v, BTreeMap::new());
-                    continue;
-                }
-            };
-            let (blues, reds, out) = coloring_kaspa(&g, v, &sp, gd.k(), &data, &ri, &anti);
-            anti.insert(*v, out);
-            // Eski ile kiyasla (sp haric mergeset_blues; eski mergeset_blues sp'siz).
-            assert_eq!(
-                blues, gdata.mergeset_blues,
-                "mergeset_blues farkli: v={v:?}"
-            );
-            assert_eq!(reds, gdata.mergeset_reds, "mergeset_reds farkli: v={v:?}");
-        }
     }
 
     #[test]

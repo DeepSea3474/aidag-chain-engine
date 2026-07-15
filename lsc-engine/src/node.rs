@@ -83,8 +83,30 @@ impl NodeState {
     /// Devnet düğüm durumu: boş graf (genesis ilk vertex'le kurulur) +
     /// artımlı ghostdag. Mainnet için ayrı kurucu (genesis pinli) gerekir.
     pub fn new_devnet(network_id: u32) -> Self {
+        Self::yeni_ic(Graph::devnet(network_id), network_id)
+    }
+
+    /// MAINNET düğüm durumu: genesis id'si PINLI (`GenesisPolicy::Whitelisted`)
+    /// + `network_id = 3474`. Genesis vertex çalışma anında `crate::mainnet`
+    /// baked wire baytlarından yüklenir (özel anahtara ihtiyaç yok). Whitelisted
+    /// politika: id uymayan hiçbir parent'sız vertex genesis olamaz → güven kökü
+    /// sabittir, "first-seen" devnet açığı YOK. En güvenli mainnet kuruluşu.
+    pub fn new_mainnet() -> Self {
+        Self::yeni_ic(
+            Graph::mainnet(
+                crate::mainnet::MAINNET_NETWORK_ID,
+                crate::mainnet::genesis_id(),
+            ),
+            crate::mainnet::MAINNET_NETWORK_ID,
+        )
+    }
+
+    /// Ortak kurulum: verilen graf + network_id ile boş defterli NodeState.
+    /// `new_devnet`/`new_mainnet` yalnızca graf POLİTİKASINDA ayrışır; geri kalan
+    /// tüm defterler (bakiye/stake/nonce/...) aynı → tek yerden kurulur (drift yok).
+    fn yeni_ic(graph: Graph, network_id: u32) -> Self {
         NodeState {
-            graph: Graph::devnet(network_id),
+            graph,
             ghostdag: Ghostdag::new_incremental(DEFAULT_K),
             network_id,
             orphans: OrphanPool::new(),
@@ -707,6 +729,13 @@ impl NodeState {
     /// Bu metod integrate_vertex'ten cagrilir -> ag/replay/yerel/cascade
     /// TUM ingest yollari otomatik kalkandan gecer (tek nokta, kacak yok).
     fn kalkana_yonlendir(&mut self, payload: &[u8], signer: &[u8; 32], zaman: u64, synced: bool) {
+        // DETERMINIZM: vesting kilit kontrolu, islenmekte olan vertex'in KENDI
+        // timestamp'ine gore yapilir. `zaman` konsensus verisidir (vertex preimage'i
+        // + her dugumde AYNI) → kilitli/serbest miktar tum dugumlerde birebir ayni
+        // hesaplanir. Yerel saat (SystemTime::now) ASLA kullanilmaz; aksi halde
+        // dugumler ayni transfer'i farkli kilit durumuyla degerlendirir → ayrisma.
+        // EVM `block.timestamp` mantigi: islem, kendi zaman damgasina gore degerlenir.
+        self.bakiye_registry.zaman_ayarla(zaman);
         match payload.first() {
             // tip=2: token kimlik kaydi -> KALKAN (STAKE-KONTROLLU + taklit reddi)
             Some(&crate::tx::TX_TYPE_TOKEN) => {
@@ -2571,11 +2600,6 @@ mod tests {
         );
     }
 
-    // yardimci: son tip icin gecerli bir parent sec (basitlik: genesis'i parent yap).
-    fn kontrat_parent(_node: &NodeState, gid: [u8; 32]) -> [u8; 32] {
-        gid
-    }
-
     // KOPRU 5 (deger>0): AVM yolundan LSC DEGER transferi. ARZ KORUNMALI.
     // data dolu + hedef KOD-SUZ adres + deger=5000 -> EVM value transferi yapar
     // (kod olmadigi icin data onemsiz). gonderen->hedef deger gider, gas kesilir, ARZ KORUNUR.
@@ -3136,6 +3160,7 @@ mod tests {
         let mut tips: Vec<VertexId> = vec![gid];
         let mut nonce = 0u64;
 
+        #[allow(clippy::explicit_counter_loop)]
         for adim in 0..60u64 {
             // Rastgele 1-2 parent sec (dallanma + birlesme uret).
             let mut parents: Vec<VertexId> = Vec::new();

@@ -195,7 +195,16 @@ pub async fn run_node(
     // NodeState artik Arc<RwLock<...>> ile paylasilabilir: ag event loop'u VE
     // (B2'de) periyodik uretici task ayni duruma guvenli erisir.
     // Deadlock kurali: ayni anda TEK kilit tut, isini yap, HEMEN birak.
-    let node_state = Arc::new(RwLock::new(lsc_engine::NodeState::new_devnet(1)));
+    // MAINNET modu: LSC_MAINNET=1 ise pinli genesis (network_id=3474, Whitelisted).
+    // Aksi halde devnet/testnet (network_id=1, ilk-goren genesis). Varsayilan güvenli:
+    // mainnet ACIKCA secilmedikce testnet davranisi korunur (kaza ile mainnet YOK).
+    let mainnet = std::env::var("LSC_MAINNET").ok().as_deref() == Some("1");
+    let node_state = Arc::new(RwLock::new(if mainnet {
+        tracing::warn!("MAINNET MODU: network_id=3474, pinli genesis (Whitelisted).");
+        lsc_engine::NodeState::new_mainnet()
+    } else {
+        lsc_engine::NodeState::new_devnet(1)
+    }));
 
     // TESTNET FAUCET: LSC_FAUCET_OWNER env'i (owner adresi, 40 hex) ayarliysa,
     // faucet'i ac (sadece bu adres test AIDAG basabilir). Ayarli degilse faucet
@@ -306,40 +315,34 @@ pub async fn run_node(
             adr("LSC_GEN_TOPLULUK"), adr("LSC_GEN_KURUCU"), adr("LSC_GEN_DESTEKCI"),
         ];
         if adresler.iter().all(|x| x.is_some()) {
-            let a: [[u8;20];6] = std::array::from_fn(|i| adresler[i].unwrap());
+            // Ust satirdaki `all(is_some)` garantisi altinda hepsi Some; panige
+            // yol acmadan sabit diziyi doldur (None asla gerceklesmez -> 0 kalmaz).
+            let mut a = [[0u8; 20]; 6];
+            for (i, adr) in adresler.iter().enumerate() {
+                if let Some(v) = adr { a[i] = *v; }
+            }
             let dagitim = lsc_engine::genesis::GenesisDagitim::planla(a);
             if dagitim.kapali_mi() {
                 let mut st = node_state.write().await;
-                // Vesting baslangici: simdiki zincir zamani
-                let vesting_bas = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs()).unwrap_or(0);
-                let cliff_6ay: u64 = 180 * 86400;
-                let sure_2yil: u64 = 730 * 86400;
+                // DETERMINIZM: vesting baslangici SABIT (SystemTime::now DEGIL).
+                // Her dugum ayni takvimi hesaplamali; yerel saat kilit durumunu
+                // ayristirirdi (konsensus bolunmesi). Koda pinli sabit kullanilir.
+                let vesting_bas = lsc_engine::mainnet::MAINNET_VESTING_BASLANGIC;
 
                 // dilimler() sirasi: [ekosistem, hazine, likidite, topluluk, kurucu, destekci]
+                // VESTING PLANI TEK KAYNAK: genesis::dilim_vesting (MUHURLU plan).
                 let dilim_list = dagitim.dilimler();
                 for (idx, (adres, miktar)) in dilim_list.iter().enumerate() {
                     st.test_bakiye_ekle(*adres, *miktar);
-                    // KILITLI dilimler: likidite(2), kurucu(4), destekci(5)
-                    match idx {
-                        2 => { // likidite: 2 yil dogrusal (cliff yok, DEX esnekligi)
-                            st.vesting_ekle(*adres, lsc_engine::registry::VestingKaydi {
-                                toplam: *miktar, baslangic: vesting_bas,
-                                cliff_sure: 0, toplam_sure: sure_2yil,
-                            });
-                        }
-                        4 | 5 => { // kurucu + destekci: 6 ay cliff + 2 yil
-                            st.vesting_ekle(*adres, lsc_engine::registry::VestingKaydi {
-                                toplam: *miktar, baslangic: vesting_bas,
-                                cliff_sure: cliff_6ay, toplam_sure: sure_2yil,
-                            });
-                        }
-                        _ => {} // ekosistem(0), hazine(1), topluluk(3): acik (vesting yok)
+                    if let Some((cliff_sure, toplam_sure)) = lsc_engine::genesis::dilim_vesting(idx) {
+                        st.vesting_ekle(*adres, lsc_engine::registry::VestingKaydi {
+                            toplam: *miktar, baslangic: vesting_bas,
+                            cliff_sure, toplam_sure,
+                        });
                     }
                 }
                 st.vesting_zaman_ayarla(vesting_bas);
-                tracing::warn!("GENESIS DAGITIM: 6 dilim yuklendi (21M). VESTING: likidite/kurucu/destekci kilitli.");
+                tracing::warn!("GENESIS DAGITIM: 6 dilim yuklendi (21M). VESTING (plan): likidite/kurucu/destekci kilitli.");
             } else {
                 tracing::error!("GENESIS DAGITIM REDDEDILDI: toplam 21M degil (kapali_mi=false)!");
             }
@@ -348,12 +351,54 @@ pub async fn run_node(
         }
     }
 
+    // ── MAINNET: SADECE KURUCU DILIMI (interim) ────────────────────────────
+    // Tam 6-dilim dagitim (LSC_GENESIS_DAGITIM=1) YAPILMADIYSA, mainnet'te en
+    // azindan KURUCU dilimini (%13) pinli kurucu adresine bagla. Diger 5 adres
+    // netlesince pinlenecek (kullanici karari). Cift-sayim yok: 6-dilim calistiysa
+    // bu atlanir. Kurucu adresi env'den DEGIL, baked kurucu anahtarindan turetilir
+    // (imza-guvenli: genesis'i imzalayan anahtar = bu adres).
+    let full_dagitim = std::env::var("LSC_GENESIS_DAGITIM").ok().as_deref() == Some("1");
+    if mainnet && !full_dagitim {
+        let kurucu = lsc_engine::mainnet::kurucu_adres();
+        let kurucu_pay = lsc_engine::genesis::AIDAG_ARZ * 13 / 100;
+        let vesting_bas = lsc_engine::mainnet::MAINNET_VESTING_BASLANGIC;
+        let mut st = node_state.write().await;
+        st.test_bakiye_ekle(kurucu, kurucu_pay);
+        // Kurucu dilimi KILITLI — vesting plani TEK KAYNAK: genesis::dilim_vesting
+        // (kurucu index'i). 6 ay cliff + 2 yil dogrusal (dump korumasi, audit-net).
+        if let Some((cliff_sure, toplam_sure)) =
+            lsc_engine::genesis::dilim_vesting(lsc_engine::genesis::DILIM_KURUCU)
+        {
+            st.vesting_ekle(
+                kurucu,
+                lsc_engine::registry::VestingKaydi {
+                    toplam: kurucu_pay,
+                    baslangic: vesting_bas,
+                    cliff_sure,
+                    toplam_sure,
+                },
+            );
+        }
+        st.vesting_zaman_ayarla(vesting_bas);
+        tracing::warn!(
+            "MAINNET KURUCU DILIMI: {} adresine {} birim AIDAG (%13) yuklendi, 6ay cliff+2yil vesting kilitli.",
+            hex::encode(kurucu),
+            kurucu_pay
+        );
+    }
+
     // Bir genesis vertex (parent'siz) uret, imzala, wire ile encode et,
     // kendi DAG state'ine ingest et (vertex 0 -> 1). Yayin 4b'de.
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    // ============================================================
+    // AIDAG GENESIS SABITI - DEGISTIRILEMEZ
+    // 01.08.2007 00:00:00 UTC = 1185926400 (Unix saniye).
+    // Kubra Irem'in dogum gunu. Zincirin dogus ani; agdaki HER dugum
+    // byte-byte AYNI genesis'i uretir/tanir (mutabakatin temeli).
+    // SystemTime::now() her acilista farkli hash -> dugum ayrismasi
+    // (cok-dugum testi kaniti, 2026-07-15). Bitcoin genesis gibi ebedi sabit.
+    // ============================================================
+    const AIDAG_GENESIS_ZAMANI: u64 = 1_185_926_400;
+    let now: u64 = AIDAG_GENESIS_ZAMANI;
 
     // KALICILIK: diskte kayitli vertex varsa, genesis uretiminden ONCE yukle.
     // Yukleme orphan-bilincli (ingest_networked); dosya sirasi garantisiz olsa
@@ -440,37 +485,56 @@ pub async fn run_node(
     // Disk'te zaten vertex (ve genesis) varsa, YENIDEN genesis uretme.
     let has_genesis = { node_state.read().await.vertex_count() > 0 };
 
-    // Genesis: produce_genesis ise VE henuz genesis yoksa uretilir + graf'a
-    // ingest edilir + diske yazilir. Yayin AYRI degil: push sync (Subscribed
-    // kolu) zaten export_vertices ile genesis dahil her seyi yayinlar.
-    if produce_genesis && !has_genesis {
-        match lsc_engine::Vertex::new_signed(1, vec![], b"lsc-genesis".to_vec(), now, &signing_key)
-        {
-            Ok(genesis) => {
-                let bytes = lsc_engine::dag::wire::encode(&genesis);
-                {
-                    let mut st = node_state.write().await;
-                    match st.ingest(&bytes, now) {
-                        Ok(id) => tracing::info!(
-                            "Genesis uretildi + ingest: id={}, vertex_sayisi={}",
-                            hex::encode(&id[..8]),
-                            st.vertex_count()
-                        ),
-                        Err(e) => tracing::warn!("Genesis ingest hatasi: {e}"),
-                    }
-                } // kilit birakilir
-                  // KALICILIK: genesis'i de diske yaz (yoksa restart'ta cocuklar
-                  // parent'siz kalir -> hepsi orphan). Kalicilik buguydu.
-                if let Some(ref path) = data_file {
-                    if let Err(e) = store::append_vertex(path, &bytes) {
-                        tracing::warn!("Genesis diske yazilamadi: {e}");
-                    }
+    // Genesis kaynagi moda gore ayrisir:
+    //  - MAINNET: pinli genesis BAKED wire baytlarindan yuklenir (crate::mainnet).
+    //    Ozel anahtara IHTIYAC YOK; her dugumde byte-byte AYNI; produce_genesis'ten
+    //    BAGIMSIZ (genesis sabittir, "uretilmez", yuklenir → tum dugumler guven
+    //    kokunu tasir, dinleyici bile).
+    //  - DEVNET/TESTNET: node kendi anahtariyla imzali genesis uretir (net_id=1),
+    //    yalnizca produce_genesis ise (mevcut davranis korunur).
+    if !has_genesis {
+        let genesis_bytes: Option<Vec<u8>> = if mainnet {
+            Some(lsc_engine::mainnet::genesis_wire())
+        } else if produce_genesis {
+            match lsc_engine::Vertex::new_signed(
+                1,
+                vec![],
+                b"lsc-genesis".to_vec(),
+                now,
+                &signing_key,
+            ) {
+                Ok(g) => Some(lsc_engine::dag::wire::encode(&g)),
+                Err(e) => {
+                    tracing::error!("Genesis vertex uretilemedi: {e:?}");
+                    None
                 }
             }
-            Err(e) => tracing::error!("Genesis vertex uretilemedi: {e:?}"),
+        } else {
+            tracing::info!("Dinleyici modu: genesis uretilmiyor, agdan vertex bekleniyor.");
+            None
+        };
+
+        if let Some(bytes) = genesis_bytes {
+            {
+                let mut st = node_state.write().await;
+                match st.ingest(&bytes, now) {
+                    Ok(id) => tracing::info!(
+                        "Genesis {}: id={}, vertex_sayisi={}",
+                        if mainnet { "yuklendi (pinli)" } else { "uretildi" },
+                        hex::encode(&id[..8]),
+                        st.vertex_count()
+                    ),
+                    Err(e) => tracing::warn!("Genesis ingest hatasi: {e}"),
+                }
+            } // kilit birakilir
+              // KALICILIK: genesis'i de diske yaz (yoksa restart'ta cocuklar
+              // parent'siz kalir -> hepsi orphan).
+            if let Some(ref path) = data_file {
+                if let Err(e) = store::append_vertex(path, &bytes) {
+                    tracing::warn!("Genesis diske yazilamadi: {e}");
+                }
+            }
         }
-    } else {
-        tracing::info!("Dinleyici modu: genesis uretilmiyor, agdan vertex bekleniyor.");
     }
 
     let local_peer_id = *swarm.local_peer_id();

@@ -84,6 +84,35 @@ impl GenesisDagitim {
     }
 }
 
+/// VESTING TAKVIMI — MÜHÜRLÜ plan (MAINNET_TEKONOMIK.md). Vesting parametreleri
+/// TEK KAYNAKTAN gelir: hem genesis 6-dilim dağıtımı hem de mainnet interim
+/// kurucu-dilimi bu sabitleri kullanır. Env'de gevşek/serbest değer YOK →
+/// yanlış konfigürasyon imkânsız, denetim (audit) net.
+pub const CLIFF_6AY: u64 = 180 * 86400;
+/// Doğrusal açılım toplam süresi: 2 yıl.
+pub const VESTING_2YIL: u64 = 730 * 86400;
+
+/// `dilimler()` sırasında KURUCU dilim index'i.
+pub const DILIM_KURUCU: usize = 4;
+
+/// `dilimler()` index'ine göre vesting planı. `Some((cliff_sure, toplam_sure))`
+/// → dilim KİLİTLİ (cliff + doğrusal açılım). `None` → AÇIK (vesting yok).
+///
+/// Plan (MÜHÜRLÜ):
+///   0 ekosistem      : AÇIK
+///   1 hazine         : AÇIK bakiye (harcama Payhawk-kilit ile ayrıca sınırlı — Faz D)
+///   2 likidite       : 2 yıl doğrusal, cliff YOK (DEX likidite esnekliği)
+///   3 topluluk       : AÇIK
+///   4 kurucu         : 6 ay cliff + 2 yıl doğrusal (dump koruması)
+///   5 erken destekçi : 6 ay cliff + 2 yıl doğrusal
+pub fn dilim_vesting(idx: usize) -> Option<(u64, u64)> {
+    match idx {
+        2 => Some((0, VESTING_2YIL)),
+        4 | 5 => Some((CLIFF_6AY, VESTING_2YIL)),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -113,6 +142,19 @@ mod tests {
         assert_eq!(g.erken_destekci.1, AIDAG_ARZ * 5 / 100);
         // Ekosistem, kalanı alır (>= %30, yuvarlama artığıyla)
         assert!(g.ekosistem.1 >= AIDAG_ARZ * 30 / 100);
+    }
+
+    #[test]
+    fn vesting_plani_muhurlu_takvime_uyar() {
+        // MÜHÜRLÜ plan: ekosistem/hazine/topluluk AÇIK; likidite 2yıl cliffsiz;
+        // kurucu+destekçi 6ay cliff+2yıl. Regresyon kilidi (plan değişirse test kırılır).
+        assert_eq!(dilim_vesting(0), None, "ekosistem açık olmalı");
+        assert_eq!(dilim_vesting(1), None, "hazine (genesis) açık olmalı");
+        assert_eq!(dilim_vesting(2), Some((0, VESTING_2YIL)), "likidite 2yıl cliffsiz");
+        assert_eq!(dilim_vesting(3), None, "topluluk açık olmalı");
+        assert_eq!(dilim_vesting(4), Some((CLIFF_6AY, VESTING_2YIL)), "kurucu 6ay+2yıl");
+        assert_eq!(dilim_vesting(5), Some((CLIFF_6AY, VESTING_2YIL)), "destekçi 6ay+2yıl");
+        assert_eq!(DILIM_KURUCU, 4, "kurucu index'i dilimler() sırasıyla tutarlı");
     }
 
     #[test]
