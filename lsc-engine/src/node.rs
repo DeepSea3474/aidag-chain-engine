@@ -668,7 +668,7 @@ impl NodeState {
                     let payload: Vec<u8> = v.payload().to_vec();
                     let signer: [u8; 32] = *v.public_key();
                     let zaman: u64 = v.timestamp();
-                    self.kalkana_yonlendir(&payload, &signer, zaman, false);
+                    self.kalkana_yonlendir(&payload, &signer, zaman);
                 }
             }
             self.son_uygulanan_sira = yeni_sira;
@@ -720,16 +720,18 @@ impl NodeState {
             let zaman: u64 = v.timestamp();
             // synced=FALSE: disk-replay DEGIL; state'in sifirdan TAM KURALLARLA
             // yeniden hesabi (gas kesilir, nonce ilerler, bakiye kontrol edilir).
-            self.kalkana_yonlendir(&payload, &signer, zaman, false);
+            self.kalkana_yonlendir(&payload, &signer, zaman);
         }
         self.son_uygulanan_sira = sira;
     }
 
     /// KALKAN yonlendirme: payload tip=2 (TokenKaydi) ise registry'ye kaydet.
     /// Taklit (ayni sembol farkli adres) protokol seviyesinde reddedilir.
-    /// Bu metod integrate_vertex'ten cagrilir -> ag/replay/yerel/cascade
-    /// TUM ingest yollari otomatik kalkandan gecer (tek nokta, kacak yok).
-    fn kalkana_yonlendir(&mut self, payload: &[u8], signer: &[u8; 32], zaman: u64, synced: bool) {
+    /// Bu metod durumu_yeniden_uygula'dan (belirlenimci total_order) cagrilir ->
+    /// TUM ingest yollari (ag/replay/yerel/cascade) ayni deterministik yoldan gecer.
+    /// NOT (B7): eski `synced` param'i kaldirildi — state HER ZAMAN total_order'dan
+    /// sifirdan turetilir; "replay" ozel yolu yoktu (olu koddu), silindi.
+    fn kalkana_yonlendir(&mut self, payload: &[u8], signer: &[u8; 32], zaman: u64) {
         // DETERMINIZM: vesting kilit kontrolu, islenmekte olan vertex'in KENDI
         // timestamp'ine gore yapilir. `zaman` konsensus verisidir (vertex preimage'i
         // + her dugumde AYNI) → kilitli/serbest miktar tum dugumlerde birebir ayni
@@ -878,27 +880,8 @@ impl NodeState {
                                     self.nonce_registry.ilerlet(&gonderen);
                                 }
                             }
-                        } else if synced {
-                            // --- REPLAY (diskten/sync): KONTRAT KODUNU yeniden kur.
-                            // Gecmis ZATEN dogrulanmis; gas/nonce/bakiye TEKRAR kontrol
-                            // edilmez (ilk seferinde yapildi). Sadece kontrat kodu/storage
-                            // avm_db'ye yeniden deploy edilir ki restart sonrasi KALICI olsun.
-                            // LSC bakiyesi replay'de yok (test bakiyesi vertex degil); bu
-                            // yuzden gas kesintisi atlanir, sadece state yeniden kurulur.
-                            let bak = self.bakiye_registry.bakiye(&gonderen);
-                            self.avm_db.aidag_koy(gonderen, bak);
-                            let _ = crate::avm::avm_calistir(
-                                &mut self.avm_db,
-                                &gonderen,
-                                &c.hedef,
-                                c.deger,
-                                &c.data,
-                                zaman,
-                            );
-                            // nonce'u replay'de de ilerlet (sonraki replay islemleri tutarli olsun)
-                            self.nonce_registry.ilerlet(&gonderen);
                         } else {
-                            // --- DATA DOLU (CANLI): KONTRAT calistirma. Kod/storage avm_db'de KALICI.
+                            // --- DATA DOLU: KONTRAT calistirma. Kod/storage avm_db'de KALICI.
                             // GAS (B2 duzeltmesi): sabit 21000 DEGIL, GERCEK gas_used'dan ucret.
                             //  * Upfront: kullanici gas TAVANINI (AVM_GAS_LIMIT) LSC olarak
                             //    karsilayabilmeli (aksi halde islem calistirilmaz).

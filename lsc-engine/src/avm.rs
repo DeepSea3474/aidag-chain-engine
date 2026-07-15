@@ -39,6 +39,10 @@ pub struct AidagDatabase {
     /// oldugu icin KALICI olmali; aksi halde bir hesap hep nonce=0 ile ayni adresi
     /// uretir -> tek kontrat deploy edebilir (adres cakismasi).
     nonce_lar: HashMap<[u8; 20], u64>,
+    /// KOPRU 5 (B7 perf): kod_hash -> adres indeksi. code_by_hash'in her cagrida TUM
+    /// kontratlarin hash'ini yeniden hesaplayan O(n) taramasini O(1)'e indirir.
+    /// kodlar ile birlikte guncellenir; hash insert-aninda BIR kez hesaplanir.
+    kod_hash_index: HashMap<B256, [u8; 20]>,
 }
 
 impl AidagDatabase {
@@ -49,6 +53,7 @@ impl AidagDatabase {
             kodlar: HashMap::new(),
             depo: HashMap::new(),
             nonce_lar: HashMap::new(),
+            kod_hash_index: HashMap::new(),
         }
     }
 
@@ -94,6 +99,8 @@ impl AidagDatabase {
 
     /// KOPRU 5: bir adrese sozlesme kodu (bytecode) koy (deploy/test).
     pub fn kod_koy(&mut self, adres: [u8; 20], kod: Bytecode) {
+        // B7: hash indeksini de guncelle (code_by_hash O(1) icin).
+        self.kod_hash_index.insert(kod.hash_slow(), adres);
         self.kodlar.insert(adres, kod);
     }
     /// KOPRU 5: bir adresin kodunu oku (yoksa None).
@@ -173,13 +180,14 @@ impl Database for AidagDatabase {
 
     /// KOPRU 5: hash e karsilik gelen sozlesme kodunu dondurur (yoksa bos).
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Infallible> {
-        // KOPRU 5: hash'e karsilik gelen kodu bul (yoksa bos).
-        for kod in self.kodlar.values() {
-            if kod.hash_slow() == code_hash {
-                return Ok(kod.clone());
-            }
-        }
-        Ok(Bytecode::default())
+        // KOPRU 5 (B7): hash -> adres indeksi ile O(1). Eski O(n) tarama her cagrida
+        // tum kontratlarin hash_slow'unu yeniden hesapliyordu.
+        Ok(self
+            .kod_hash_index
+            .get(&code_hash)
+            .and_then(|adres| self.kodlar.get(adres))
+            .cloned()
+            .unwrap_or_default())
     }
 
     /// KOPRU 5: (adres, slot) -> deger okur (yoksa sifir).
@@ -211,13 +219,22 @@ impl DatabaseCommit for AidagDatabase {
             }
             let adres = address.into_array();
 
-            // 1) Bakiye (AIDAG native deger) - EVM sonucunu AIDAG defterine yaz
+            // 1) Bakiye (AIDAG native deger) - EVM sonucunu AIDAG defterine yaz.
+            // B7: AIDAG arzi SINIRLI (21M) -> bakiye u128'e HER ZAMAN sigar. Invariant'i
+            // debug'da dogrula; release'de deterministik satura (panik=DoS riski yok).
+            // "Sessiz para yaratma" endisesi: bounded supply ile ULASILAMAZ + belgeli.
+            debug_assert!(
+                u128::try_from(account.info.balance).is_ok(),
+                "AIDAG bakiyesi u128'i asti — arz invariant'i kirildi (ulasilamaz olmali)"
+            );
             let bakiye_u128 = account.info.balance.try_into().unwrap_or(u128::MAX);
             self.aidag_bakiyeler.insert(adres, bakiye_u128);
 
             // 2) Kod (deploy edilen sozlesme)
             if let Some(kod) = &account.info.code {
                 if !kod.is_empty() {
+                    // B7: hash indeksini de guncelle (code_by_hash O(1)).
+                    self.kod_hash_index.insert(kod.hash_slow(), adres);
                     self.kodlar.insert(adres, kod.clone());
                 }
             }
