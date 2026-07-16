@@ -49,6 +49,23 @@ pub const MAINNET_KURUCU_PUBKEY_HEX: &str =
 /// Kurucu kanonik adresi — 20 bayt hex (blake3(pubkey)[..20]).
 pub const MAINNET_KURUCU_ADRES_HEX: &str = "11c1906e07508e0b83ef4afa042879281e196b9f";
 
+/// MAINNET GENESIS DAGITIM ADRESLERI (PINLI — 2026-07-16, kullanici onayli).
+/// Sira genesis::GenesisDagitim::planla ile AYNI:
+///   [ekosistem, hazine, likidite, topluluk, kurucu, erken-destekci, on-satis].
+/// - on-satis (idx 6) = kurucu native adresi (operasyon/escrow; on-satis buradan
+///   alicilara dagitilir, on-satis vertex'ini bu anahtar imzalar).
+/// - idx 0-5 = kullanici cuzdanlari (MetaMask/EVM). Adres = anahtardan turer.
+/// Bkz. AIDAG_GENESIS_DAGITIM_ADRESLERI.md (tam tablo + oran/vesting).
+pub const MAINNET_DAGITIM_ADRES_HEX: [&str; 7] = [
+    "cfbb3e5a398b9c43e10770d19ff5ea6f027aeb3b", // ekosistem %22
+    "7458936b578ad2346934a9729a86d3f516d59e24", // hazine %25
+    "1d3f315aa99c8c298a0a5f39eef6115bb1fc0924", // likidite %15
+    "c98182ec9c5ed46f84879dbdd6e2d0979773e1bb", // topluluk %12
+    "57241fb83e0ee8624399a9ad0f4ccf2b1de4e716", // kurucu %13
+    "8fa6bf5dd4125433a749af10df4a1791043a72cd", // erken-destekci %5
+    "11c1906e07508e0b83ef4afa042879281e196b9f", // on-satis %8 (kurucu native)
+];
+
 /// Pinli genesis vertex id — 32 bayt hex (guven koku).
 pub const MAINNET_GENESIS_ID_HEX: &str =
     "b82345008ae109d842beefa4004a8680fc6f545fefa2c87a6a218de0f1269c39";
@@ -64,6 +81,18 @@ pub fn kurucu_adres() -> [u8; 20] {
     let mut a = [0u8; 20];
     a.copy_from_slice(&b);
     a
+}
+
+/// PINLI mainnet dagitim adresleri — [u8;20] dizisi (genesis::planla sirasi).
+/// Gecersiz hex -> acikca DUR (derleme-zamani sabit, startup'ta bir kez).
+pub fn dagitim_adresleri() -> [[u8; 20]; 7] {
+    let mut out = [[0u8; 20]; 7];
+    for (i, h) in MAINNET_DAGITIM_ADRES_HEX.iter().enumerate() {
+        let b = hex_decode(h).expect("MAINNET_DAGITIM_ADRES_HEX gecersiz hex");
+        assert!(b.len() == 20, "MAINNET_DAGITIM_ADRES_HEX 20 bayt olmali");
+        out[i].copy_from_slice(&b);
+    }
+    out
 }
 
 /// Pinli genesis id — [u8;32].

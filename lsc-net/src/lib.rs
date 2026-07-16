@@ -294,11 +294,13 @@ pub async fn run_node(
         owner_adres
     };
 
-    // GENESIS HAZINE: LSC_GENESIS_HAZINE env'i ayarliysa, owner'a (hazine) o kadar
-    // baslangic AIDAG'i ver. RPC ucu DEGIL -> disaridan tetiklenemez (guvenli).
-    // Deger 18-ondalik ham birim (ornek: 1000 AIDAG = "1000000000000000000000").
-    // NOT: Bu gecici bir kurulum; gercek mainnet genesis'i pinli/vesting'li olacak.
-    if let Ok(hazine_str) = std::env::var("LSC_GENESIS_HAZINE") {
+    // GENESIS HAZINE (TESTNET): LSC_GENESIS_HAZINE env'i owner'a baslangic AIDAG verir.
+    // MAINNET'te DEVRE DISI -> dagitim new_mainnet()'te KODA PINLI (cift-sayim yok).
+    if let Some(hazine_str) = if mainnet {
+        None
+    } else {
+        std::env::var("LSC_GENESIS_HAZINE").ok()
+    } {
         if let Ok(miktar) = hazine_str.trim().parse::<u128>() {
             node_state
                 .write()
@@ -312,11 +314,10 @@ pub async fn run_node(
         }
     }
 
-    // ── MAINNET GENESIS DAGITIMI (7 dilim, pinli) ──────────────────────────
-    // LSC_GENESIS_DAGITIM=1 ise, genesis.rs'teki 6-dilim dagitimi uygulanir.
-    // 7 adres env.den okunur (LSC_GEN_EKOSISTEM ... LSC_GEN_ONSATIS).
-    // Kapali sistem: toplam TAM 21M olmali (kapali_mi kontrolu).
-    if std::env::var("LSC_GENESIS_DAGITIM").ok().as_deref() == Some("1") {
+    // ── TESTNET GENESIS DAGITIMI (env, 7 dilim) ────────────────────────────
+    // LSC_GENESIS_DAGITIM=1 ise env'den 7 adresle dagitim (kapali 21M kontrolu).
+    // MAINNET'te DEVRE DISI -> mainnet dagitimi new_mainnet()'te KODA PINLI.
+    if !mainnet && std::env::var("LSC_GENESIS_DAGITIM").ok().as_deref() == Some("1") {
         let adr = |k: &str| -> Option<[u8; 20]> {
             let h = std::env::var(k).ok()?;
             let b = hex::decode(h.trim().trim_start_matches("0x")).ok()?;
@@ -383,42 +384,11 @@ pub async fn run_node(
         }
     }
 
-    // ── MAINNET: SADECE KURUCU DILIMI (interim) ────────────────────────────
-    // Tam 6-dilim dagitim (LSC_GENESIS_DAGITIM=1) YAPILMADIYSA, mainnet'te en
-    // azindan KURUCU dilimini (%13) pinli kurucu adresine bagla. Diger 5 adres
-    // netlesince pinlenecek (kullanici karari). Cift-sayim yok: 6-dilim calistiysa
-    // bu atlanir. Kurucu adresi env'den DEGIL, baked kurucu anahtarindan turetilir
-    // (imza-guvenli: genesis'i imzalayan anahtar = bu adres).
-    let full_dagitim = std::env::var("LSC_GENESIS_DAGITIM").ok().as_deref() == Some("1");
-    if mainnet && !full_dagitim {
-        let kurucu = lsc_engine::mainnet::kurucu_adres();
-        let kurucu_pay = lsc_engine::genesis::AIDAG_ARZ * 13 / 100;
-        let vesting_bas = lsc_engine::mainnet::MAINNET_VESTING_BASLANGIC;
-        let mut st = node_state.write().await;
-        st.test_bakiye_ekle(kurucu, kurucu_pay);
-        // Kurucu dilimi KILITLI — vesting plani TEK KAYNAK: genesis::dilim_vesting
-        // (kurucu index'i). 6 ay cliff + 2 yil dogrusal (dump korumasi, audit-net).
-        if let Some((cliff_sure, toplam_sure)) =
-            lsc_engine::genesis::dilim_vesting(lsc_engine::genesis::DILIM_KURUCU)
-        {
-            st.vesting_ekle(
-                kurucu,
-                lsc_engine::registry::VestingKaydi {
-                    toplam: kurucu_pay,
-                    baslangic: vesting_bas,
-                    cliff_sure,
-                    toplam_sure,
-                    tge_acik: 0,
-                },
-            );
-        }
-        st.vesting_zaman_ayarla(vesting_bas);
-        tracing::warn!(
-            "MAINNET KURUCU DILIMI: {} adresine {} birim AIDAG (%13) yuklendi, 6ay cliff+2yil vesting kilitli.",
-            hex::encode(kurucu),
-            kurucu_pay
-        );
-    }
+    // ── MAINNET GENESIS DAGITIMI: new_mainnet()'te PINLI ───────────────────
+    // Mainnet 7-dilim dagitim + vesting (kurucu dahil) new_mainnet()'te KODA PINLI
+    // yuklenir (mainnet.rs::MAINNET_DAGITIM_ADRES_HEX). Burada TEKRAR yuklenmez ->
+    // cift-sayim YOK. Eski interim kurucu-dilimi kaldirildi; env-hazine/dagitim
+    // yollari yalniz TESTNET (yukarida !mainnet ile sinirli).
 
     // Bir genesis vertex (parent'siz) uret, imzala, wire ile encode et,
     // kendi DAG state'ine ingest et (vertex 0 -> 1). Yayin 4b'de.

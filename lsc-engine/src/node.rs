@@ -111,7 +111,40 @@ impl NodeState {
         // devre disi (lib.rs). Faucet (mint) mainnet'te kapali (mainnet=true) ->
         // owner pinlemek arzi kirmaz; yalniz on-satis (arz-korumali) etkinlesir.
         s.faucet_owner = Some(crate::mainnet::kurucu_adres());
+        // A1 (fon determinizmi): PINLI 7-dilim genesis dagitimini + vesting'i OTOMATIK
+        // yukle. Env (LSC_GENESIS_*) YOK -> tum mainnet node'lari AYNI dagitim + owner
+        // bakiyesi -> on-satis konsensus bolunmesi kapanir. Kapalilik (21M) debug'da dogrulanir.
+        s.mainnet_dagitim_yukle();
         s
+    }
+
+    /// A1: PINLI 7-dilim mainnet dagitimini + vesting'i yukle. baslangic_bakiyeler/
+    /// baslangic_vesting'e islenir -> her state-rebuild'de deterministik korunur.
+    /// Adresler mainnet.rs'te PINLI (env DEGIL). on-satis (idx 6) = kurucu native.
+    fn mainnet_dagitim_yukle(&mut self) {
+        let adresler = crate::mainnet::dagitim_adresleri();
+        let dagitim = crate::genesis::GenesisDagitim::planla(adresler);
+        debug_assert!(
+            dagitim.kapali_mi(),
+            "MAINNET dagitim toplam 21M degil (kapali_mi=false)!"
+        );
+        let vesting_bas = crate::mainnet::MAINNET_VESTING_BASLANGIC;
+        for (idx, (adres, miktar)) in dagitim.dilimler().iter().enumerate() {
+            self.test_bakiye_ekle(*adres, *miktar);
+            if let Some((cliff_sure, toplam_sure)) = crate::genesis::dilim_vesting(idx) {
+                self.vesting_ekle(
+                    *adres,
+                    crate::registry::VestingKaydi {
+                        toplam: *miktar,
+                        baslangic: vesting_bas,
+                        cliff_sure,
+                        toplam_sure,
+                        tge_acik: 0,
+                    },
+                );
+            }
+        }
+        self.vesting_zaman_ayarla(vesting_bas);
     }
 
     /// Ortak kurulum: verilen graf + network_id ile boş defterli NodeState.
@@ -3340,6 +3373,63 @@ mod tests {
             node.toplam_bakiye_arzi(),
             arz_once,
             "mainnet faucet arzi degistirmedi (mint yok)"
+        );
+    }
+
+    // A1 KANIT (fon determinizmi): mainnet 7-dilim dagitimi KODA PINLI, env'siz
+    // otomatik yuklenir. Iki mainnet node AYNI dagitim + vesting alir; toplam 21M.
+    #[test]
+    fn a1_mainnet_dagitim_pinli_deterministik() {
+        let n1 = NodeState::new_mainnet();
+        let n2 = NodeState::new_mainnet();
+        let adr = crate::mainnet::dagitim_adresleri();
+        let arz = crate::genesis::AIDAG_ARZ;
+
+        // Toplam arz TAM 21M (kapali sistem)
+        assert_eq!(n1.toplam_bakiye_arzi(), arz, "mainnet toplam AIDAG = 21M");
+
+        // Her dilim dogru miktar (adr sirasi: eko/hazine/likidite/topluluk/kurucu/erken/onsatis)
+        assert_eq!(n1.bakiye(&adr[0]), arz * 22 / 100, "ekosistem %22");
+        assert_eq!(n1.bakiye(&adr[1]), arz * 25 / 100, "hazine %25");
+        assert_eq!(n1.bakiye(&adr[2]), arz * 15 / 100, "likidite %15");
+        assert_eq!(n1.bakiye(&adr[3]), arz * 12 / 100, "topluluk %12");
+        assert_eq!(n1.bakiye(&adr[4]), arz * 13 / 100, "kurucu %13");
+        assert_eq!(n1.bakiye(&adr[5]), arz * 5 / 100, "erken destekci %5");
+        assert_eq!(n1.bakiye(&adr[6]), arz * 8 / 100, "on-satis %8");
+
+        // DETERMINIZM: iki mainnet node AYNI bakiye (env'e bagli ayrisma YOK)
+        for a in adr.iter() {
+            assert_eq!(n1.bakiye(a), n2.bakiye(a), "iki mainnet node ayni bakiye");
+        }
+
+        // VESTING: TGE'de kurucu/ekosistem kilitli, hazine acik
+        let tge = crate::mainnet::MAINNET_VESTING_BASLANGIC;
+        assert_eq!(
+            n1.vesting_kilitli(&adr[4], tge),
+            arz * 13 / 100,
+            "kurucu TGE'de tam kilitli (6ay cliff)"
+        );
+        assert_eq!(
+            n1.vesting_kilitli(&adr[0], tge),
+            arz * 22 / 100,
+            "ekosistem TGE'de tam kilitli (12ay dogrusal basi)"
+        );
+        assert_eq!(
+            n1.vesting_kilitli(&adr[1], tge),
+            0,
+            "hazine acik (kilit yok)"
+        );
+
+        // On-satis dilimi (idx 6) = kurucu owner adresi (operasyon/escrow)
+        assert_eq!(
+            crate::mainnet::kurucu_adres(),
+            adr[6],
+            "on-satis dilimi = kurucu (owner) adresi"
+        );
+        assert_eq!(
+            n1.faucet_owner(),
+            Some(crate::mainnet::kurucu_adres()),
+            "on-satis owner pinli kurucu"
         );
     }
 
