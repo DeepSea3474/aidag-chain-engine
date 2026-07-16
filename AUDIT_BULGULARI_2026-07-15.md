@@ -5,6 +5,61 @@
 
 ---
 
+## ✅ REMEDIATION KAYDI (2026-07-16) — dış audit için
+
+**14/16 bulgu TAM kapatıldı; her kod düzeltmesi, eski hatayı GÖSTEREN kanıt testiyle geldi.**
+Test tabanı 323/323 workspace yeşil; CI tam yeşil (fmt + clippy + test).
+**Kalan 2 madde:** **A1** KISMİ (owner adresi pinlendi; hazine BAKİYESİ pinlenmesi
+mainnet dağıtımı = tokenomik kararı bekler), **A3** süreç/doküman (kod bug'ı değil).
+DÜRÜSTLÜK NOTU: A1/A2/A5 önce commit mesajlarından "kapalı" sanılmıştı; kod
+doğrulamasında owner'ın node-yerel (env) olduğu görüldü ve A2/A5 GERÇEKTEN `8cb9f55`
+ile kapatıldı. A1'in bakiye ayağı hâlâ açık (aşağıda).
+
+| Bulgu | Önem | Durum | Commit | Kanıt testi |
+|-------|------|-------|--------|-------------|
+| **A1** owner hazine env (konsensüs böl.) | KRİTİK | 🔧 KISMİ | `8cb9f55` | owner ADRESİ pinlendi (A2); hazine BAKİYESİ hâlâ env → dağıtım pinlenmeli (tokenomik) |
+| **A2** owner-gating env | YÜKSEK | ✅ | `8cb9f55` | `a2_mainnet_owner_pinli_deterministik` (env override mainnet'te kapalı) |
+| **A3** çift-dağıtım odeme_ref | ORTA | 📋 | — | süreç/doküman (aşağıda); aynı-ref zaten det. engelli |
+| **A4** on-satış şeffaflık | ORTA | ✅ | `1f898d6` | `on_satis_lsc_hediye_yetersizse_kayit_gercegi_yansitir_a4` |
+| **A5** geçersiz env owner | DÜŞÜK | ✅ | `8cb9f55` | mainnet owner pinli + env yok; ayrıca mainnet faucet MINT kapalı (`a2_mainnet_faucet_mint_yapmaz`) |
+| **B1** fon donması (AIDAG state-diff) | KRİTİK | ✅ | `d08f715` | `avm_kontrat_ici_transfer_gercek_deftere_yansir_b1` |
+| **B2** gas + DoS (gerçek gas_used) | KRİTİK | ✅ | `a127db8`+`c1d90de` | deploy/call gas + `ham_eth_kontrat_ici_transfer...b1_b2` |
+| **B3** deploy nonce kalıcılığı | YÜKSEK | ✅ | `8fe032f` | `avm_ayni_hesap_iki_kontrat_deploy_edebilir_b3` |
+| **B4** eksik bakiye yükleme | YÜKSEK | ✅ | `d08f715` | B1 tam-seed ile kapandı |
+| **B5** hayalet tx (DAG-dışı) | YÜKSEK | ✅ | `c1d90de` | ölü `eth_ham_tx_isle` kaldırıldı |
+| **B6** birleşik nonce vs EVM per-account | ORTA | ✅ | `ce4b49f` | `b6_create_nonce_birlesik_nonce_ile_tutarli` |
+| **B7** U256→u128 + code_by_hash + ölü dal | DÜŞÜK | ✅ | `efb38e8` | debug_assert + O(1) index + ölü synced dalı silindi |
+| **C1** RWA custodian yetkisi | YÜKSEK | ✅ | `fbeeb9a` | `kubr_teminat_yetkisi_custodian_c1` |
+| **C2** BelgeDamgasi front-running | ORTA/YÜK | ✅ | `de3096f` | `belge_damgasi_front_running_onlenir_c2` |
+| **C3** KUBR teminat matematik | ORTA | ✅ | `911e322` | `kubr_teminat_orani_truncation_yok_c3` |
+| **C4** KUBR hardening | DÜŞÜK | ✅ | `48b59c1` | `kubr_hardening_zero_address_ownership_allowance_c4` |
+
+Ek: CI fmt kapısı yeşile alındı (`ae60d64`, repo-geneli `cargo fmt`).
+
+### A3 — odeme_ref türetme (süreç/doküman)
+**Kod durumu (sağlam):** `on_satis_registry` aynı `odeme_ref`'i iki kez işlemez
+(deterministik çift-dağıtım engeli, `node.rs` tip=10). Owner yanlışlıkla aynı ödemeyi
+iki kez gönderse bile ikinci dağıtım YAPILMAZ.
+**Süreç kuralı (bağlayıcı):** `odeme_ref`, ilgili ödemenin **değişmez kimliğinden**
+türetilmelidir — örn. `odeme_ref = u64(keccak(banka_referansı ‖ tutar ‖ alıcı)[..8])`.
+Böylece aynı fiziksel ödeme her zaman AYNI ref'i üretir; owner farklı ref uydurup
+çift dağıtım yapamaz. Bu kural on-satış operasyon prosedürüne + owner aracına işlenir
+(zincir-dışı ödeme onayı adımı). Kod tarafı ek değişiklik gerektirmez.
+
+### A1 — KALAN: hazine bakiyesi pinleme (MAINNET-BLOCKER, tokenomik bekler)
+**Kapanan (A2 ile):** owner ADRESİ artık `new_mainnet()`'te pinli (`8cb9f55`); tüm
+mainnet node'ları aynı owner'ı kullanır. Mainnet faucet (mint) kapalı → 21M korunur.
+**Açık:** owner'ın **hazine BAKİYESİ** hâlâ node-yerel env (`LSC_GENESIS_HAZINE`,
+`lib.rs`) ile besleniyor. İki mainnet node farklı env ile farklı owner bakiyesi alırsa,
+on-satış transferi birinde başarılı diğerinde yetersiz → ayrışma. **Tam çözüm:** mainnet
+genesis DAĞITIMI (`genesis.rs`'teki 6 dilim — ekosistem/hazine/likidite/topluluk/kurucu/
+erken) **kodda PİNLİ** olmalı (env değil) ve `new_mainnet()` bunu genesis'te yüklemeli.
+**Bloke eden:** 6 dilimin GERÇEK adresleri + tutarları = kullanıcının nihai tokenomik
+kararı (şu an placeholder, `genesis.rs` satır 5). Bu karar verilince A1 tam kapanır +
+mainnet güvenle canlıya alınabilir. **Bu netleşene kadar mainnet BAŞLATILMAMALI.**
+
+---
+
 ## A. ÖN-SATIŞ (on_satis)
 
 **A1 — KRİTİK (konsensüs bölünmesi):** Owner hazine bakiyesi konsensüs dışı; node-yerel
