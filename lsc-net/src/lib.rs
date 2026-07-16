@@ -312,9 +312,9 @@ pub async fn run_node(
         }
     }
 
-    // ── MAINNET GENESIS DAGITIMI (6 dilim, pinli) ──────────────────────────
+    // ── MAINNET GENESIS DAGITIMI (7 dilim, pinli) ──────────────────────────
     // LSC_GENESIS_DAGITIM=1 ise, genesis.rs'teki 6-dilim dagitimi uygulanir.
-    // 6 adres env'den okunur (LSC_GEN_EKOSISTEM ... LSC_GEN_DESTEKCI).
+    // 7 adres env.den okunur (LSC_GEN_EKOSISTEM ... LSC_GEN_ONSATIS).
     // Kapali sistem: toplam TAM 21M olmali (kapali_mi kontrolu).
     if std::env::var("LSC_GENESIS_DAGITIM").ok().as_deref() == Some("1") {
         let adr = |k: &str| -> Option<[u8; 20]> {
@@ -335,11 +335,12 @@ pub async fn run_node(
             adr("LSC_GEN_TOPLULUK"),
             adr("LSC_GEN_KURUCU"),
             adr("LSC_GEN_DESTEKCI"),
+            adr("LSC_GEN_ONSATIS"),
         ];
         if adresler.iter().all(|x| x.is_some()) {
             // Ust satirdaki `all(is_some)` garantisi altinda hepsi Some; panige
             // yol acmadan sabit diziyi doldur (None asla gerceklesmez -> 0 kalmaz).
-            let mut a = [[0u8; 20]; 6];
+            let mut a = [[0u8; 20]; 7];
             for (i, adr) in adresler.iter().enumerate() {
                 if let Some(v) = adr {
                     a[i] = *v;
@@ -373,12 +374,12 @@ pub async fn run_node(
                     }
                 }
                 st.vesting_zaman_ayarla(vesting_bas);
-                tracing::warn!("GENESIS DAGITIM: 6 dilim yuklendi (21M). VESTING (plan): likidite/kurucu/destekci kilitli.");
+                tracing::warn!("GENESIS DAGITIM: 7 dilim yuklendi (21M). VESTING (plan): likidite/kurucu/destekci kilitli.");
             } else {
                 tracing::error!("GENESIS DAGITIM REDDEDILDI: toplam 21M degil (kapali_mi=false)!");
             }
         } else {
-            tracing::error!("GENESIS DAGITIM: 6 adres env'i eksik/gecersiz.");
+            tracing::error!("GENESIS DAGITIM: 7 adres env.i eksik/gecersiz.");
         }
     }
 

@@ -19,8 +19,9 @@ pub const AIDAG_ARZ: u128 = 21_000_000 * ONDALIK;
 pub const LSC_ARZ: u128 = 2_100_000_000 * ONDALIK;
 
 /// Genesis dağıtım dilimleri (AIDAG). Her dilim bir adrese gider.
-/// Yüzdeler: Ekosistem %30, Hazine %25, Likidite %15, Topluluk %12,
-/// Kurucu %13, Erken Destekçi %5 = %100 (kapalı).
+/// Yüzdeler: Ekosistem %22, Hazine %25, Likidite %15, Topluluk %12,
+/// Kurucu %13, Erken Destekçi %5, Ön-satış %8 = %100 (kapalı).
+/// (2026-07-16: ön-satış %8 dilimi Ekosistem'den ayrıldı: %30→%22.)
 #[derive(Debug, Clone)]
 pub struct GenesisDagitim {
     pub ekosistem: (GenAdres, Tutar),
@@ -29,22 +30,26 @@ pub struct GenesisDagitim {
     pub topluluk: (GenAdres, Tutar),
     pub kurucu: (GenAdres, Tutar),
     pub erken_destekci: (GenAdres, Tutar),
+    /// ÖN-SATIŞ escrow'u: proje adresinde durur, on-satış (tip=10) ile alıcılara
+    /// dağıtılır. Vesting BURADA değil, DAĞITIM anında alıcıya uygulanır (%20 TGE + 12ay).
+    pub on_satis: (GenAdres, Tutar),
 }
 
 type GenAdres = [u8; 20];
 
 impl GenesisDagitim {
-    /// Toplam arzdan 6 dilimi yüzdelere göre hesaplar.
+    /// Toplam arzdan 7 dilimi yüzdelere göre hesaplar.
     /// Yuvarlama artığı (varsa) ekosisteme eklenir — böylece toplam TAM arz olur.
-    pub fn planla(adresler: [GenAdres; 6]) -> Self {
+    pub fn planla(adresler: [GenAdres; 7]) -> Self {
         let arz = AIDAG_ARZ;
         let hazine = arz * 25 / 100;
         let likidite = arz * 15 / 100;
         let topluluk = arz * 12 / 100;
         let kurucu = arz * 13 / 100;
         let erken = arz * 5 / 100;
-        // Ekosistem = kalan (yuvarlama artığını da alır -> kapalılık garantisi)
-        let ekosistem = arz - hazine - likidite - topluluk - kurucu - erken;
+        let on_satis = arz * 8 / 100;
+        // Ekosistem = kalan (%22 + yuvarlama artığı -> kapalılık garantisi)
+        let ekosistem = arz - hazine - likidite - topluluk - kurucu - erken - on_satis;
         GenesisDagitim {
             ekosistem: (adresler[0], ekosistem),
             hazine: (adresler[1], hazine),
@@ -52,6 +57,7 @@ impl GenesisDagitim {
             topluluk: (adresler[3], topluluk),
             kurucu: (adresler[4], kurucu),
             erken_destekci: (adresler[5], erken),
+            on_satis: (adresler[6], on_satis),
         }
     }
 
@@ -63,6 +69,7 @@ impl GenesisDagitim {
             + self.topluluk.1
             + self.kurucu.1
             + self.erken_destekci.1
+            + self.on_satis.1
     }
 
     /// KAPALILIK KONTROLÜ: toplam TAM olarak AIDAG_ARZ mı?
@@ -72,7 +79,7 @@ impl GenesisDagitim {
     }
 
     /// Dilimleri (adres, miktar) listesi olarak döner — bakiye yüklemek için.
-    pub fn dilimler(&self) -> [(GenAdres, Tutar); 6] {
+    pub fn dilimler(&self) -> [(GenAdres, Tutar); 7] {
         [
             self.ekosistem,
             self.hazine,
@@ -80,6 +87,7 @@ impl GenesisDagitim {
             self.topluluk,
             self.kurucu,
             self.erken_destekci,
+            self.on_satis,
         ]
     }
 }
@@ -109,6 +117,8 @@ pub const DILIM_KURUCU: usize = 4;
 ///   3 topluluk       : 6 ay doğrusal, cliff YOK
 ///   4 kurucu         : 6 ay cliff + 2 yıl doğrusal (dump koruması)
 ///   5 erken destekçi : 6 ay cliff + 2 yıl doğrusal
+///   6 ön-satış       : AÇIK escrow (vesting BURADA değil; on-satış DAĞITIMINDA
+///                      alıcıya uygulanır — %20 TGE + 12 ay). Bkz. node.rs tip=10.
 pub fn dilim_vesting(idx: usize) -> Option<(u64, u64)> {
     match idx {
         0 => Some((0, VESTING_12AY)),
@@ -126,7 +136,7 @@ mod tests {
     #[test]
     fn genesis_kapali_toplam_tam_arz() {
         let adresler = [
-            [1u8; 20], [2u8; 20], [3u8; 20], [4u8; 20], [5u8; 20], [6u8; 20],
+            [1u8; 20], [2u8; 20], [3u8; 20], [4u8; 20], [5u8; 20], [6u8; 20], [7u8; 20],
         ];
         let g = GenesisDagitim::planla(adresler);
         // Kapalılık: toplam TAM olarak 21M ×10^18
@@ -137,7 +147,7 @@ mod tests {
     #[test]
     fn genesis_dilimler_dogru_oran() {
         let adresler = [
-            [1u8; 20], [2u8; 20], [3u8; 20], [4u8; 20], [5u8; 20], [6u8; 20],
+            [1u8; 20], [2u8; 20], [3u8; 20], [4u8; 20], [5u8; 20], [6u8; 20], [7u8; 20],
         ];
         let g = GenesisDagitim::planla(adresler);
         // Hazine %25
@@ -146,8 +156,10 @@ mod tests {
         assert_eq!(g.kurucu.1, AIDAG_ARZ * 13 / 100);
         // Erken destekçi %5
         assert_eq!(g.erken_destekci.1, AIDAG_ARZ * 5 / 100);
-        // Ekosistem, kalanı alır (>= %30, yuvarlama artığıyla)
-        assert!(g.ekosistem.1 >= AIDAG_ARZ * 30 / 100);
+        // Ön-satış %8
+        assert_eq!(g.on_satis.1, AIDAG_ARZ * 8 / 100);
+        // Ekosistem, kalanı alır (%22 + yuvarlama artığıyla)
+        assert!(g.ekosistem.1 >= AIDAG_ARZ * 22 / 100);
     }
 
     #[test]
@@ -191,7 +203,7 @@ mod tests {
     fn genesis_dilimler_bakiyeye_yuklenebilir() {
         use crate::registry::BakiyeRegistry;
         let adresler = [
-            [1u8; 20], [2u8; 20], [3u8; 20], [4u8; 20], [5u8; 20], [6u8; 20],
+            [1u8; 20], [2u8; 20], [3u8; 20], [4u8; 20], [5u8; 20], [6u8; 20], [7u8; 20],
         ];
         let g = GenesisDagitim::planla(adresler);
         let mut reg = BakiyeRegistry::yeni();
