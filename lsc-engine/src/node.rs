@@ -888,6 +888,12 @@ impl NodeState {
                                 // yurusun. gas_price=0 -> EVM native yaratmaz/yakmaz.
                                 self.avm_db
                                     .aidag_yukle_hepsi(self.bakiye_registry.tum_bakiyeler());
+                                // B6: CREATE nonce'unu BIRLESIK nonce_registry'ye senkronla
+                                // (c.nonce == beklenen, dogru_mu ile dogrulandi). Boylece
+                                // CREATE adresi = keccak(gonderen, birlesik_nonce) =
+                                // eth_getTransactionCount -> MetaMask/arac adres tahmini tutar.
+                                // (Aksi halde native tx'ler avm_db nonce'undan ayrisirdi.)
+                                self.avm_db.nonce_koy(gonderen, c.nonce);
                                 // KONTRAT calistir: deploy (hedef=sifir) ya da call. deger EVM'e
                                 // verilir ki kontrat mantigi (payable vb.) dogru tetiklensin.
                                 let sonuc = crate::avm::avm_calistir(
@@ -1066,6 +1072,10 @@ impl NodeState {
                                 // hareketler ucuncu-taraflar dahil dogru bakiyelerle yurusun).
                                 self.avm_db
                                     .aidag_yukle_hepsi(self.bakiye_registry.tum_bakiyeler());
+                                // B6: CREATE nonce'unu BIRLESIK nonce_registry'ye senkronla
+                                // (islem.nonce == beklenen). CREATE adresi eth_getTransactionCount
+                                // ile tutarli olur -> MetaMask/arac adres tahmini dogru.
+                                self.avm_db.nonce_koy(gonderen, islem.nonce);
                                 if let Ok((_h, r)) =
                                     crate::avm::ham_eth_tx_isle(&mut self.avm_db, raw, zaman)
                                 {
@@ -2571,6 +2581,62 @@ mod tests {
             node.toplam_bakiye_arzi(),
             arz_basta,
             "AIDAG toplam arzi korundu (raw-eth yolu)"
+        );
+    }
+
+    // B6 KANIT (nonce modeli): native tx sonrasi deploy'un CREATE adresi BIRLESIK
+    // nonce'u kullanir -> eth_getTransactionCount ile TUTARLI (MetaMask/arac adres
+    // tahmini dogru). Eski kodda avm_db'nin ayri nonce'u native tx'ten ayrisir,
+    // CREATE adresi eth araclarinin hesabindan FARKLI cikardi.
+    #[test]
+    fn b6_create_nonce_birlesik_nonce_ile_tutarli() {
+        use crate::registry::public_key_to_adres;
+        use crate::tx::{AvmCagri, TransferKaydi};
+        let now = 1_000_000;
+        let mut node = NodeState::new_devnet(NET);
+        let (gen, gid) = genesis_bytes(1, now);
+        node.ingest_networked(&gen, now);
+
+        let sk = SigningKey::from_bytes(&[0x66u8; 32]);
+        let gonderen = public_key_to_adres(&sk.verifying_key().to_bytes());
+        node.test_bakiye_ekle(gonderen, 1_000_000); // AIDAG (native transfer icin)
+        node.lsc_test_bakiye_ekle(gonderen, 100_000_000_000_000_000); // LSC (deploy gas)
+
+        // 1) NATIVE AIDAG transfer (tip=4, nonce=0) -> BIRLESIK nonce 0->1.
+        let alici = [0x33u8; 20];
+        let p_tr = TransferKaydi::new(alici, 1000, 0).encode();
+        let v_tr = Vertex::new_signed(NET, vec![gid], p_tr, now, &sk).expect("transfer");
+        node.ingest_networked(&wire::encode(&v_tr), now);
+        assert_eq!(
+            node.beklenen_nonce(&gonderen),
+            1,
+            "native transfer nonce'u 1'e ilerletti"
+        );
+
+        // 2) KONTRAT DEPLOY (nonce=1). CREATE nonce'u BIRLESIK olmali.
+        let bin_hex = include_str!("../../avm-sozlesmeler/Kasa.bin").trim();
+        let kod: Vec<u8> = (0..bin_hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&bin_hex[i..i + 2], 16).unwrap())
+            .collect();
+        let p_dep = AvmCagri::new([0u8; 20], 0, 1, kod).encode();
+        let v_dep = Vertex::new_signed(NET, vec![*v_tr.id()], p_dep, now, &sk).expect("deploy");
+        node.ingest_networked(&wire::encode(&v_dep), now);
+        let kasa = node.avm_kontrat_adresleri()[0];
+
+        // KANIT (B6): deploy adresi = keccak(gonderen, BIRLESIK nonce=1) = eth araclarinin
+        // eth_getTransactionCount ile hesaplayacagi adres. Eski kodda avm_db nonce=0 ile
+        // FARKLI (yanlis) adres cikardi.
+        let beklenen_evm = crate::avm::adres_to_evm(&gonderen).create(1);
+        let beklenen = crate::avm::evm_to_adres(&beklenen_evm);
+        assert_eq!(
+            kasa, beklenen,
+            "B6: CREATE adresi birlesik nonce(1) ile tutarli"
+        );
+        assert_eq!(
+            node.beklenen_nonce(&gonderen),
+            2,
+            "deploy sonrasi birlesik nonce 2"
         );
     }
 
