@@ -1449,13 +1449,14 @@ mod tests {
             "C3: baslangic teminati carp-sonra-bol ile 1500mg (eski buggy floor: 1000)"
         );
 
-        // owner setCollateral(1400): 1.5 token icin 1500mg gerekli; 1400 YETERSIZ.
+        // C1: setCollateral yetkisi CUSTODIAN'da. custodian setCollateral(1400):
+        // 1.5 token icin 1500mg gerekli; 1400 YETERSIZ.
         let mut sc = Vec::new();
         sc.extend_from_slice(&keccak256(b"setCollateral(uint256)")[0..4]);
         let mut v32 = [0u8; 32];
         v32[24..32].copy_from_slice(&1400u64.to_be_bytes());
         sc.extend_from_slice(&v32);
-        let _ = avm_calistir(&mut db, &sahip, &kubr, 0, &sc, 101).expect("setCollateral");
+        let _ = avm_calistir(&mut db, &custodian, &kubr, 0, &sc, 101).expect("setCollateral");
 
         // KANIT 2 (satir 83): gerekenMg = ceil(1.5e18*1000/1e18)=1500 > 1400 -> FALSE.
         // Eski buggy: gerekenMg=(1.5e18/1e18)*1000=1000 <= 1400 -> TRUE (az-teminat maskesi).
@@ -1571,6 +1572,84 @@ mod tests {
         let cikti =
             avm_call_oku(&db, &[0u8; 20], &kubr, &keccak256(b"owner()")[0..4]).expect("owner");
         assert_eq!(&cikti[12..32], &yeni, "C4: owner yeni adrese devredildi");
+    }
+
+    // C1 KANIT (RWA custody yetkisi): teminati yalniz CUSTODIAN gunceller, owner DEGIL.
+    // custody devri custodian'a bagli. Owner tek basina "tam teminatli" uyduramaz.
+    #[test]
+    fn kubr_teminat_yetkisi_custodian_c1() {
+        use revm::primitives::{keccak256, U256};
+        let bin_hex = include_str!("kubr_bytecode.hex").trim();
+        let mut deploy_data = hex_decode(bin_hex);
+        let custodian = [0x11u8; 20];
+        let mut c32 = [0u8; 32];
+        c32[12..32].copy_from_slice(&custodian);
+        deploy_data.extend_from_slice(&c32);
+        let ilk_arz = U256::from(1000u64) * U256::from(10u64).pow(U256::from(18u64));
+        let mut a32 = [0u8; 32];
+        a32.copy_from_slice(&ilk_arz.to_be_bytes::<32>());
+        deploy_data.extend_from_slice(&a32);
+
+        let mut db = AidagDatabase::yeni();
+        let sahip = [0xAAu8; 20]; // owner (deployer)
+        let d = avm_calistir(&mut db, &sahip, &[0u8; 20], 0, &deploy_data, 100).expect("deploy");
+        let kubr = d.olusan_adres.expect("kontrat");
+
+        let sc = |miktar: u64| -> Vec<u8> {
+            let mut v = Vec::new();
+            v.extend_from_slice(&keccak256(b"setCollateral(uint256)")[0..4]);
+            let mut m = [0u8; 32];
+            m[24..32].copy_from_slice(&miktar.to_be_bytes());
+            v.extend_from_slice(&m);
+            v
+        };
+        let tc = |adr: [u8; 20]| -> Vec<u8> {
+            let mut v = Vec::new();
+            v.extend_from_slice(&keccak256(b"transferCustody(address)")[0..4]);
+            let mut a = [0u8; 32];
+            a[12..32].copy_from_slice(&adr);
+            v.extend_from_slice(&a);
+            v
+        };
+
+        // 1) owner (sahip) setCollateral -> REVERT (yetki custodian'da)
+        let r = avm_calistir(&mut db, &sahip, &kubr, 0, &sc(5000), 101).expect("owner sc");
+        assert!(
+            !r.basarili,
+            "C1: owner teminat GUNCELLEYEMEZ (onlyCustodian)"
+        );
+
+        // 2) custodian setCollateral -> BASARILI; collateralMg == 5000
+        let r = avm_calistir(&mut db, &custodian, &kubr, 0, &sc(5000), 102).expect("cust sc");
+        assert!(r.basarili, "C1: custodian teminat gunceller");
+        let cikti =
+            avm_call_oku(&db, &[0u8; 20], &kubr, &keccak256(b"collateralMg()")[0..4]).expect("cm");
+        assert_eq!(
+            U256::from_be_slice(&cikti),
+            U256::from(5000u64),
+            "custodian teminati yazdi"
+        );
+
+        // 3) transferCustody(0) -> REVERT; transferCustody(yeni) -> custodian degisir
+        let r = avm_calistir(&mut db, &custodian, &kubr, 0, &tc([0u8; 20]), 103).expect("tc0");
+        assert!(!r.basarili, "C1: sifir adrese custody devri REVERT");
+        let yeni_cust = [0x22u8; 20];
+        let r = avm_calistir(&mut db, &custodian, &kubr, 0, &tc(yeni_cust), 104).expect("tc");
+        assert!(r.basarili, "custody devri basarili");
+        let cikti =
+            avm_call_oku(&db, &[0u8; 20], &kubr, &keccak256(b"custodian()")[0..4]).expect("cu");
+        assert_eq!(
+            &cikti[12..32],
+            &yeni_cust,
+            "C1: custodian yeni adrese devredildi"
+        );
+
+        // 4) ESKI custodian artik setCollateral yapamaz (yetki devroldu)
+        let r = avm_calistir(&mut db, &custodian, &kubr, 0, &sc(9999), 105).expect("eski cust");
+        assert!(
+            !r.basarili,
+            "C1: eski custodian artik teminat guncelleyemez"
+        );
     }
 
     // ============================================================

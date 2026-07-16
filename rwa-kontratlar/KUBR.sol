@@ -28,9 +28,16 @@ contract KUBR {
     event Approval(address indexed owner, address indexed spender, uint256 value);
     event CollateralUpdated(uint256 newCollateralMg);
     event OwnershipTransferred(address indexed oncekiOwner, address indexed yeniOwner);
+    event CustodyTransferred(address indexed oncekiCustodian, address indexed yeniCustodian);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "sadece owner");
+        _;
+    }
+
+    // C1: teminat (gercek altin) yetkisi SAKLAYICI'ya aittir, owner'a DEGIL.
+    modifier onlyCustodian() {
+        require(msg.sender == custodian, "sadece custodian");
         _;
     }
 
@@ -95,10 +102,19 @@ contract KUBR {
     }
 
     // --- RWA yonetim (teminat) ---
-    /// @notice Saklayici teminati gunceller (gercek altin girisi/cikisi).
-    function setCollateral(uint256 _collateralMg) external onlyOwner {
+    /// @notice C1: Teminati SAKLAYICI (custodian) gunceller — owner DEGIL. Gercek altin
+    /// giris/cikisini yalniz fiziksel altini tutan saklayici bildirir; owner tek basina
+    /// "tam teminatli" iddiasi uyduramaz (RWA guven modeli custody'e baglandi).
+    function setCollateral(uint256 _collateralMg) external onlyCustodian {
         collateralMg = _collateralMg;
         emit CollateralUpdated(_collateralMg);
+    }
+
+    /// @notice C1: Saklayici devri (zero-address korumali). Yalniz mevcut custodian.
+    function transferCustody(address yeniCustodian) external onlyCustodian {
+        require(yeniCustodian != address(0), "yeni custodian sifir adres olamaz");
+        emit CustodyTransferred(custodian, yeniCustodian);
+        custodian = yeniCustodian;
     }
 
     /// @notice C4: sahipligi devret (zero-address korumali). Yeni owner yonetim
