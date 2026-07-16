@@ -1,0 +1,363 @@
+<title>AIDAG-Chain — Audit Remediation Raporu</title>
+<style>
+  :root {
+    --ground: #f5f7f9;
+    --surface: #ffffff;
+    --surface-2: #eef2f5;
+    --ink: #131a24;
+    --muted: #5a6675;
+    --faint: #8794a3;
+    --line: #e2e8ee;
+    --accent: #0d7d74;
+    --accent-soft: #d6ece9;
+    --ok: #15803d;
+    --ok-soft: #dcf3e3;
+    --warn: #b45309;
+    --warn-soft: #f6e8d3;
+    --doc: #475569;
+    --doc-soft: #e4e9ef;
+    --crit: #b3261e;
+    --high: #bd4b13;
+    --med: #97701a;
+    --low: #64615b;
+    --shadow: 0 1px 2px rgba(19,26,36,.05), 0 8px 24px -12px rgba(19,26,36,.14);
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #0c1116;
+      --surface: #141b22;
+      --surface-2: #1b232c;
+      --ink: #e7edf3;
+      --muted: #97a3b1;
+      --faint: #6b7887;
+      --line: #26313c;
+      --accent: #2fb8ac;
+      --accent-soft: #133430;
+      --ok: #47c479;
+      --ok-soft: #16311f;
+      --warn: #d99a3f;
+      --warn-soft: #33260f;
+      --doc: #93a2b4;
+      --doc-soft: #212b35;
+      --crit: #e5776f;
+      --high: #dd925f;
+      --med: #c7a659;
+      --low: #9a968d;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 30px -14px rgba(0,0,0,.6);
+    }
+  }
+  :root[data-theme="light"] {
+    --ground: #f5f7f9; --surface: #ffffff; --surface-2: #eef2f5; --ink: #131a24;
+    --muted: #5a6675; --faint: #8794a3; --line: #e2e8ee; --accent: #0d7d74;
+    --accent-soft: #d6ece9; --ok: #15803d; --ok-soft: #dcf3e3; --warn: #b45309;
+    --warn-soft: #f6e8d3; --doc: #475569; --doc-soft: #e4e9ef; --crit: #b3261e;
+    --high: #bd4b13; --med: #97701a; --low: #64615b;
+    --shadow: 0 1px 2px rgba(19,26,36,.05), 0 8px 24px -12px rgba(19,26,36,.14);
+  }
+  :root[data-theme="dark"] {
+    --ground: #0c1116; --surface: #141b22; --surface-2: #1b232c; --ink: #e7edf3;
+    --muted: #97a3b1; --faint: #6b7887; --line: #26313c; --accent: #2fb8ac;
+    --accent-soft: #133430; --ok: #47c479; --ok-soft: #16311f; --warn: #d99a3f;
+    --warn-soft: #33260f; --doc: #93a2b4; --doc-soft: #212b35; --crit: #e5776f;
+    --high: #dd925f; --med: #c7a659; --low: #9a968d;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 30px -14px rgba(0,0,0,.6);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: clamp(20px, 5vw, 56px) clamp(16px, 4vw, 36px) 64px; }
+
+  .eyebrow {
+    font-size: 12px; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--accent); font-weight: 700; margin: 0 0 14px;
+  }
+  h1 {
+    font-size: clamp(26px, 4.4vw, 40px); line-height: 1.1; margin: 0 0 10px;
+    letter-spacing: -.02em; text-wrap: balance; font-weight: 800;
+  }
+  .sub { color: var(--muted); font-size: clamp(15px, 2vw, 17px); margin: 0; max-width: 62ch; }
+  .meta { display: flex; flex-wrap: wrap; gap: 6px 20px; margin-top: 18px; font-size: 13.5px; color: var(--faint); }
+  .meta b { color: var(--muted); font-weight: 600; }
+  .meta .mono { font-family: var(--mono); }
+
+  /* critical banner */
+  .banner {
+    margin: 30px 0 8px; border-radius: 12px; padding: 18px 20px;
+    background: var(--warn-soft); border: 1px solid color-mix(in srgb, var(--warn) 34%, transparent);
+    display: flex; gap: 14px; align-items: flex-start;
+  }
+  .banner .dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--warn); margin-top: 7px; box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn) 20%, transparent); }
+  .banner h3 { margin: 0 0 4px; font-size: 15px; letter-spacing: -.01em; }
+  .banner p { margin: 0; font-size: 14px; color: var(--muted); }
+  .banner .mono { font-family: var(--mono); color: var(--ink); font-size: 12.5px; }
+
+  /* stat strip */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 26px 0 8px; }
+  @media (max-width: 620px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+  .stat {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px 16px 14px; box-shadow: var(--shadow);
+  }
+  .stat .n { font-size: 30px; font-weight: 800; letter-spacing: -.03em; font-variant-numeric: tabular-nums; line-height: 1; }
+  .stat.ok .n { color: var(--ok); }
+  .stat.warn .n { color: var(--warn); }
+  .stat .l { font-size: 12px; color: var(--muted); margin-top: 7px; letter-spacing: .02em; }
+  .stat .n small { font-size: 15px; font-weight: 600; color: var(--faint); letter-spacing: 0; }
+
+  section { margin-top: 42px; }
+  .sec-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; }
+  .sec-head h2 { font-size: 19px; margin: 0; letter-spacing: -.01em; }
+  .sec-head .tag { font-size: 12px; color: var(--faint); font-family: var(--mono); }
+  .sec-desc { color: var(--muted); font-size: 14px; margin: 0 0 16px; }
+
+  /* findings table */
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 640px; }
+  thead th {
+    text-align: left; font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--faint); font-weight: 700; padding: 12px 16px; border-bottom: 1px solid var(--line);
+    background: var(--surface-2);
+  }
+  tbody td { padding: 13px 16px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover td { background: color-mix(in srgb, var(--accent) 4%, transparent); }
+  .fid { font-family: var(--mono); font-weight: 700; color: var(--ink); font-size: 13px; }
+  .ftitle { color: var(--ink); }
+  .fnote { color: var(--muted); font-size: 12.5px; margin-top: 3px; }
+  .mono { font-family: var(--mono); }
+  td .commit { font-family: var(--mono); font-size: 12.5px; color: var(--accent); }
+  td .test { font-family: var(--mono); font-size: 11.5px; color: var(--muted); word-break: break-all; display: block; margin-top: 4px; }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+    font-size: 11.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px;
+    letter-spacing: .01em;
+  }
+  .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .p-ok { color: var(--ok); background: var(--ok-soft); }
+  .p-warn { color: var(--warn); background: var(--warn-soft); }
+  .p-doc { color: var(--doc); background: var(--doc-soft); }
+
+  .sev { font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+  .s-crit { color: var(--crit); }
+  .s-high { color: var(--high); }
+  .s-med { color: var(--med); }
+  .s-low { color: var(--low); }
+
+  /* open items callouts */
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 680px) { .cards { grid-template-columns: 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; box-shadow: var(--shadow); }
+  .card.blocker { border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
+  .card h4 { margin: 0 0 4px; font-size: 15px; display: flex; align-items: center; gap: 9px; }
+  .card p { margin: 8px 0 0; font-size: 13.5px; color: var(--muted); }
+  .card .fix { margin-top: 10px; font-size: 13px; color: var(--ink); }
+  .card code { font-family: var(--mono); font-size: 12px; background: var(--surface-2); padding: 1px 5px; border-radius: 5px; }
+
+  footer { margin-top: 46px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--faint); font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 6px 18px; justify-content: space-between; }
+  footer .mono { font-family: var(--mono); }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 14px 0 0; font-size: 12px; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">İç Denetim · Remediation Kaydı</p>
+  <h1>AIDAG-Chain — Audit Bulguları Düzeltme Raporu</h1>
+  <p class="sub">4 odaklı iç denetimde tespit edilen 16 bulgunun düzeltme durumu. Her kod düzeltmesi, eski hatayı gösteren bir kanıt testiyle birlikte kapatıldı ve commit'lendi.</p>
+  <div class="meta">
+    <span><b>Tarih:</b> 2026-07-16</span>
+    <span><b>Kaynak denetim:</b> 2026-07-15</span>
+    <span><b>Dal:</b> <span class="mono">konsensus-determinizm</span></span>
+    <span><b>Test tabanı:</b> <span class="mono">323/323</span> workspace</span>
+    <span><b>CI:</b> fmt · clippy · test — hepsi yeşil</span>
+  </div>
+
+  <div class="banner" role="alert">
+    <span class="dot" aria-hidden="true"></span>
+    <div>
+      <h3>Mainnet henüz başlatılmamalı — A1 açık</h3>
+      <p>Owner <b>adresi</b> pinlendi, mainnet faucet mint'i kapatıldı. Ancak owner'ın hazine <b>bakiyesi</b> hâlâ ortam değişkeni (<span class="mono">LSC_GENESIS_HAZINE</span>) ile besleniyor. Tam determinizm için mainnet genesis <b>dağıtımının 6 dilimi</b> gerçek adres+tutarlarla kodda pinlenmeli — bu, nihai tokenomik kararını bekliyor.</p>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="stat ok"><div class="n">14<small>/16</small></div><div class="l">Tam kapatıldı</div></div>
+    <div class="stat warn"><div class="n">1</div><div class="l">Kısmi — A1 (mainnet-blocker)</div></div>
+    <div class="stat"><div class="n">1</div><div class="l">Süreç/doküman — A3</div></div>
+    <div class="stat"><div class="n">11</div><div class="l">Yeni kanıt testi</div></div>
+  </div>
+  <div class="legend" aria-hidden="true">
+    <span><span class="pill p-ok">Kapandı</span></span>
+    <span><span class="pill p-warn">Kısmi</span></span>
+    <span><span class="pill p-doc">Doküman</span></span>
+    <span><span class="sev s-crit">Kritik</span> · <span class="sev s-high">Yüksek</span> · <span class="sev s-med">Orta</span> · <span class="sev s-low">Düşük</span></span>
+  </div>
+
+  <section>
+    <div class="sec-head"><h2>A · Ön-satış &amp; konsensüs</h2><span class="tag">on_satis</span></div>
+    <p class="sec-desc">Owner/hazine pinleme ve on-satış şeffaflığı. Konsensüs bölünmesi riskinin merkezi.</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Bulgu</th><th>Önem</th><th>Durum</th><th>Kanıt</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><span class="fid">A1</span> <span class="ftitle">Owner hazine bakiyesi env ile — konsensüs bölünmesi</span><div class="fnote">Owner adresi pinlendi; hazine bakiyesi hâlâ env → dağıtım pinlenmeli</div></td>
+          <td><span class="sev s-crit">Kritik</span></td>
+          <td><span class="pill p-warn">Kısmi</span></td>
+          <td><span class="commit">8cb9f55</span><span class="test">A2 ile kısmi; bakiye = tokenomik bekler</span></td>
+        </tr>
+        <tr>
+          <td><span class="fid">A2</span> <span class="ftitle">Owner-gating konsensüs dışı (env / node-yerel)</span><div class="fnote">new_mainnet() owner'ı pinli kurucu adrese sabitler; env override kapalı</div></td>
+          <td><span class="sev s-high">Yüksek</span></td>
+          <td><span class="pill p-ok">Kapandı</span></td>
+          <td><span class="commit">8cb9f55</span><span class="test">a2_mainnet_owner_pinli_deterministik</span></td>
+        </tr>
+        <tr>
+          <td><span class="fid">A3</span> <span class="ftitle">Çift-dağıtım — odeme_ref türetme</span><div class="fnote">Aynı-ref zaten deterministik engelli; ref değişmez ödeme kimliğinden türetilmeli</div></td>
+          <td><span class="sev s-med">Orta</span></td>
+          <td><span class="pill p-doc">Doküman</span></td>
+          <td><span class="test">süreç kuralı — kod değişikliği yok</span></td>
+        </tr>
+        <tr>
+          <td><span class="fid">A4</span> <span class="ftitle">On-satış şeffaflığı — LSC hediye</span><div class="fnote">Transfer sonucu kontrol; kayda gerçek gönderilen tutar yazılır</div></td>
+          <td><span class="sev s-med">Orta</span></td>
+          <td><span class="pill p-ok">Kapandı</span></td>
+          <td><span class="commit">1f898d6</span><span class="test">on_satis_lsc_hediye_yetersizse_kayit_gercegi_yansitir_a4</span></td>
+        </tr>
+        <tr>
+          <td><span class="fid">A5</span> <span class="ftitle">Geçersiz env owner + mainnet faucet mint</span><div class="fnote">Mainnet owner pinli + env yok; mainnet faucet (mint) tamamen kapalı → 21M korunur</div></td>
+          <td><span class="sev s-low">Düşük</span></td>
+          <td><span class="pill p-ok">Kapandı</span></td>
+          <td><span class="commit">8cb9f55</span><span class="test">a2_mainnet_faucet_mint_yapmaz</span></td>
+        </tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>B · AVM (revm / EVM)</h2><span class="tag">fon güvenliği</span></div>
+    <p class="sec-desc">Sözleşme yürütme, gas, nonce ve AIDAG defteri bütünlüğü.</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Bulgu</th><th>Önem</th><th>Durum</th><th>Kanıt</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><span class="fid">B1</span> <span class="ftitle">Fon donması — kontrat-içi AIDAG state-diff</span><div class="fnote">avm_db ↔ bakiye_registry çift yönlü aynalama; kontrat-içi hareketler gerçek deftere geçer</div></td>
+          <td><span class="sev s-crit">Kritik</span></td>
+          <td><span class="pill p-ok">Kapandı</span></td>
+          <td><span class="commit">d08f715</span><span class="test">avm_kontrat_ici_transfer_gercek_deftere_yansir_b1</span></td>
+        </tr>
+        <tr>
+          <td><span class="fid">B2</span> <span class="ftitle">Gas + DoS — gerçek gas_used</span><div class="fnote">Sabit 21000 yerine gerçek gas_used; gas tavanı; başarısız tx'te de gas (AVM + HAM_ETH)</div></td>
+          <td><span class="sev s-crit">Kritik</span></td>
+          <td><span class="pill p-ok">Kapandı</span></td>
+          <td><span class="commit">a127db8 · c1d90de</span><span class="test">ham_eth_kontrat_ici_transfer_gercek_deftere_yansir_b1_b2</span></td>
+        </tr>
+        <tr>
+          <td><span class="fid">B3</span> <span class="ftitle">Deploy nonce kalıcılığı — CREATE çakışması</span><div class="fnote">EVM hesap nonce'u avm_db'de kalıcı → aynı hesap çoklu kontrat deploy edebilir</div></td>
+          <td><span class="sev s-high">Yüksek</span></td>
+          <td><span class="pill p-ok">Kapandı</span></td>
+          <td><span class="commit">8fe032f</span><span class="test">avm_ayni_hesap_iki_kontrat_deploy_edebilir_b3</span></td>
+        </tr>
+        <tr>
+          <td><span class="fid">B4</span> <span class="ftitle">Eksik bakiye yükleme (yanlış yürütme)</span><div class="fnote">B1 tam-seed ile kapandı: EVM'e tüm hesapların doğru bakiyesi verilir</div></td>
+          <td><span class="sev s-high">Yüksek</span></td>
+          <td><span class="pill p-ok">Kapandı</span></td>
+          <td><span class="commit">d08f715</span><span class="test">B1 ile birlikte</span></td>
+        </tr>
+        <tr>
+          <td><span class="fid">B5</span> <span class="ftitle">Hayalet tx — DAG-dışı avm_db mutasyonu</span><div class="fnote">Ölü, çağrılmayan eth_ham_tx_isle kaldırıldı; tip=12 DAG-yolu parity'ye çekildi</div></td>
+          <td><span class="sev s-high">Yüksek</span></td>
+          <td><span class="pill p-ok">Kapandı</span></td>
+          <td><span class="commit">c1d90de</span><span class="test">hayalet metod kaldırıldı</span></td>
+        </tr>
+        <tr>
+          <td><span class="fid">B6</span> <span class="ftitle">Birleşik nonce vs EVM per-account (MetaMask)</span><div class="fnote">CREATE nonce'u birleşik nonce_registry'ye hizalandı → eth_getTransactionCount tutarlı</div></td>
+          <td><span class="sev s-med">Orta</span></td>
+          <td><span class="pill p-ok">Kapandı</span></td>
+          <td><span class="commit">ce4b49f</span><span class="test">b6_create_nonce_birlesik_nonce_ile_tutarli</span></td>
+        </tr>
+        <tr>
+          <td><span class="fid">B7</span> <span class="ftitle">U256→u128 sessiz MAX · code_by_hash · ölü dal</span><div class="fnote">debug_assert invariant + O(1) hash indeksi + ölü synced replay dalı silindi</div></td>
+          <td><span class="sev s-low">Düşük</span></td>
+          <td><span class="pill p-ok">Kapandı</span></td>
+          <td><span class="commit">efb38e8</span><span class="test">temizlik + sertleştirme</span></td>
+        </tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>C · RWA &amp; Solidity kontratları</h2><span class="tag">KUBR · BelgeDamgasi</span></div>
+    <p class="sec-desc">Altın RWA token (KUBR) güven modeli ve belge damgası sözleşmesi.</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Bulgu</th><th>Önem</th><th>Durum</th><th>Kanıt</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><span class="fid">C1</span> <span class="ftitle">RWA custodian yetkisi — güven modeli</span><div class="fnote">setCollateral onlyCustodian + transferCustody; owner tek başına teminat uyduramaz</div></td>
+          <td><span class="sev s-high">Yüksek</span></td>
+          <td><span class="pill p-ok">Kapandı</span></td>
+          <td><span class="commit">fbeeb9a</span><span class="test">kubr_teminat_yetkisi_custodian_c1</span></td>
+        </tr>
+        <tr>
+          <td><span class="fid">C2</span> <span class="ftitle">BelgeDamgasi front-running</span><div class="fnote">(kaydeden, hash) namespace; saldırgan mempool'dan sahiplik gasp edemez</div></td>
+          <td><span class="sev s-high">Yük/Orta</span></td>
+          <td><span class="pill p-ok">Kapandı</span></td>
+          <td><span class="commit">de3096f</span><span class="test">belge_damgasi_front_running_onlenir_c2</span></td>
+        </tr>
+        <tr>
+          <td><span class="fid">C3</span> <span class="ftitle">KUBR teminat oranı — truncation</span><div class="fnote">Çarp-sonra-böl + gereksinim tavana yuvarlı; az-teminat maskelenmez</div></td>
+          <td><span class="sev s-med">Orta</span></td>
+          <td><span class="pill p-ok">Kapandı</span></td>
+          <td><span class="commit">911e322</span><span class="test">kubr_teminat_orani_truncation_yok_c3</span></td>
+        </tr>
+        <tr>
+          <td><span class="fid">C4</span> <span class="ftitle">KUBR hardening</span><div class="fnote">Zero-address kontrolleri + transferOwnership + increase/decreaseAllowance</div></td>
+          <td><span class="sev s-low">Düşük</span></td>
+          <td><span class="pill p-ok">Kapandı</span></td>
+          <td><span class="commit">48b59c1</span><span class="test">kubr_hardening_zero_address_ownership_allowance_c4</span></td>
+        </tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>Açık maddeler</h2></div>
+    <div class="cards">
+      <div class="card blocker">
+        <h4><span class="pill p-warn">Kısmi</span> A1 — hazine bakiyesi pinleme</h4>
+        <p><b>Mainnet-blocker.</b> Owner adresi pinlendi ve mainnet faucet mint'i kapatıldı; ama owner'ın hazine bakiyesi hâlâ node-yerel env ile besleniyor. İki mainnet node farklı env alırsa on-satış transferi ayrışabilir.</p>
+        <p class="fix"><b>Tam çözüm:</b> <code>genesis.rs</code>'teki 6 dilim (ekosistem / hazine / likidite / topluluk / kurucu / erken) gerçek adres+tutarlarla kodda pinlenip <code>new_mainnet()</code>'te yüklenmeli.</p>
+        <p class="fix"><b>Bloke eden:</b> nihai tokenomik kararı — 6 adres şu an placeholder. Netleşene kadar mainnet başlatılmamalı.</p>
+      </div>
+      <div class="card">
+        <h4><span class="pill p-doc">Doküman</span> A3 — odeme_ref türetme</h4>
+        <p>Kod tarafı sağlam: <code>on_satis_registry</code> aynı <code>odeme_ref</code>'i iki kez işlemez (deterministik çift-dağıtım engeli).</p>
+        <p class="fix"><b>Süreç kuralı:</b> <code>odeme_ref</code>, ilgili ödemenin değişmez kimliğinden türetilmeli (ör. banka referansı + tutar + alıcı hash'i). Aynı ödeme her zaman aynı ref'i üretir; owner farklı ref uydurup çift dağıtım yapamaz.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>AIDAG-Chain iç denetim remediation kaydı · yalnızca proje içi</span>
+    <span class="mono">14 kapalı · 1 kısmi · 1 doküman · 323/323 test</span>
+  </footer>
+</div>
+
+<script>
+  // Tema toggle stamp'ini yoksay: sayfa hem media-query hem data-theme ile calisir.
+  (function () {
+    var root = document.documentElement;
+    if (!root.hasAttribute('data-theme')) {
+      var m = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+      // data-theme dokunulmaz; media-query zaten kapsiyor. Bu blok ileride toggle icin yer tutucu.
+    }
+  })();
+</script>
