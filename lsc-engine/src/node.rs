@@ -1007,6 +1007,24 @@ impl NodeState {
                                     lsc_gonderilen,
                                     zaman,
                                 );
+                                // 4) FAZ2 VESTING: dagitilan AIDAG KILITLI (%20 TGE hemen +
+                                //    kalan %80 12 ay dogrusal). Birden cok dagitim alan alici
+                                //    icin kilit BIRIKIR (vesting_biriktir). Takvim SABIT (TGE
+                                //    = MAINNET_VESTING_BASLANGIC) -> tum dugumlerde deterministik.
+                                if d.aidag > 0 {
+                                    let tge_acik =
+                                        d.aidag * crate::genesis::ON_SATIS_TGE_YUZDE / 100;
+                                    self.bakiye_registry.vesting_biriktir(
+                                        d.alici,
+                                        crate::registry::VestingKaydi {
+                                            toplam: d.aidag,
+                                            baslangic: crate::mainnet::MAINNET_VESTING_BASLANGIC,
+                                            cliff_sure: 0,
+                                            toplam_sure: crate::genesis::ON_SATIS_VESTING_SURE,
+                                            tge_acik,
+                                        },
+                                    );
+                                }
                             } else {
                                 // AIDAG transferi basarisiz (owner bakiyesi yetersiz vb.):
                                 // SESSIZ GECME -> uyar. Dagitim YAPILMADI, kayit YOK.
@@ -2757,6 +2775,54 @@ mod tests {
         assert_eq!(
             k.lsc_hediye, 0,
             "A4: kayit GERCEK hediyeyi (0) saklar, 'gonderildi' yalanini DEGIL"
+        );
+    }
+
+    // FAZ2 KANIT (on-satis vesting): dagitilan AIDAG %20 TGE hemen + kalan %80 12 ay
+    // kilitli; birden cok dagitim BIRIKIR; 12 ay sonra tam acik.
+    #[test]
+    fn on_satis_dagitim_vestingli_ve_birikimli_faz2() {
+        use crate::registry::public_key_to_adres;
+        use crate::tx::OnSatisDagitim;
+        let tge = crate::mainnet::MAINNET_VESTING_BASLANGIC;
+        let mut node = NodeState::new_devnet(NET);
+        let (gen, gid) = genesis_bytes(1, tge);
+        node.ingest_networked(&gen, tge);
+
+        let sk = SigningKey::from_bytes(&[0x91u8; 32]);
+        let owner = public_key_to_adres(&sk.verifying_key().to_bytes());
+        node.faucet_owner_ayarla(owner);
+        node.test_bakiye_ekle(owner, 1_000_000);
+
+        let alici = [0x55u8; 20];
+
+        // 1) Dagitim: alici 10.000 AIDAG (TGE aninda)
+        let p1 = OnSatisDagitim::new(alici, 10_000, 0, 111).encode();
+        let v1 = Vertex::new_signed(NET, vec![gid], p1, tge, &sk).expect("d1");
+        node.ingest_networked(&wire::encode(&v1), tge);
+        assert_eq!(node.bakiye(&alici), 10_000, "alici 10k AIDAG aldi");
+        assert_eq!(
+            node.vesting_kilitli(&alici, tge),
+            8_000,
+            "TGE'de %80 (8k) KILITLI -> harcanabilir 2k"
+        );
+
+        // 2) Ikinci dagitim: alici +5.000 (farkli odeme_ref) -> vesting BIRIKIR
+        let p2 = OnSatisDagitim::new(alici, 5_000, 0, 222).encode();
+        let v2 = Vertex::new_signed(NET, vec![*v1.id()], p2, tge, &sk).expect("d2");
+        node.ingest_networked(&wire::encode(&v2), tge);
+        assert_eq!(node.bakiye(&alici), 15_000, "toplam 15k AIDAG");
+        assert_eq!(
+            node.vesting_kilitli(&alici, tge),
+            12_000,
+            "kilit BIRIKTI: %80 (12k) kilitli"
+        );
+
+        // 3) 12 ay sonra tam acik
+        assert_eq!(
+            node.vesting_kilitli(&alici, tge + 360 * 86400),
+            0,
+            "12 ay sonra %0 kilitli (tam acik)"
         );
     }
 

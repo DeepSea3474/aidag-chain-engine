@@ -240,9 +240,28 @@ impl BakiyeRegistry {
         *b
     }
 
-    /// VESTING: bir adrese vesting plani ekle.
+    /// VESTING: bir adrese vesting plani ekle (uzerine yazar).
     pub fn vesting_ekle(&mut self, adres: [u8; 20], kayit: VestingKaydi) {
         self.vesting.insert(adres, kayit);
+    }
+
+    /// VESTING BIRIKTIR (on-satis): bir aliciya YENI vesting grant'i EKLE (uzerine
+    /// yazmaz). Ayni takvim (baslangic/cliff/toplam_sure) varsayilir — on-satis tek
+    /// takvim kullanir; birden cok dagitim alan alicinin kilidi TOPLANIR.
+    /// toplam ve tge_acik toplanir; takvim ilk grant'tan korunur.
+    /// DETERMINIZM: cagiran deterministik veri (miktar + sabit takvim) verir ->
+    /// tum dugumlerde ayni birikim.
+    pub fn vesting_biriktir(&mut self, adres: [u8; 20], ek: VestingKaydi) {
+        match self.vesting.get_mut(&adres) {
+            Some(mevcut) => {
+                mevcut.toplam = mevcut.toplam.saturating_add(ek.toplam);
+                mevcut.tge_acik = mevcut.tge_acik.saturating_add(ek.tge_acik);
+                // baslangic/cliff_sure/toplam_sure ilk grant'tan (on-satis tek takvim).
+            }
+            None => {
+                self.vesting.insert(adres, ek);
+            }
+        }
     }
     /// Bir adresin su an KILITLI miktari.
     pub fn vesting_kilitli(&self, adres: &[u8; 20], simdi: u64) -> Tutar {

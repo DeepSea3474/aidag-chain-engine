@@ -107,6 +107,13 @@ pub const VESTING_6AY: u64 = 180 * 86400;
 /// `dilimler()` sırasında KURUCU dilim index'i.
 pub const DILIM_KURUCU: usize = 4;
 
+/// ON-SATIŞ VESTING (dağıtım anında alıcıya uygulanır): TGE'de açık oran (%20) +
+/// kalan %80 doğrusal açılım süresi (12 ay, cliff yok). Bkz. node.rs tip=10.
+/// Deterministik: tüm düğümler aynı oran/süreyi kullanır → vesting ayrışmaz.
+pub const ON_SATIS_TGE_YUZDE: u128 = 20;
+/// On-satış kalan (%80) doğrusal açılım süresi: 12 ay.
+pub const ON_SATIS_VESTING_SURE: u64 = 360 * 86400;
+
 /// `dilimler()` index'ine göre vesting planı. `Some((cliff_sure, toplam_sure))`
 /// → dilim KİLİTLİ (cliff + doğrusal açılım). `None` → AÇIK (vesting yok).
 ///
