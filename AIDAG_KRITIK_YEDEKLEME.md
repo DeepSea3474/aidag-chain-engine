@@ -57,9 +57,11 @@ Bunlar kaybolursa/sızarsa **fon gider, geri gelmez.** Her birini **offline + ş
 ### USDT ödeme cüzdanı (ön-satış geliri)
 | Alan | Değer |
 |---|---|
-| USDT cüzdan adresi | **[BELİRLENECEK — sen ver]** |
-| Zincir/standart | **[ERC-20 / BEP-20 / TRC-20?]** |
-> Bu cüzdan, alıcıların ödediği **USDT'yi** toplar (AIDAG dağıtımıyla ayrı). Güvenli olsun (donanım/çoklu-imza ideali).
+| USDT cüzdan adresi | `0xE5b0a02E8821103e6274cAA8B107b9E480B2A80A` (ayrı, EVM) |
+| Zincir/standart | **BEP-20 (BSC)** — USDT `0x55d398326f99059fF775485246999027B3197955` |
+> Bu cüzdan, alıcıların ödediği **USDT'yi** toplar (AIDAG dağıtımıyla ayrı, 6 dilimden ayrı).
+> ⚠️ Sitede kabul edilen AĞ net yazılmalı; alıcı yanlış ağdan gönderirse para kaybolur.
+> Güvenli tut (donanım/çoklu-imza ideali — gerçek para toplar).
 
 ---
 
