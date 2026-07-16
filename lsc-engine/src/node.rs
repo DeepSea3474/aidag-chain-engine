@@ -54,11 +54,16 @@ pub struct NodeState {
     /// On satis dagitim defteri: odeme_ref -> kayit (cifte dagitim engeli, seffaflik).
     on_satis_registry: crate::registry::OnSatisRegistry,
 
-    /// Faucet owner adresi (TESTNET). Some ise SADECE bu adres faucet basabilir;
-    /// None ise faucet tamamen KAPALI (mainnet guvenligi).
+    /// Faucet owner adresi. On-satis (tip=10) ve faucet (tip=6) yetki kapisi.
+    /// Mainnet'te new_mainnet() PINLI kurucu adrese sabitler (env override YOK) ->
+    /// tum node'larda AYNI (A2: owner-gating konsensus-deterministik).
     faucet_owner: Option<[u8; 20]>,
     /// Faucet CIFTE-DAMLA engeli: bir adrese bir kez.
     faucet_verildi: std::collections::HashSet<[u8; 20]>,
+    /// MAINNET modu mu? new_mainnet()=true, new_devnet()=false. Deterministik launch
+    /// konfigu (network_id ile korele). Faucet (tip=6, MINT) mainnet'te KAPALI ->
+    /// 21M sabit AIDAG arzi korunur (yoktan bakiye basilmaz).
+    mainnet: bool,
 
     /// AVM state: sozlesme kodu + storage (KALICI kaynak). LSC bakiyesi BURADA
     /// TUTULMAZ; her cagrida lsc_registry'den yuklenir (tek kaynak = lsc_registry).
@@ -83,7 +88,7 @@ impl NodeState {
     /// Devnet düğüm durumu: boş graf (genesis ilk vertex'le kurulur) +
     /// artımlı ghostdag. Mainnet için ayrı kurucu (genesis pinli) gerekir.
     pub fn new_devnet(network_id: u32) -> Self {
-        Self::yeni_ic(Graph::devnet(network_id), network_id)
+        Self::yeni_ic(Graph::devnet(network_id), network_id, false)
     }
 
     /// MAINNET düğüm durumu: genesis id'si PINLI (`GenesisPolicy::Whitelisted`)
@@ -92,23 +97,32 @@ impl NodeState {
     /// politika: id uymayan hiçbir parent'sız vertex genesis olamaz → güven kökü
     /// sabittir, "first-seen" devnet açığı YOK. En güvenli mainnet kuruluşu.
     pub fn new_mainnet() -> Self {
-        Self::yeni_ic(
+        let mut s = Self::yeni_ic(
             Graph::mainnet(
                 crate::mainnet::MAINNET_NETWORK_ID,
                 crate::mainnet::genesis_id(),
             ),
             crate::mainnet::MAINNET_NETWORK_ID,
-        )
+            true,
+        );
+        // A2 (owner-gating konsensus-deterministik): on-satis owner'i PINLI kurucu
+        // adrese sabitle. Tum mainnet node'lari AYNI owner'i kullanir -> env'e bagli
+        // node-yerel ayrisma (konsensus bolunmesi) YOK. Env override mainnet'te
+        // devre disi (lib.rs). Faucet (mint) mainnet'te kapali (mainnet=true) ->
+        // owner pinlemek arzi kirmaz; yalniz on-satis (arz-korumali) etkinlesir.
+        s.faucet_owner = Some(crate::mainnet::kurucu_adres());
+        s
     }
 
     /// Ortak kurulum: verilen graf + network_id ile boş defterli NodeState.
     /// `new_devnet`/`new_mainnet` yalnızca graf POLİTİKASINDA ayrışır; geri kalan
     /// tüm defterler (bakiye/stake/nonce/...) aynı → tek yerden kurulur (drift yok).
-    fn yeni_ic(graph: Graph, network_id: u32) -> Self {
+    fn yeni_ic(graph: Graph, network_id: u32, mainnet: bool) -> Self {
         NodeState {
             graph,
             ghostdag: Ghostdag::new_incremental(DEFAULT_K),
             network_id,
+            mainnet,
             orphans: OrphanPool::new(),
             token_registry: crate::registry::TokenRegistry::yeni(),
             stake_registry: crate::registry::StakeRegistry::yeni(),
@@ -1034,21 +1048,25 @@ impl NodeState {
             // degilse REDDEDILIR (sessizce yok sayilir). Boylece faucet vertex'i
             // aga yayilir, tum dugumlerde ayni bakiye olusur (senkron).
             Some(&crate::tx::TX_TYPE_FAUCET) => {
-                if let Some(owner) = self.faucet_owner {
-                    if let Ok(f) = crate::tx::FaucetKaydi::decode(payload) {
-                        let imzalayan = crate::registry::public_key_to_adres(signer);
-                        if imzalayan == owner && self.faucet_verildi.insert(f.alici) {
-                            // Owner dogrulandi -> test bakiyesi bas (aga yayilan).
-                            self.bakiye_registry.test_bakiye_ekle(f.alici, f.miktar);
-                            // GAS: faucet AIDAG yaninda birkac islemlik LSC (gas) de verir (gercek gas testi).
-                            self.lsc_registry
-                                .test_bakiye_ekle(f.alici, 100_000_000_000_000_000);
-                            // 0.1 LSC gas (~4700 transfer)
+                // MAINNET GUVENLIGI: faucet MINT'tir (yoktan test AIDAG). Mainnet'te
+                // TAMAMEN KAPALI -> 21M sabit arz korunur. Yalniz testnet'te calisir.
+                if !self.mainnet {
+                    if let Some(owner) = self.faucet_owner {
+                        if let Ok(f) = crate::tx::FaucetKaydi::decode(payload) {
+                            let imzalayan = crate::registry::public_key_to_adres(signer);
+                            if imzalayan == owner && self.faucet_verildi.insert(f.alici) {
+                                // Owner dogrulandi -> test bakiyesi bas (aga yayilan).
+                                self.bakiye_registry.test_bakiye_ekle(f.alici, f.miktar);
+                                // GAS: AIDAG yaninda birkac islemlik LSC (gas) de ver.
+                                self.lsc_registry
+                                    .test_bakiye_ekle(f.alici, 100_000_000_000_000_000);
+                                // 0.1 LSC gas (~4700 transfer)
+                            }
+                            // owner degilse: sessizce reddet (yetkisiz faucet).
                         }
-                        // owner degilse: sessizce reddet (yetkisiz faucet).
                     }
                 }
-                // owner ayarli degilse: faucet kapali, hicbir sey yapma.
+                // owner ayarsiz ya da MAINNET: faucet kapali, hicbir sey yapma.
             }
             // diger tipler: kalkan/staking/record disi, dokunma.
             // tip=12: HAM ETHEREUM TX (eth_sendRawTransaction). Payload = RLP eth tx.
@@ -3187,6 +3205,75 @@ mod tests {
             node.bakiye(&alici),
             1000,
             "ikinci faucet damlasi eklenmemeli"
+        );
+    }
+
+    // A2 KANIT (owner-gating konsensus-deterministik): mainnet owner PINLI kurucu
+    // adrese sabitlenir, env'den BAGIMSIZ. Iki mainnet node AYNI owner'i alir ->
+    // node-yerel ayrisma (on-satis konsensus bolunmesi) YOK.
+    #[test]
+    fn a2_mainnet_owner_pinli_deterministik() {
+        let n1 = NodeState::new_mainnet();
+        let n2 = NodeState::new_mainnet();
+        assert!(n1.faucet_owner().is_some(), "mainnet owner PINLI olmali");
+        assert_eq!(
+            n1.faucet_owner(),
+            n2.faucet_owner(),
+            "iki mainnet node AYNI owner (deterministik)"
+        );
+        assert_eq!(
+            n1.faucet_owner(),
+            Some(crate::mainnet::kurucu_adres()),
+            "owner = pinli kurucu adres (env override yok)"
+        );
+        assert_eq!(
+            NodeState::new_devnet(1).faucet_owner(),
+            None,
+            "devnet owner varsayilan None (testnet env ile ayarlanir)"
+        );
+    }
+
+    // A2/A5 KANIT (mainnet arz guvenligi): faucet (tip=6) MINT'tir; mainnet'te
+    // TAMAMEN KAPALI. Owner imzali faucet bile MINT ETMEZ -> 21M sabit arz korunur.
+    #[test]
+    fn a2_mainnet_faucet_mint_yapmaz() {
+        use crate::registry::public_key_to_adres;
+        use crate::tx::FaucetKaydi;
+        let zaman = crate::mainnet::MAINNET_GENESIS_ZAMANI + 100;
+        let mut node = NodeState::new_mainnet();
+        // Pinli mainnet genesis'i ingest et.
+        node.ingest_networked(&crate::mainnet::genesis_wire(), zaman);
+        let gid = crate::mainnet::genesis_id();
+
+        // Owner'i bir test anahtarina ayarla: mainnet guard owner'DAN BAGIMSIZ calismali
+        // (owner eslesse bile mint olmamali).
+        let owner_sk = SigningKey::from_bytes(&[0x44u8; 32]);
+        let owner = public_key_to_adres(&owner_sk.verifying_key().to_bytes());
+        node.faucet_owner_ayarla(owner);
+
+        let alici = [0x55u8; 20];
+        let arz_once = node.toplam_bakiye_arzi();
+        let p = FaucetKaydi::new(alici, 1_000_000).encode();
+        let v = Vertex::new_signed(
+            crate::mainnet::MAINNET_NETWORK_ID,
+            vec![gid],
+            p,
+            zaman,
+            &owner_sk,
+        )
+        .expect("faucet vertex");
+        node.ingest_networked(&wire::encode(&v), zaman);
+
+        // KANIT: mainnet'te faucet MINT ETMEDI.
+        assert_eq!(
+            node.bakiye(&alici),
+            0,
+            "A2: mainnet faucet mint ETMEZ (21M korunur)"
+        );
+        assert_eq!(
+            node.toplam_bakiye_arzi(),
+            arz_once,
+            "mainnet faucet arzi degistirmedi (mint yok)"
         );
     }
 

@@ -206,19 +206,23 @@ pub async fn run_node(
         lsc_engine::NodeState::new_devnet(1)
     }));
 
-    // TESTNET FAUCET: LSC_FAUCET_OWNER env'i (owner adresi, 40 hex) ayarliysa,
-    // faucet'i ac (sadece bu adres test AIDAG basabilir). Ayarli degilse faucet
-    // KAPALI kalir (mainnet guvenligi). Test AIDAG'in gercek degeri yoktur.
-    if let Ok(owner_hex) = std::env::var("LSC_FAUCET_OWNER") {
-        match hex::decode(owner_hex.trim()) {
-            Ok(b) if b.len() == 20 => {
-                let mut owner = [0u8; 20];
-                owner.copy_from_slice(&b);
-                node_state.write().await.faucet_owner_ayarla(owner);
-                tracing::info!("Faucet owner ayarlandi: {}", owner_hex.trim());
+    // TESTNET FAUCET: LSC_FAUCET_OWNER env'i YALNIZ TESTNET'te gecerli. MAINNET'te
+    // owner new_mainnet() tarafindan PINLI kurucu adrese sabitlendi; env override
+    // KAPALI (A2: konsensus-deterministik owner, node-yerel ayrisma yok).
+    if !mainnet {
+        if let Ok(owner_hex) = std::env::var("LSC_FAUCET_OWNER") {
+            match hex::decode(owner_hex.trim()) {
+                Ok(b) if b.len() == 20 => {
+                    let mut owner = [0u8; 20];
+                    owner.copy_from_slice(&b);
+                    node_state.write().await.faucet_owner_ayarla(owner);
+                    tracing::info!("Faucet owner ayarlandi (testnet): {}", owner_hex.trim());
+                }
+                _ => tracing::warn!("LSC_FAUCET_OWNER gecersiz (40 hex olmali): {owner_hex}"),
             }
-            _ => tracing::warn!("LSC_FAUCET_OWNER gecersiz (40 hex olmali): {owner_hex}"),
         }
+    } else if std::env::var("LSC_FAUCET_OWNER").is_ok() {
+        tracing::warn!("MAINNET: LSC_FAUCET_OWNER env YOK SAYILDI (owner pinli kurucu adres).");
     }
 
     // RPC -> ag dongusu kanali: /submit ile gelen+ingest edilen vertex'i AGA yayinlamak icin.
@@ -261,24 +265,32 @@ pub async fn run_node(
     // uret+kaydet), yoksa gecici. Kripto-cevik format (algo_id + seed).
     let signing_key = rpc_signing_key.clone();
 
-    // FAUCET/ON SATIS OWNER: Eger LSC_FAUCET_OWNER env'i verilmISSE (yukarida
-    // ayarlandi), owner ODUR (senin kontrolundeki anahtar; on satis dagitimini
-    // SEN disaridan imzalarsin -> node otomatik dagitmaz = guvenli). Env YOKSA,
-    // owner = node kendi adresi (testnet kolayligi: RPC GET /faucet calissin).
-    // Owner adresini belirle (env ya da node adresi).
-    let owner_adres_final: [u8; 20] = if let Ok(owner_hex) = std::env::var("LSC_FAUCET_OWNER") {
+    // FAUCET/ON SATIS OWNER belirleme:
+    //  - MAINNET: owner new_mainnet() tarafindan PINLI kurucu adres. Env/node-adres
+    //    override YOK (A2: tum node'larda AYNI owner -> konsensus bolunmesi yok).
+    //  - TESTNET: LSC_FAUCET_OWNER env varsa o (disaridan imzali dagitim); yoksa
+    //    node kendi adresi (RPC faucet kolayligi).
+    let owner_adres_final: [u8; 20] = if mainnet {
+        let pinli = node_state
+            .read()
+            .await
+            .faucet_owner()
+            .expect("MAINNET: owner new_mainnet() ile pinli olmali");
+        tracing::info!("MAINNET: on-satis owner = PINLI kurucu adres (env override devre disi).");
+        pinli
+    } else if let Ok(owner_hex) = std::env::var("LSC_FAUCET_OWNER") {
         let mut a = [0u8; 20];
         if let Ok(b) = hex::decode(owner_hex.trim()) {
             if b.len() == 20 {
                 a.copy_from_slice(&b);
             }
         }
-        tracing::info!("Faucet/on-satis owner = LSC_FAUCET_OWNER (env, disaridan imzali dagitim)");
+        tracing::info!("Faucet/on-satis owner = LSC_FAUCET_OWNER (testnet, disaridan imzali).");
         a
     } else {
         let owner_adres = lsc_engine::public_key_to_adres(&signing_key.verifying_key().to_bytes());
         node_state.write().await.faucet_owner_ayarla(owner_adres);
-        tracing::info!("Faucet owner = node adresi (env yok, zincir faucet): {owner_adres:?}");
+        tracing::info!("Faucet owner = node adresi (testnet, env yok): {owner_adres:?}");
         owner_adres
     };
 
