@@ -91,6 +91,10 @@ impl GenesisDagitim {
 pub const CLIFF_6AY: u64 = 180 * 86400;
 /// Doğrusal açılım toplam süresi: 2 yıl.
 pub const VESTING_2YIL: u64 = 730 * 86400;
+/// 12 ay doğrusal (ekosistem — TGE dump'ini azaltmak için, cliff yok).
+pub const VESTING_12AY: u64 = 360 * 86400;
+/// 6 ay doğrusal (topluluk — cliff yok).
+pub const VESTING_6AY: u64 = 180 * 86400;
 
 /// `dilimler()` sırasında KURUCU dilim index'i.
 pub const DILIM_KURUCU: usize = 4;
@@ -98,16 +102,18 @@ pub const DILIM_KURUCU: usize = 4;
 /// `dilimler()` index'ine göre vesting planı. `Some((cliff_sure, toplam_sure))`
 /// → dilim KİLİTLİ (cliff + doğrusal açılım). `None` → AÇIK (vesting yok).
 ///
-/// Plan (MÜHÜRLÜ):
-///   0 ekosistem      : AÇIK
+/// Plan (MÜHÜRLÜ — koruyucu güncelleme 2026-07-16):
+///   0 ekosistem      : 12 ay doğrusal, cliff YOK (TGE dolaşımı %59→%25)
 ///   1 hazine         : AÇIK bakiye (harcama Payhawk-kilit ile ayrıca sınırlı — Faz D)
 ///   2 likidite       : 2 yıl doğrusal, cliff YOK (DEX likidite esnekliği)
-///   3 topluluk       : AÇIK
+///   3 topluluk       : 6 ay doğrusal, cliff YOK
 ///   4 kurucu         : 6 ay cliff + 2 yıl doğrusal (dump koruması)
 ///   5 erken destekçi : 6 ay cliff + 2 yıl doğrusal
 pub fn dilim_vesting(idx: usize) -> Option<(u64, u64)> {
     match idx {
+        0 => Some((0, VESTING_12AY)),
         2 => Some((0, VESTING_2YIL)),
+        3 => Some((0, VESTING_6AY)),
         4 | 5 => Some((CLIFF_6AY, VESTING_2YIL)),
         _ => None,
     }
@@ -146,16 +152,25 @@ mod tests {
 
     #[test]
     fn vesting_plani_muhurlu_takvime_uyar() {
-        // MÜHÜRLÜ plan: ekosistem/hazine/topluluk AÇIK; likidite 2yıl cliffsiz;
+        // MÜHÜRLÜ plan (koruyucu güncelleme 2026-07-16): ekosistem 12ay, topluluk 6ay
+        // (eskiden açıktı → TGE dolaşımı %59→%25); hazine AÇIK; likidite 2yıl cliffsiz;
         // kurucu+destekçi 6ay cliff+2yıl. Regresyon kilidi (plan değişirse test kırılır).
-        assert_eq!(dilim_vesting(0), None, "ekosistem açık olmalı");
+        assert_eq!(
+            dilim_vesting(0),
+            Some((0, VESTING_12AY)),
+            "ekosistem 12ay cliffsiz (koruma)"
+        );
         assert_eq!(dilim_vesting(1), None, "hazine (genesis) açık olmalı");
         assert_eq!(
             dilim_vesting(2),
             Some((0, VESTING_2YIL)),
             "likidite 2yıl cliffsiz"
         );
-        assert_eq!(dilim_vesting(3), None, "topluluk açık olmalı");
+        assert_eq!(
+            dilim_vesting(3),
+            Some((0, VESTING_6AY)),
+            "topluluk 6ay cliffsiz (koruma)"
+        );
         assert_eq!(
             dilim_vesting(4),
             Some((CLIFF_6AY, VESTING_2YIL)),
