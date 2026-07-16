@@ -181,25 +181,37 @@ pub struct BakiyeRegistry {
     simdi_zaman: u64,
 }
 
-/// Vesting plani: cliff + dogrusal acilim (blok/zaman bazli).
+/// Vesting plani: (TGE-acik) + cliff + dogrusal acilim (blok/zaman bazli).
 #[derive(Clone, Debug)]
 pub struct VestingKaydi {
     pub toplam: Tutar,
     pub baslangic: u64,
     pub cliff_sure: u64,
     pub toplam_sure: u64,
+    /// TGE'de (baslangic aninda) HEMEN acilan miktar (on-satis %20 gibi). Kalan
+    /// (toplam - tge_acik) cliff+dogrusal vest'e tabi. 0 = klasik davranis (geri uyumlu).
+    pub tge_acik: Tutar,
 }
 
 impl VestingKaydi {
     pub fn acilmis(&self, simdi: u64) -> Tutar {
-        if simdi < self.baslangic + self.cliff_sure {
+        // TGE'den once hicbir sey acik degil.
+        if simdi < self.baslangic {
             return 0;
         }
-        let gecen = simdi.saturating_sub(self.baslangic);
-        if gecen >= self.toplam_sure {
-            return self.toplam;
-        }
-        self.toplam * (gecen as u128) / (self.toplam_sure as u128)
+        // Vest'e tabi kisim = toplam - tge_acik (tge_acik zaten hemen serbest).
+        let vest_toplam = self.toplam.saturating_sub(self.tge_acik);
+        let vested = if simdi < self.baslangic + self.cliff_sure {
+            0
+        } else {
+            let gecen = simdi.saturating_sub(self.baslangic);
+            if self.toplam_sure == 0 || gecen >= self.toplam_sure {
+                vest_toplam
+            } else {
+                vest_toplam * (gecen as u128) / (self.toplam_sure as u128)
+            }
+        };
+        self.tge_acik.saturating_add(vested)
     }
     pub fn kilitli(&self, simdi: u64) -> Tutar {
         self.toplam.saturating_sub(self.acilmis(simdi))
@@ -503,6 +515,53 @@ impl NonceRegistry {
 #[cfg(test)]
 mod tests {
 
+    // FAZ2 KANIT (TGE-acilis vesting): on-satis modeli = %20 TGE hemen + kalan %80
+    // 12 ay dogrusal. tge_acik alani dogru calisir; kilitli kisim transfer edilemez.
+    #[test]
+    fn vesting_tge_acilis_on_satis_modeli() {
+        let gun = 86400u64;
+        let bas = 1_000_000u64;
+        let v = VestingKaydi {
+            toplam: 1000,
+            baslangic: bas,
+            cliff_sure: 0,
+            toplam_sure: 360 * gun, // 12 ay
+            tge_acik: 200,          // %20 TGE hemen
+        };
+        // Acilim egrisi
+        assert_eq!(v.acilmis(bas - 1), 0, "TGE oncesi 0");
+        assert_eq!(v.acilmis(bas), 200, "TGE'de %20 (200) acik");
+        assert_eq!(v.kilitli(bas), 800, "TGE'de %80 (800) kilitli");
+        assert_eq!(
+            v.acilmis(bas + 180 * gun),
+            600,
+            "6. ay %60 (200 + 80%'in yarisi)"
+        );
+        assert_eq!(v.acilmis(bas + 360 * gun), 1000, "12. ay %100");
+
+        // Transfer zorlamasi: TGE'de yalniz %20 harcanabilir
+        let mut reg = BakiyeRegistry::yeni();
+        let sahip = [0x33u8; 20];
+        let alici = [0x44u8; 20];
+        reg.test_bakiye_ekle(sahip, 1000);
+        reg.vesting_ekle(sahip, v);
+        reg.zaman_ayarla(bas); // TGE
+        assert!(
+            matches!(
+                reg.transfer(&sahip, &alici, 200),
+                TransferSonuc::Basarili { .. }
+            ),
+            "TGE'de 200 (=%20) transfer OK"
+        );
+        assert!(
+            matches!(
+                reg.transfer(&sahip, &alici, 1),
+                TransferSonuc::YetersizBakiye { .. }
+            ),
+            "kalan %80 kilitli -> ek transfer RED"
+        );
+    }
+
     #[test]
     fn vesting_kilitli_transfer_edilemez() {
         let mut reg = BakiyeRegistry::yeni();
@@ -517,6 +576,7 @@ mod tests {
                 baslangic,
                 cliff_sure: 180 * 86400,
                 toplam_sure: 730 * 86400,
+                tge_acik: 0,
             },
         );
         // Cliff icinde (3. ay) -> kilitli, transfer REDDEDILMELI

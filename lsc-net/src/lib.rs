@@ -367,6 +367,7 @@ pub async fn run_node(
                                 baslangic: vesting_bas,
                                 cliff_sure,
                                 toplam_sure,
+                                tge_acik: 0,
                             },
                         );
                     }
@@ -406,6 +407,7 @@ pub async fn run_node(
                     baslangic: vesting_bas,
                     cliff_sure,
                     toplam_sure,
+                    tge_acik: 0,
                 },
             );
         }
