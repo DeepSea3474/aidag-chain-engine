@@ -1,0 +1,303 @@
+<title>AIDAG-Chain — Tokenomik & Ön-Satış Programı</title>
+<style>
+  :root {
+    --ground: #f6f5f2; --surface: #ffffff; --surface-2: #efece5; --ink: #1c1a15;
+    --muted: #625d51; --faint: #918a7a; --line: #e6e2d8; --accent: #9a7328;
+    --accent-2: #b98f3c; --accent-soft: #f0e6cf;
+    --lock: #9a7328; --lock-soft: #f0e6cf; --open: #3f8f5e; --open-soft: #dcefe2;
+    --s1: #b5622c; --s2: #2f7d8c;
+    --seg1:#b98f3c; --seg2:#8a6a2a; --seg3:#5f8f74; --seg4:#7d8a5f; --seg5:#9a7328; --seg6:#b07a4a; --seg7:#c05f4a;
+    --shadow: 0 1px 2px rgba(28,26,21,.05), 0 10px 30px -14px rgba(28,26,21,.18);
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #14120e; --surface: #1c1a15; --surface-2: #24211a; --ink: #ece7db;
+      --muted: #a49c8a; --faint: #726b5b; --line: #2e2a21; --accent: #d4a94e;
+      --accent-2: #e0ba64; --accent-soft: #2c2412;
+      --lock: #d4a94e; --lock-soft: #2c2412; --open: #5fbe82; --open-soft: #14291c;
+      --s1: #d98a52; --s2: #56afc0;
+      --seg1:#d4a94e; --seg2:#b1893a; --seg3:#63a583; --seg4:#93a06d; --seg5:#c79a45; --seg6:#c98d5c; --seg7:#d47461;
+      --shadow: 0 1px 2px rgba(0,0,0,.35), 0 14px 34px -16px rgba(0,0,0,.65);
+    }
+  }
+  :root[data-theme="light"]{ --ground:#f6f5f2;--surface:#fff;--surface-2:#efece5;--ink:#1c1a15;--muted:#625d51;--faint:#918a7a;--line:#e6e2d8;--accent:#9a7328;--accent-2:#b98f3c;--accent-soft:#f0e6cf;--lock:#9a7328;--lock-soft:#f0e6cf;--open:#3f8f5e;--open-soft:#dcefe2;--s1:#b5622c;--s2:#2f7d8c;--seg1:#b98f3c;--seg2:#8a6a2a;--seg3:#5f8f74;--seg4:#7d8a5f;--seg5:#9a7328;--seg6:#b07a4a;--seg7:#c05f4a;--shadow:0 1px 2px rgba(28,26,21,.05),0 10px 30px -14px rgba(28,26,21,.18); }
+  :root[data-theme="dark"]{ --ground:#14120e;--surface:#1c1a15;--surface-2:#24211a;--ink:#ece7db;--muted:#a49c8a;--faint:#726b5b;--line:#2e2a21;--accent:#d4a94e;--accent-2:#e0ba64;--accent-soft:#2c2412;--lock:#d4a94e;--lock-soft:#2c2412;--open:#5fbe82;--open-soft:#14291c;--s1:#d98a52;--s2:#56afc0;--seg1:#d4a94e;--seg2:#b1893a;--seg3:#63a583;--seg4:#93a06d;--seg5:#c79a45;--seg6:#c98d5c;--seg7:#d47461;--shadow:0 1px 2px rgba(0,0,0,.35),0 14px 34px -16px rgba(0,0,0,.65); }
+
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--ground); color:var(--ink); font-family:var(--sans); line-height:1.55; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width: 960px; margin:0 auto; padding: clamp(20px,5vw,56px) clamp(16px,4vw,36px) 64px; }
+  .eyebrow { font-size:12px; letter-spacing:.16em; text-transform:uppercase; color:var(--accent); font-weight:700; margin:0 0 14px; }
+  h1 { font-size:clamp(26px,4.4vw,40px); line-height:1.08; margin:0 0 10px; letter-spacing:-.02em; text-wrap:balance; font-weight:800; }
+  .sub { color:var(--muted); font-size:clamp(15px,2vw,17px); margin:0; max-width:64ch; }
+  .meta { display:flex; flex-wrap:wrap; gap:6px 20px; margin-top:18px; font-size:13.5px; color:var(--faint); }
+  .meta b { color:var(--muted); font-weight:600; }
+  .draft { display:inline-block; font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--accent); background:var(--accent-soft); padding:3px 9px; border-radius:6px; margin-left:8px; vertical-align:middle; }
+
+  section { margin-top:44px; }
+  .sec-head { display:flex; align-items:baseline; gap:12px; margin-bottom:6px; }
+  h2 { font-size:19px; margin:0; letter-spacing:-.01em; }
+  .sec-head .tag { font-size:12px; color:var(--faint); font-family:var(--mono); }
+  .sec-desc { color:var(--muted); font-size:14px; margin:0 0 16px; max-width:64ch; }
+
+  .facts { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:24px; }
+  @media (max-width:620px){ .facts{ grid-template-columns:repeat(2,1fr);} }
+  .fact { background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:15px 16px; box-shadow:var(--shadow); }
+  .fact .n { font-size:23px; font-weight:800; letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
+  .fact .l { font-size:12px; color:var(--muted); margin-top:5px; }
+
+  .card { background:var(--surface); border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow); }
+  .pad { padding: clamp(16px,3vw,24px); }
+
+  /* distribution bar */
+  .distbar { display:flex; height:34px; border-radius:8px; overflow:hidden; margin:2px 0 14px; }
+  .distbar span { display:block; }
+  .distlegend { display:grid; grid-template-columns:repeat(2,1fr); gap:7px 22px; font-size:13px; }
+  @media (max-width:560px){ .distlegend{ grid-template-columns:1fr;} }
+  .distlegend .row { display:flex; align-items:center; gap:9px; }
+  .distlegend .sw { width:11px; height:11px; border-radius:3px; flex:none; }
+  .distlegend .nm { color:var(--ink); }
+  .distlegend .pc { margin-left:auto; font-family:var(--mono); font-size:12.5px; color:var(--muted); font-variant-numeric:tabular-nums; }
+
+  .tablewrap { overflow-x:auto; border:1px solid var(--line); border-radius:12px; background:var(--surface); box-shadow:var(--shadow); }
+  table { width:100%; border-collapse:collapse; font-size:13.5px; min-width:560px; }
+  thead th { text-align:left; font-size:11px; letter-spacing:.07em; text-transform:uppercase; color:var(--faint); font-weight:700; padding:11px 14px; border-bottom:1px solid var(--line); background:var(--surface-2); }
+  thead th.r, tbody td.r { text-align:right; }
+  tbody td { padding:11px 14px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  tbody tr:last-child td { border-bottom:none; }
+  tbody tr.total td { font-weight:700; background:var(--surface-2); }
+  .num { font-family:var(--mono); font-variant-numeric:tabular-nums; }
+  .slice { display:inline-flex; align-items:center; gap:8px; }
+  .slice .sw { width:9px; height:9px; border-radius:2px; flex:none; }
+  .vtag { font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px; white-space:nowrap; }
+  .v-lock { color:var(--lock); background:var(--lock-soft); }
+  .v-open { color:var(--open); background:var(--open-soft); }
+  .rec { font-size:10.5px; color:var(--accent); font-weight:700; margin-left:6px; }
+
+  .stages { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:680px){ .stages{ grid-template-columns:1fr;} }
+  .stage { border-top:3px solid; }
+  .stage.one { border-color:var(--s1); }
+  .stage.two { border-color:var(--s2); }
+  .stage .k { font-size:11px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--faint); }
+  .stage h3 { margin:4px 0 2px; font-size:17px; }
+  .stage .big { font-size:26px; font-weight:800; letter-spacing:-.02em; font-variant-numeric:tabular-nums; margin:8px 0 2px; }
+  .stage .big small { font-size:14px; color:var(--muted); font-weight:600; }
+  .stage ul { margin:12px 0 0; padding-left:18px; color:var(--muted); font-size:13px; }
+  .stage li { margin:3px 0; }
+  .stage li b { color:var(--ink); font-weight:600; }
+
+  .scen th.r, .scen td.r { text-align:right; }
+  .scen tbody tr.hi td { background:var(--accent-soft); }
+  .scen .lbl { font-weight:700; }
+  .scen .warn { font-size:11px; color:var(--muted); }
+
+  /* unlock curve */
+  .curve-wrap { display:grid; grid-template-columns:1.3fr .9fr; gap:18px; align-items:stretch; }
+  @media (max-width:680px){ .curve-wrap{ grid-template-columns:1fr;} }
+  svg { display:block; width:100%; height:auto; }
+  .tge { display:flex; flex-direction:column; justify-content:center; gap:14px; }
+  .tge .big { font-size:40px; font-weight:800; letter-spacing:-.03em; color:var(--accent); line-height:1; font-variant-numeric:tabular-nums; }
+  .tge .cmp { font-size:13px; color:var(--muted); }
+  .tge .cmp b { color:var(--ink); }
+  .tge .old { text-decoration:line-through; color:var(--faint); }
+
+  .callout { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:680px){ .callout{ grid-template-columns:1fr;} }
+  .co { border-left:3px solid var(--accent); }
+  .co.warn { border-left-color:var(--s1); }
+  .co h4 { margin:0 0 6px; font-size:15px; }
+  .co p { margin:6px 0 0; font-size:13.5px; color:var(--muted); }
+  .co code { font-family:var(--mono); font-size:12px; background:var(--surface-2); padding:1px 5px; border-radius:5px; }
+
+  .decisions { list-style:none; padding:0; margin:0; display:grid; gap:10px; }
+  .decisions li { display:flex; gap:12px; align-items:flex-start; background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:13px 15px; box-shadow:var(--shadow); font-size:14px; }
+  .decisions .q { flex:none; width:22px; height:22px; border-radius:6px; background:var(--accent-soft); color:var(--accent); font-weight:800; font-size:12px; display:grid; place-items:center; margin-top:1px; }
+  .decisions b { color:var(--ink); }
+  .decisions span { color:var(--muted); }
+
+  footer { margin-top:48px; padding-top:20px; border-top:1px solid var(--line); color:var(--faint); font-size:12.5px; display:flex; flex-wrap:wrap; gap:6px 18px; justify-content:space-between; }
+  .fn { font-family:var(--mono); }
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">Tokenomik · Ön-Satış Programı</p>
+  <h1>AIDAG-Chain Tokenomik &amp; Ön-Satış Programı<span class="draft">Taslak v1</span></h1>
+  <p class="sub">Sabit 21M arz üzerine kurulu, koruyucu (dump-dirençli) ve erken katılımı teşvik eden ön-satış + vesting programı. Dağıtım ve vesting matematiksel olarak kapalı (toplam tam %100). Fiyat/değerleme bir <b>piyasa kararı</b> olduğundan tek sayı değil, 3 senaryo sunulur.</p>
+  <div class="meta">
+    <span><b>AIDAG arzı:</b> 21.000.000 (sabit)</span>
+    <span><b>LSC arzı:</b> 2.100.000.000</span>
+    <span><b>Ön-satış:</b> %8 (2 aşama)</span>
+    <span><b>TGE dolaşımı:</b> %25 (öneri)</span>
+  </div>
+
+  <div class="facts">
+    <div class="fact"><div class="n">21.000.000</div><div class="l">AIDAG — sabit, mint yok</div></div>
+    <div class="fact"><div class="n">%8</div><div class="l">Ön-satış (1.680.000 AIDAG)</div></div>
+    <div class="fact"><div class="n">%25</div><div class="l">TGE dolaşımı (öneri) · eski ~%59</div></div>
+    <div class="fact"><div class="n">6+18 ay</div><div class="l">Stage-1 vesting (cliff + doğrusal)</div></div>
+  </div>
+
+  <section>
+    <div class="sec-head"><h2>1 · Dağıtım</h2><span class="tag">21.000.000 AIDAG · kapalı sistem</span></div>
+    <p class="sec-desc">Ön-satış için <b>%8'lik yeni bir dilim</b> Ekosistem'den ayrıldı (%30→%22); toplam yine tam %100 / 21M. Genesis'te sabit yazılır, sonradan basım yok.</p>
+    <div class="card pad">
+      <div class="distbar" role="img" aria-label="Dağıtım oranları">
+        <span style="width:22%;background:var(--seg1)"></span>
+        <span style="width:25%;background:var(--seg2)"></span>
+        <span style="width:15%;background:var(--seg3)"></span>
+        <span style="width:12%;background:var(--seg4)"></span>
+        <span style="width:13%;background:var(--seg5)"></span>
+        <span style="width:5%;background:var(--seg6)"></span>
+        <span style="width:8%;background:var(--seg7)"></span>
+      </div>
+      <div class="distlegend">
+        <div class="row"><span class="sw" style="background:var(--seg1)"></span><span class="nm">Ekosistem</span><span class="pc">%22 · 4.620.000</span></div>
+        <div class="row"><span class="sw" style="background:var(--seg2)"></span><span class="nm">Hazine</span><span class="pc">%25 · 5.250.000</span></div>
+        <div class="row"><span class="sw" style="background:var(--seg3)"></span><span class="nm">Likidite</span><span class="pc">%15 · 3.150.000</span></div>
+        <div class="row"><span class="sw" style="background:var(--seg4)"></span><span class="nm">Topluluk</span><span class="pc">%12 · 2.520.000</span></div>
+        <div class="row"><span class="sw" style="background:var(--seg5)"></span><span class="nm">Kurucu</span><span class="pc">%13 · 2.730.000</span></div>
+        <div class="row"><span class="sw" style="background:var(--seg6)"></span><span class="nm">Erken destekçi</span><span class="pc">%5 · 1.050.000</span></div>
+        <div class="row"><span class="sw" style="background:var(--seg7)"></span><span class="nm">Ön-satış</span><span class="pc">%8 · 1.680.000</span></div>
+      </div>
+    </div>
+
+    <div style="height:16px"></div>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Dilim</th><th class="r">AIDAG</th><th>Vesting</th></tr></thead>
+      <tbody>
+        <tr><td><span class="slice"><span class="sw" style="background:var(--seg1)"></span>Ekosistem</span></td><td class="r num">4.620.000</td><td><span class="vtag v-lock">12 ay doğrusal</span><span class="rec">öneri</span></td></tr>
+        <tr><td><span class="slice"><span class="sw" style="background:var(--seg2)"></span>Hazine</span></td><td class="r num">5.250.000</td><td><span class="vtag v-open">Açık</span> <span style="font-size:12px;color:var(--muted)">Payhawk belge-kilidi</span></td></tr>
+        <tr><td><span class="slice"><span class="sw" style="background:var(--seg3)"></span>Likidite</span></td><td class="r num">3.150.000</td><td><span class="vtag v-lock">2 yıl doğrusal</span> <span style="font-size:12px;color:var(--muted)">cliff yok</span></td></tr>
+        <tr><td><span class="slice"><span class="sw" style="background:var(--seg4)"></span>Topluluk</span></td><td class="r num">2.520.000</td><td><span class="vtag v-lock">6 ay doğrusal</span><span class="rec">öneri</span></td></tr>
+        <tr><td><span class="slice"><span class="sw" style="background:var(--seg5)"></span>Kurucu</span></td><td class="r num">2.730.000</td><td><span class="vtag v-lock">6 ay cliff + 2 yıl</span></td></tr>
+        <tr><td><span class="slice"><span class="sw" style="background:var(--seg6)"></span>Erken destekçi</span></td><td class="r num">1.050.000</td><td><span class="vtag v-lock">6 ay cliff + 2 yıl</span></td></tr>
+        <tr><td><span class="slice"><span class="sw" style="background:var(--seg7)"></span>Ön-satış</span></td><td class="r num">1.680.000</td><td><span class="vtag v-lock">aşamaya göre (↓)</span></td></tr>
+        <tr class="total"><td>Toplam</td><td class="r num">21.000.000</td><td>%100 · kapalı</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>2 · Ön-satış — iki aşama</h2><span class="tag">%8 = 1.680.000 AIDAG</span></div>
+    <p class="sec-desc">Aşama 1 audit'ten <b>önce</b> (bootstrap: audit + listeleme + şirket giderleri), Aşama 2 audit'ten <b>sonra</b> BitMart IEO. Erken = daha riskli = daha ucuz (teşvik) + daha uzun kilit (koruma).</p>
+    <div class="stages">
+      <div class="card pad stage one">
+        <div class="k">Aşama 1 · audit öncesi</div>
+        <h3>Bootstrap turu</h3>
+        <div class="big">630.000 <small>AIDAG · arzın %3'ü</small></div>
+        <ul>
+          <li><b>Amaç:</b> audit + BitMart listeleme + şirket kurulum</li>
+          <li><b>Fiyat:</b> listeleme fiyatının %50'si (en derin indirim)</li>
+          <li><b>Vesting:</b> 6 ay cliff + 18 ay doğrusal · TGE'de %0</li>
+          <li><b>Yaklaşım:</b> yakın/özel tur — en güçlü kilit</li>
+        </ul>
+      </div>
+      <div class="card pad stage two">
+        <div class="k">Aşama 2 · audit sonrası</div>
+        <h3>BitMart IEO</h3>
+        <div class="big">1.050.000 <small>AIDAG · arzın %5'i</small></div>
+        <ul>
+          <li><b>Amaç:</b> likidite + büyüme + operasyon runway</li>
+          <li><b>Fiyat:</b> listeleme fiyatının %70'i</li>
+          <li><b>Vesting:</b> 1 ay cliff + 12 ay doğrusal (halka açık → daha likit)</li>
+          <li><b>Kesin şartlar:</b> BitMart IEO kurallarına göre</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>3 · Fiyat &amp; gelir senaryoları</h2><span class="tag">fiyat = piyasa/avukat kararı</span></div>
+    <p class="sec-desc">Tek fiyat dayatmıyorum — listeleme değerlemesi bir piyasa kararı. 3 senaryo; her biri <b>Stage-1 = listeleme×%50</b>, <b>Stage-2 = listeleme×%70</b> merdiveniyle.</p>
+    <div class="tablewrap"><table class="scen">
+      <thead><tr><th>Senaryo</th><th class="r">Listeleme</th><th class="r">FDV (21M)</th><th class="r">S1 fiyat → gelir</th><th class="r">S2 fiyat → gelir</th><th class="r">Toplam gelir</th></tr></thead>
+      <tbody>
+        <tr><td class="lbl">Temkinli</td><td class="r num">$0.25</td><td class="r num">$5.2M</td><td class="r num">$0.125 → $78.750</td><td class="r num">$0.175 → $183.750</td><td class="r num">$262.500</td></tr>
+        <tr class="hi"><td class="lbl">Orta</td><td class="r num">$0.50</td><td class="r num">$10.5M</td><td class="r num">$0.250 → $157.500</td><td class="r num">$0.350 → $367.500</td><td class="r num">$525.000</td></tr>
+        <tr><td class="lbl">İyimser</td><td class="r num">$1.00</td><td class="r num">$21.0M</td><td class="r num">$0.500 → $315.000</td><td class="r num">$0.700 → $735.000</td><td class="r num">$1.050.000</td></tr>
+      </tbody>
+    </table></div>
+    <p class="sec-desc" style="margin-top:12px">Aşama 1 geliri (~$79k–$315k) audit + listeleme + şirket giderlerini karşılamalı. Gerçek maliyetlerini verirsen doğru senaryoyu birlikte seçeriz.</p>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>4 · Dolaşım eğrisi &amp; TGE koruması</h2><span class="tag">önerilen vesting</span></div>
+    <p class="sec-desc">Koruyucu vesting, lansmanda (TGE) dolaşımdaki arzı <b>%25</b>'e indiriyor — eski plandaki ~%59 yerine. Bu, ani satış baskısını (dump) düşürür ve fiyatı korur.</p>
+    <div class="card pad curve-wrap">
+      <svg viewBox="0 0 420 220" role="img" aria-label="24 aylık dolaşım eğrisi">
+        <defs>
+          <linearGradient id="fill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="var(--accent)" stop-opacity="0.28"/>
+            <stop offset="1" stop-color="var(--accent)" stop-opacity="0.02"/>
+          </linearGradient>
+        </defs>
+        <!-- grid -->
+        <g stroke="var(--line)" stroke-width="1">
+          <line x1="40" y1="20" x2="40" y2="180"/>
+          <line x1="40" y1="180" x2="410" y2="180"/>
+          <line x1="40" y1="100" x2="410" y2="100" stroke-dasharray="3 4"/>
+          <line x1="40" y1="60" x2="410" y2="60" stroke-dasharray="3 4"/>
+        </g>
+        <!-- y labels -->
+        <g fill="var(--faint)" font-size="9" font-family="var(--mono)">
+          <text x="34" y="183" text-anchor="end">0%</text>
+          <text x="34" y="103" text-anchor="end">50%</text>
+          <text x="34" y="23" text-anchor="end">100%</text>
+        </g>
+        <!-- area: points at months 0,3,6,12,18,24 -> % 25,39.6,59.4,81.8,90.6,99.5 -->
+        <!-- x: 40..410 over 24 months (15.4 px/mo). y: 180 - pct*1.6 -->
+        <path d="M40,140 L86.2,116.6 L132.4,84.9 L224.8,49.1 L317.2,35.0 L409.6,21.6 L409.6,180 L40,180 Z" fill="url(#fill)"/>
+        <path d="M40,140 L86.2,116.6 L132.4,84.9 L224.8,49.1 L317.2,35.0 L409.6,21.6" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+        <!-- points -->
+        <g fill="var(--accent)">
+          <circle cx="40" cy="140" r="3.5"/><circle cx="132.4" cy="84.9" r="3.5"/><circle cx="224.8" cy="49.1" r="3.5"/><circle cx="409.6" cy="21.6" r="3.5"/>
+        </g>
+        <!-- x labels -->
+        <g fill="var(--faint)" font-size="9" font-family="var(--mono)">
+          <text x="40" y="195" text-anchor="middle">0</text>
+          <text x="132.4" y="195" text-anchor="middle">6ay</text>
+          <text x="224.8" y="195" text-anchor="middle">12ay</text>
+          <text x="409.6" y="195" text-anchor="middle">24ay</text>
+        </g>
+      </svg>
+      <div class="tge">
+        <div>
+          <div class="big">%25</div>
+          <div class="cmp">TGE (lansman) dolaşımı — <b>önerilen</b> vesting ile</div>
+        </div>
+        <div class="cmp">Eski plan (ekosistem+topluluk açık): <span class="old">~%59</span> → çok yüksek, dump riski.</div>
+        <div class="cmp"><b>6. ay</b> %59 · <b>12. ay</b> %82 · <b>24. ay</b> ~%100 tam açık.</div>
+      </div>
+    </div>
+    <div style="height:16px"></div>
+    <div class="callout">
+      <div class="card pad co">
+        <h4>Neden koruyucu?</h4>
+        <p>Ekosistem'e 12 ay, topluluğa 6 ay doğrusal kilit eklenmesi öneriliyor. Kurucu/destekçi zaten 6 ay cliff + 2 yıl. Böylece lansmanda satılabilir arz düşük → fiyat istikrarı + "kurucu kaçmaz" güveni.</p>
+      </div>
+      <div class="card pad co warn">
+        <h4>⚠ Vesting başlangıç tarihi</h4>
+        <p>Kodda <code>MAINNET_VESTING_BASLANGIC = 2026-07-15</code> (placeholder). Mainnet daha sonra açılırsa vesting saati geçmişte başlar → kilitler lansmanda zaten açık olur. <b>Gerçek TGE tarihine güncellenmeden mainnet başlamamalı.</b></p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>5 · Senin onayını bekleyen kararlar</h2></div>
+    <p class="sec-desc">Aşağıdakiler netleşince rakamları kilitler, genesis'e pinler ve kanıt testi yazarım (A1 kapanır).</p>
+    <ul class="decisions">
+      <li><span class="q">1</span><span><b>Gerçek maliyetler:</b> audit, BitMart listeleme, şirket+hukuk (USD) — doğru fiyat senaryosunu seçmek için.</span></li>
+      <li><span class="q">2</span><span><b>Listeleme fiyatı / FDV:</b> temkinli / orta / iyimser — hangisi?</span></li>
+      <li><span class="q">3</span><span><b>Ön-satış kaynağı:</b> %8'i Ekosistem'den ayırmayı onaylıyor musun, yoksa başka dilimden mi?</span></li>
+      <li><span class="q">4</span><span><b>Vesting iyileştirmesi:</b> Ekosistem 12 ay + Topluluk 6 ay kilit önerimi kabul mü? (TGE dolaşımı %59→%25)</span></li>
+      <li><span class="q">5</span><span><b>6 dağıtım cüzdanı</b> (güvenli custody) + owner/hazine funding modeli.</span></li>
+    </ul>
+  </section>
+
+  <footer>
+    <span>AIDAG-Chain tokenomik &amp; ön-satış programı · Taslak v1 · proje içi</span>
+    <span class="fn">21M sabit · ön-satış %8 · TGE %25 · kapalı sistem</span>
+  </footer>
+</div>
