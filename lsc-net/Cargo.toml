@@ -2,7 +2,7 @@
 name = "lsc-net"
 version = "0.1.0"
 edition = "2021"
-license = "BSL-1.1"
+license = "BUSL-1.1"
 description = "LSC ag katmani P2P. Asama 1: peer identity + ping."
 
 [[bin]]

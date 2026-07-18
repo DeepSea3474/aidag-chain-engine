@@ -15,6 +15,13 @@ Additional Use Grant: You may make use of the Licensed Work for non-production,
                       free of charge. Any production or commercial use of the
                       Licensed Work requires a separate commercial license
                       granted by the Licensor.
+                      In addition, running an unmodified node that participates
+                      in the public AIDAG-Chain network, submitting or
+                      validating transactions on that network, and building
+                      applications on top of that network are permitted free of
+                      charge. The commercial-use restriction is directed at
+                      using the Licensed Work to operate a separate or
+                      competing blockchain network.
 Change Date:          2030-07-10
 Change License:       Apache License, Version 2.0
 
