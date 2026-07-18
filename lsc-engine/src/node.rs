@@ -504,6 +504,19 @@ impl NodeState {
         };
         let id = *vertex.id();
 
+        // AG KAPISI: yabanci network_id'li vertex ORPHAN HAVUZUNA GIRMEDEN reddedilir.
+        // Onceden ag kontrolu yalnizca graph.insert icindeydi; eksik-ebeveynli yabanci
+        // vertex oraya hic ulasmadigi icin havuza sizip birikiyordu (mainnet<->testnet
+        // mDNS karisimi, 2026-07-18: 0 entegre / 4 orphan). Havuz doldurma yuzeyi kapandi.
+        if vertex.network_id() != self.graph.network_id() {
+            return NetworkIngestOutcome::Rejected(IngestError::Graph(
+                crate::dag::graph::GraphError::NetworkMismatch {
+                    expected: self.graph.network_id(),
+                    got: vertex.network_id(),
+                },
+            ));
+        }
+
         // 2) Zaten varsa (graf'ta veya havuzda) tekrar isleme.
         if self.graph.contains(&id) || self.orphans.contains(&id) {
             return NetworkIngestOutcome::Duplicate(id);
@@ -542,6 +555,19 @@ impl NodeState {
         };
         let id = *vertex.id();
 
+        // AG KAPISI: yabanci network_id'li vertex ORPHAN HAVUZUNA GIRMEDEN reddedilir.
+        // Onceden ag kontrolu yalnizca graph.insert icindeydi; eksik-ebeveynli yabanci
+        // vertex oraya hic ulasmadigi icin havuza sizip birikiyordu (mainnet<->testnet
+        // mDNS karisimi, 2026-07-18: 0 entegre / 4 orphan). Havuz doldurma yuzeyi kapandi.
+        if vertex.network_id() != self.graph.network_id() {
+            return NetworkIngestOutcome::Rejected(IngestError::Graph(
+                crate::dag::graph::GraphError::NetworkMismatch {
+                    expected: self.graph.network_id(),
+                    got: vertex.network_id(),
+                },
+            ));
+        }
+
         if self.graph.contains(&id) || self.orphans.contains(&id) {
             return NetworkIngestOutcome::Duplicate(id);
         }
@@ -577,6 +603,19 @@ impl NodeState {
             Err(e) => return NetworkIngestOutcome::Rejected(IngestError::Decode(e)),
         };
         let id = *vertex.id();
+
+        // AG KAPISI: yabanci network_id'li vertex ORPHAN HAVUZUNA GIRMEDEN reddedilir.
+        // Onceden ag kontrolu yalnizca graph.insert icindeydi; eksik-ebeveynli yabanci
+        // vertex oraya hic ulasmadigi icin havuza sizip birikiyordu (mainnet<->testnet
+        // mDNS karisimi, 2026-07-18: 0 entegre / 4 orphan). Havuz doldurma yuzeyi kapandi.
+        if vertex.network_id() != self.graph.network_id() {
+            return NetworkIngestOutcome::Rejected(IngestError::Graph(
+                crate::dag::graph::GraphError::NetworkMismatch {
+                    expected: self.graph.network_id(),
+                    got: vertex.network_id(),
+                },
+            ));
+        }
         if self.graph.contains(&id) || self.orphans.contains(&id) {
             return NetworkIngestOutcome::Duplicate(id);
         }
@@ -605,6 +644,19 @@ impl NodeState {
     /// pub(crate) — sadece guvenilir toplu yukleme yolundan.
     pub fn ingest_decoded_preverified(&mut self, vertex: Vertex) -> NetworkIngestOutcome {
         let id = *vertex.id();
+
+        // AG KAPISI: yabanci network_id'li vertex ORPHAN HAVUZUNA GIRMEDEN reddedilir.
+        // Onceden ag kontrolu yalnizca graph.insert icindeydi; eksik-ebeveynli yabanci
+        // vertex oraya hic ulasmadigi icin havuza sizip birikiyordu (mainnet<->testnet
+        // mDNS karisimi, 2026-07-18: 0 entegre / 4 orphan). Havuz doldurma yuzeyi kapandi.
+        if vertex.network_id() != self.graph.network_id() {
+            return NetworkIngestOutcome::Rejected(IngestError::Graph(
+                crate::dag::graph::GraphError::NetworkMismatch {
+                    expected: self.graph.network_id(),
+                    got: vertex.network_id(),
+                },
+            ));
+        }
         if self.graph.contains(&id) || self.orphans.contains(&id) {
             return NetworkIngestOutcome::Duplicate(id);
         }

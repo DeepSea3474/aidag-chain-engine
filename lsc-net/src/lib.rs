@@ -256,10 +256,14 @@ pub async fn run_node(
         );
     } // kilit burada birakilir
 
-    // Vertex topic'ine abone ol.
-    let topic = gossipsub::IdentTopic::new(VERTEX_TOPIC);
+    // Vertex topic'ine abone ol. AG IZOLASYONU: topic adi network_id ile ayrilir
+    // (lsc-vertices-1 / lsc-vertices-3474) -> mainnet ve testnet dugumleri ayni
+    // makinede/agda bulussalar bile birbirinin vertex'ini gossipsub'da DUYMAZ.
+    let net_id = node_state.read().await.network_id();
+    let topic_adi = format!("{VERTEX_TOPIC}-{net_id}");
+    let topic = gossipsub::IdentTopic::new(topic_adi.clone());
     swarm.behaviour_mut().gossipsub.subscribe(&topic)?;
-    tracing::info!("Gossipsub topic'ine abone olundu: {VERTEX_TOPIC}");
+    tracing::info!("Gossipsub topic'ine abone olundu: {topic_adi}");
 
     // Vertex imzalama anahtari: key_file varsa KALICI kimlik (diskten yukle/
     // uret+kaydet), yoksa gecici. Kripto-cevik format (algo_id + seed).
