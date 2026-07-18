@@ -39,8 +39,18 @@ def public_key_to_adres(public_key: bytes) -> bytes:
 
 
 class AidagClient:
-    def __init__(self, rpc_url, network_id=1, signing_key=None):
+    def __init__(self, rpc_url, network_id=None, signing_key=None):
+        """network_id verilmezse dugumun /status ucundan OTOMATIK okunur.
+        Boylece mainnet (3474) / testnet (1) ayrimi kullaniciya birakilmaz;
+        yanlis ag ile gonderim (NetworkMismatch ile sessiz ret) onlenir.
+        Ulasilamazsa 1 (devnet/testnet) varsayilir."""
         self.rpc_url = rpc_url.rstrip("/")
+        if network_id is None:
+            try:
+                network_id = int(requests.get(f"{self.rpc_url}/status", timeout=5)
+                                 .json()["network_id"])
+            except Exception:
+                network_id = 1
         self.network_id = network_id
         self.sk = SigningKey.generate() if signing_key is None else SigningKey(signing_key)
         self.public_key = bytes(self.sk.verify_key)
