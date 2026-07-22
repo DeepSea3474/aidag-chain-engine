@@ -3971,4 +3971,79 @@ mod tests {
             eksik.len()
         );
     }
+
+    // ===============================================================
+    // SYNC OTOMATIK TESTI (denetim raporu bloker #14).
+    // Taze bir node, dolu bir peer'dan DAG'i CHUNKED/OFFSET sync ile
+    // (gercek ag dongusunun AYNI mantigi: export_vertices + skip/take
+    // + ingest_synced) baştan ceker. KANIT: sadece DAG yapisi degil,
+    // STATE de (bakiye/nonce/arz) BIREBIR yakinsar. State ayrismasi =
+    // sessiz zincir-bolunmesi; bu test onu regresyona baglar.
+    // ===============================================================
+    #[test]
+    fn sync_taze_node_ayni_state_e_yakinsar() {
+        use crate::registry::public_key_to_adres;
+        use crate::tx::TransferKaydi;
+        let now = 1_000_000u64;
+
+        // --- PEER: genesis + bakiye + bir zincir transfer ---
+        let mut peer = NodeState::new_devnet(NET);
+        let (gen, gid) = genesis_bytes(1, now);
+        peer.ingest_networked(&gen, now);
+
+        let sk = SigningKey::from_bytes(&[21u8; 32]);
+        let gonderen = public_key_to_adres(&sk.verifying_key().to_bytes());
+        let alici = [0x77; 20];
+        peer.test_bakiye_ekle(gonderen, 10_000);
+
+        // Zincirlenmis transfer'ler (kardes degil -> total_order'a hepsi girer)
+        let mut parent = gid;
+        for i in 0..6u64 {
+            let p = TransferKaydi::new(alici, 100, i).encode();
+            let v = Vertex::new_signed(NET, vec![parent], p, now + 1 + i, &sk).expect("v");
+            parent = *v.id();
+            peer.ingest_networked(&wire::encode(&v), now + 1 + i);
+        }
+
+        // Peer'in beklenen state'i (referans)
+        let peer_gonderen = peer.bakiye(&gonderen);
+        let peer_alici = peer.bakiye(&alici);
+        let peer_nonce = peer.beklenen_nonce(&gonderen);
+        let peer_arz = peer.toplam_bakiye_arzi();
+        assert_eq!(peer_gonderen, 10_000 - 600, "peer: 6x100 dustu");
+        assert_eq!(peer_alici, 600, "peer: alici 600 aldi");
+
+        // --- TAZE NODE: CHUNKED sync (gercek ag mantiginin aynisi) ---
+        let mut taze = NodeState::new_devnet(NET);
+        // Taze node ayni baslangic dagitimini bilir (genesis dagitimi;
+        // testte test_bakiye_ekle ile ayni sekilde kurulur).
+        taze.test_bakiye_ekle(gonderen, 10_000);
+
+        const CHUNK: usize = 2; // kucuk chunk -> cok turlu sync'i zorla
+        let mut offset = 0usize;
+        loop {
+            let all = peer.export_vertices();
+            let total = all.len();
+            let parca: Vec<Vec<u8>> = all.into_iter().skip(offset).take(CHUNK).collect();
+            if parca.is_empty() { break; }
+            for byt in &parca {
+                taze.ingest_synced(byt);
+            }
+            offset += parca.len();
+            if offset >= total { break; }
+        }
+
+        // Orphan kalmissa cozdur (sirasizlik guvencesi)
+        for byt in peer.export_vertices() {
+            taze.ingest_synced(&byt);
+        }
+
+        // --- KANIT: STATE birebir yakinsadi ---
+        assert_eq!(taze.vertex_count(), peer.vertex_count(), "vertex sayisi ayni");
+        assert_eq!(taze.orphan_count(), 0, "orphan kalmadi");
+        assert_eq!(taze.bakiye(&gonderen), peer_gonderen, "YAKINSAMA: gonderen bakiye");
+        assert_eq!(taze.bakiye(&alici), peer_alici, "YAKINSAMA: alici bakiye");
+        assert_eq!(taze.beklenen_nonce(&gonderen), peer_nonce, "YAKINSAMA: nonce");
+        assert_eq!(taze.toplam_bakiye_arzi(), peer_arz, "YAKINSAMA: toplam arz");
+    }
 }
