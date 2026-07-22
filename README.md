@@ -12,7 +12,7 @@
 
  
 
-![Tests](https://img.shields.io/badge/tests-290%2B%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-329%20passing-brightgreen)
 
  
 
@@ -24,13 +24,14 @@
 
 AIDAG-Chain is a DAG-based Layer-1 blockchain. Blocks are vertices in a directed acyclic graph, ordered by **GHOSTDAG** consensus for parallel, high-throughput block production without a single-chain bottleneck. The execution layer is **EVM-compatible** (built on `revm`), so MetaMask, ethers.js, and Solidity contracts work against it out of the box.
 
-It is not a whitepaper — it runs. A live testnet where MetaMask sends real AIDAG transfers that settle on-chain, backed by **290+ passing tests** across consensus, execution, and state.
+It is not a whitepaper — it runs. A live testnet where MetaMask sends real AIDAG transfers that settle on-chain, backed by **329 passing tests** across consensus, execution, and state.
 
 ## Verified, today
 
 - **Live testnet** — public JSON-RPC, faucet, and block explorer at [aidag-chain.com](https://aidag-chain.com).
 - **Real wallet transfers** — MetaMask sends value on AIDAG-Chain; balances update on-chain and are visible in the explorer.
-- **290+ tests, green** — consensus, EVM execution, gas accounting, and registries — enforced through `fmt` / `clippy -D warnings` / `test` gates.
+- **329 tests, green** — consensus, EVM execution, gas accounting, and registries — enforced through `fmt` / `clippy -D warnings` / `test` gates.
+- **Consensus determinism, proven** — state is derived deterministically from GHOSTDAG total-order (not ingest order), so nodes converge to identical state regardless of the order they receive vertices. Verified by multi-node convergence, sync, and restart tests plus a randomized invariant that checks incremental state == full recompute.
 
 ## Core
 
