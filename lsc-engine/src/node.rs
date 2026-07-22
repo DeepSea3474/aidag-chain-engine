@@ -4046,4 +4046,55 @@ mod tests {
         assert_eq!(taze.beklenen_nonce(&gonderen), peer_nonce, "YAKINSAMA: nonce");
         assert_eq!(taze.toplam_bakiye_arzi(), peer_arz, "YAKINSAMA: toplam arz");
     }
+
+    // ===============================================================
+    // SYNC DAYANIKLILIK (bloker #14, 2. varyant): vertex'ler KARISIK
+    // SIRADA gelirse. Gercek agda parcalar farkli sirayla dusebilir;
+    // orphan+cascade sirasizligi cozmeli ve state YINE ayni yakinsamali.
+    // ===============================================================
+    #[test]
+    fn sync_sirasiz_gelse_de_ayni_state_e_yakinsar() {
+        use crate::registry::public_key_to_adres;
+        use crate::tx::TransferKaydi;
+        let now = 1_000_000u64;
+
+        let mut peer = NodeState::new_devnet(NET);
+        let (gen, gid) = genesis_bytes(1, now);
+        peer.ingest_networked(&gen, now);
+        let sk = SigningKey::from_bytes(&[22u8; 32]);
+        let gonderen = public_key_to_adres(&sk.verifying_key().to_bytes());
+        let alici = [0x88; 20];
+        peer.test_bakiye_ekle(gonderen, 10_000);
+        let mut parent = gid;
+        for i in 0..6u64 {
+            let p = TransferKaydi::new(alici, 100, i).encode();
+            let v = Vertex::new_signed(NET, vec![parent], p, now + 1 + i, &sk).expect("v");
+            parent = *v.id();
+            peer.ingest_networked(&wire::encode(&v), now + 1 + i);
+        }
+
+        let mut taze = NodeState::new_devnet(NET);
+        taze.test_bakiye_ekle(gonderen, 10_000);
+
+        // KARISIK SIRA: export'u TERS cevirerek besle (cocuklar once,
+        // genesis en son) -> orphan havuzu + cascade cozmeli.
+        let mut karisik = peer.export_vertices();
+        karisik.reverse();
+
+        // Cok turlu: cozulmeyenler orphan'da bekler, tekrar denenir.
+        loop {
+            let before = taze.vertex_count();
+            for byt in &karisik {
+                taze.ingest_synced(byt);
+            }
+            if taze.vertex_count() == before { break; }
+        }
+
+        assert_eq!(taze.vertex_count(), peer.vertex_count(), "vertex sayisi ayni");
+        assert_eq!(taze.orphan_count(), 0, "orphan cozuldu");
+        assert_eq!(taze.bakiye(&gonderen), peer.bakiye(&gonderen), "YAKINSAMA: gonderen");
+        assert_eq!(taze.bakiye(&alici), peer.bakiye(&alici), "YAKINSAMA: alici");
+        assert_eq!(taze.beklenen_nonce(&gonderen), peer.beklenen_nonce(&gonderen), "YAKINSAMA: nonce");
+        assert_eq!(taze.toplam_bakiye_arzi(), peer.toplam_bakiye_arzi(), "YAKINSAMA: arz");
+    }
 }
