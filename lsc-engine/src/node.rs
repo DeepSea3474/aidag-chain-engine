@@ -4097,4 +4097,70 @@ mod tests {
         assert_eq!(taze.beklenen_nonce(&gonderen), peer.beklenen_nonce(&gonderen), "YAKINSAMA: nonce");
         assert_eq!(taze.toplam_bakiye_arzi(), peer.toplam_bakiye_arzi(), "YAKINSAMA: arz");
     }
+
+    // ===============================================================
+    // AG IZOLASYONU (denetim bloker #12'nin test edilebilir kismi).
+    // 2026-07-18'de mainnet dugumu mDNS ile testnet dugumunu bulup
+    // yabanci vertex'leri ORPHAN HAVUZUNA almisti. Dort ingest yoluna
+    // ag kapisi eklenerek duzeltildi. Bu test o duzeltmeyi regresyona
+    // baglar: yabanci network_id REDDEDILIR ve orphan havuzuna GIRMEZ.
+    // Aksi halde iki ag sessizce karisir.
+    // ===============================================================
+    #[test]
+    fn yabanci_network_id_her_ingest_yolunda_reddedilir() {
+        const YABANCI: u32 = 3474; // farkli ag (ornek: mainnet)
+        let now = 1_000_000u64;
+        let sk = SigningKey::from_bytes(&[41u8; 32]);
+
+        // Yabanci agda uretilmis, parent'siz (orphan sebebi olmayan) vertex.
+        let yabanci_v = Vertex::new_signed(YABANCI, vec![], b"yabanci".to_vec(), now, &sk)
+            .expect("yabanci vertex");
+        let yabanci_bytes = wire::encode(&yabanci_v);
+
+        // --- Yol 1: ingest_networked ---
+        let mut n1 = NodeState::new_devnet(NET);
+        let v_once = n1.vertex_count();
+        match n1.ingest_networked(&yabanci_bytes, now) {
+            NetworkIngestOutcome::Integrated(_) | NetworkIngestOutcome::Duplicate(_) => {
+                panic!("ingest_networked yabanci network_id'yi KABUL ETTI");
+            }
+            _ => {}
+        }
+        assert_eq!(n1.orphan_count(), 0, "ingest_networked: orphan havuzuna girdi!");
+        assert_eq!(n1.vertex_count(), v_once, "ingest_networked: DAG'a eklendi!");
+
+        // --- Yol 2: ingest_synced ---
+        let mut n2 = NodeState::new_devnet(NET);
+        let v_once2 = n2.vertex_count();
+        match n2.ingest_synced(&yabanci_bytes) {
+            NetworkIngestOutcome::Integrated(_) | NetworkIngestOutcome::Duplicate(_) => {
+                panic!("ingest_synced yabanci network_id'yi KABUL ETTI");
+            }
+            _ => {}
+        }
+        assert_eq!(n2.orphan_count(), 0, "ingest_synced: orphan havuzuna girdi!");
+        assert_eq!(n2.vertex_count(), v_once2, "ingest_synced: DAG'a eklendi!");
+
+        // --- Yol 3: ingest_synced_preverified ---
+        let mut n3 = NodeState::new_devnet(NET);
+        let v_once3 = n3.vertex_count();
+        match n3.ingest_synced_preverified(&yabanci_bytes) {
+            NetworkIngestOutcome::Integrated(_) | NetworkIngestOutcome::Duplicate(_) => {
+                panic!("ingest_synced_preverified yabanci network_id'yi KABUL ETTI");
+            }
+            _ => {}
+        }
+        assert_eq!(n3.orphan_count(), 0, "preverified: orphan havuzuna girdi!");
+        assert_eq!(n3.vertex_count(), v_once3, "preverified: DAG'a eklendi!");
+
+        // Kendi agindan gelen ayni yapidaki vertex KABUL edilmeli (kapi
+        // her seyi reddetmiyor, sadece yabanci agi reddediyor).
+        let kendi_v = Vertex::new_signed(NET, vec![], b"kendi".to_vec(), now, &sk)
+            .expect("kendi vertex");
+        let mut n4 = NodeState::new_devnet(NET);
+        match n4.ingest_networked(&wire::encode(&kendi_v), now) {
+            NetworkIngestOutcome::Integrated(_) | NetworkIngestOutcome::Duplicate(_) => {}
+            other => panic!("kendi agindan gelen vertex reddedildi: {other:?}"),
+        }
+    }
 }
