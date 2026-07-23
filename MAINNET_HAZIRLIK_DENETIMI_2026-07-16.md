@@ -134,3 +134,86 @@ Sert **KALDI (fail)** yok — build/test/clippy yeşil, konsensus determinizmi (
 - **`MAINNET_VESTING_BASLANGIC`** referans tarih (2026-07-15); mainnet.rs:40 açıkça "GERÇEK LAUNCH tarihinde güncellenip yeniden derlenir" diyor — launch günü güncelleme gerekli.
 - **Ağır fuzz determinizm testleri `#[ignore]`** (opt-in). Varsayılan CI bunları koşmaz; nightly'ye bağlanması önerilir (bu denetimde elle koşuldu, geçti).
 - **genesis.rs başlık yorumu** hâlâ "adresler placeholder" diyor; gerçek adresler mainnet.rs'te pinli — kozmetik tutarsızlık.
+
+---
+
+# GÜNCELLEME — 2026-07-23
+
+Bu bölüm, 16 Temmuz raporundaki blokerlerin sonraki durumunu kaydeder.
+Orijinal değerlendirme yukarıda değiştirilmeden duruyor.
+
+## Bloker durumu
+
+| # | Madde | 07-16 | 07-23 |
+|---|-------|-------|-------|
+| 14 | Sync otomatik testi | KISMEN | **KAPANDI** |
+| 13 | Restart entegrasyon testi | KISMEN | **KAPANDI** |
+| 12 | 2-node handshake | KISMEN | **KISMEN** (aşağıya bak) |
+
+## #14 — Sync otomatik testi: KAPANDI
+
+`lsc-engine/src/node.rs`:
+- `sync_taze_node_ayni_state_e_yakinsar` — taze düğüm, dolu bir peer'dan DAG'ı
+  chunked/offset sync ile (gerçek ağ döngüsünün aynı mantığı) baştan çeker.
+  Doğrulanan: yalnız DAG yapısı değil, **state de birebir** yakınsıyor
+  (bakiye, nonce, toplam arz).
+- `sync_sirasiz_gelse_de_ayni_state_e_yakinsar` — vertex'ler ters/karışık
+  sırada gelse bile orphan+cascade çözüyor, state aynı yakınsıyor.
+
+Raporun "en yüksek risk" olarak işaretlediği sessiz zincir-ayrışması senaryosu
+artık regresyon korumasında.
+
+## #13 — Restart entegrasyon testi: KAPANDI
+
+İki seviyede:
+- `lsc-net/src/store.rs` → `restart_diskten_ayni_state_kurulur`: gerçek disk
+  I/O ile append_vertex → load_vertices → replay; state birebir aynı.
+- `lsc-net/tests/restart_entegrasyon.rs` → `surec_restart_diskten_ayni_state`:
+  **gerçek `lsc-node` binary'si** izole ağda (LSC_NETWORK_ID=99999, port 40099,
+  RPC 8699) başlar, `/submit` ile vertex alır, **süreç öldürülür**, aynı veri
+  dosyasıyla yeniden başlar. Doğrulanan: genesis id + vertex sayısı + orphan
+  diskten birebir kuruluyor. (`#[ignore]`'lu — gerçek süreç/port açtığı için
+  elle çalıştırılır: `cargo test --test restart_entegrasyon -- --ignored`)
+
+## #12 — 2-node handshake: KISMEN
+
+Kapanan kısım — **ağ izolasyonu regresyonu**:
+- `yabanci_network_id_her_ingest_yolunda_reddedilir`: yabancı network_id'li
+  vertex üç ingest yolunda da (networked / synced / preverified) reddediliyor
+  ve **orphan havuzuna girmiyor**; kendi ağından gelen aynı yapıdaki vertex
+  kabul ediliyor (kapı seçici). 18 Temmuz'daki "mainnet düğümü testnet
+  vertex'lerini orphan'a alıyor" hatası artık sessizce geri gelemez.
+- Aynı davranış **gerçek süreçte de** doğrulandı: izole ağdaki test düğümü
+  mDNS ile canlı testnet düğümünü buldu, pull-sync yaptı, 8 vertex geldi →
+  `0 entegre, 0 orphan`.
+
+Açık kalan: peer keşfi/handshake'in kendisi için otomatik test yok; kalıcı
+ikinci makinede sürekli çalışan düğüm yok. (Uzak düğüm mutabakatı ve yayılım
+18 Temmuz'da gerçek internet üzerinden canlı kanıtlandı, ancak tek seferlikti.)
+
+## Yol boyunca bulunan ve düzeltilen hata
+
+`lsc-net/src/lib.rs`: devnet genesis'i sabit `network_id=1` ile imzalanıyordu.
+Varsayılan ağda görünmüyordu (zaten 1), ancak farklı bir ağ kimliğiyle açılan
+düğüm **kendi genesis'ini** ağ kapısından geçiremiyor, `vertex=0` ile kalıyordu.
+Genesis artık düğümün kendi ağ kimliğiyle imzalanıyor; varsayılan 1, mevcut
+testnet davranışı değişmedi.
+
+## Test durumu
+
+330 test geçiyor / 0 başarısız (+ 1 `#[ignore]`'lu süreç-restart entegrasyon
+testi, elle çalıştırılır).
+
+## Mainnet durumu
+
+Mainnet düğümü **bilerek durdurulmuş** durumda ve bağımsız denetim tamamlanana
+kadar kapalı tutulacak. Genesis oluşturulmuştu; dışarıdan erişim olmadığı ve
+hiçbir token dağıtılmadığı için karar geri döndürülebilir. Veri dosyaları
+korunuyor. Testnet düğümü çalışmaya devam ediyor.
+
+## Kalan başlıklar (kod dışı)
+
+1. Kalıcı ikinci düğüm — ayrı makinede sürekli çalışan node
+2. DIŞ bağımsız güvenlik denetimi (token / RWA / AVM kapsamı)
+3. Custody sertleştirme
+4. Hukuki yapı
