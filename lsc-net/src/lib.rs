@@ -203,7 +203,15 @@ pub async fn run_node(
         tracing::warn!("MAINNET MODU: network_id=3474, pinli genesis (Whitelisted).");
         lsc_engine::NodeState::new_mainnet()
     } else {
-        lsc_engine::NodeState::new_devnet(1)
+        // Devnet ag kimligi env ile ayarlanabilir (varsayilan 1 = mevcut davranis).
+        // Izole test aglari icin: LSC_NETWORK_ID=99999 -> ayri gossipsub topic'i,
+        // ag kapisi sayesinde canli testnet ile veri karismaz.
+        lsc_engine::NodeState::new_devnet(
+            std::env::var("LSC_NETWORK_ID")
+                .ok()
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(1),
+        )
     }));
 
     // TESTNET FAUCET: LSC_FAUCET_OWNER env'i YALNIZ TESTNET'te gecerli. MAINNET'te
@@ -503,8 +511,15 @@ pub async fn run_node(
         let genesis_bytes: Option<Vec<u8>> = if mainnet {
             Some(lsc_engine::mainnet::genesis_wire())
         } else if produce_genesis {
+            // Genesis DUGUMUN KENDI ag kimligiyle imzalanmali. Sabit 1 kalirsa
+            // farkli bir agda acilan dugum kendi genesis'ini ag kapisindan
+            // geciremez (vertex=0). Varsayilan 1 -> mevcut testnet degismez.
+            let devnet_net_id = std::env::var("LSC_NETWORK_ID")
+                .ok()
+                .and_then(|x| x.parse::<u32>().ok())
+                .unwrap_or(1);
             match lsc_engine::Vertex::new_signed(
-                1,
+                devnet_net_id,
                 vec![],
                 b"lsc-genesis".to_vec(),
                 now,
