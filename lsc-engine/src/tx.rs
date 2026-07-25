@@ -183,6 +183,9 @@ pub const TX_TYPE_ESLESTIRME: u8 = 8;
 /// tip=9: AVM cagrisi (EVM uzerinden LSC deger transferi). Kopru 4.
 pub const TX_TYPE_AVM_CAGRI: u8 = 9;
 pub const TX_TYPE_ON_SATIS: u8 = 10;
+/// ON SATIS CLAIM (tip=11). ALICI cagirir (owner degil). Kendi tahsisinden
+/// hak edilen (vesting'e gore acilan) kismi owner'dan kendine ceker.
+pub const TX_TYPE_ON_SATIS_CLAIM: u8 = 13;
 pub const ESLESTIRME_ENCODED_LEN: usize = 1 + ADDR_LEN + ADDR_LEN;
 
 /// Kurum adi azami uzunluk (spam/DoS korumasi).
@@ -600,6 +603,45 @@ impl OnSatisDagitim {
             aidag,
             lsc_hediye,
             odeme_ref,
+        })
+    }
+}
+
+/// ON SATIS CLAIM (tip=11). Alici, TGE sonrasi hak ettigi AIDAG'i ceker.
+/// Payload SADECE odeme_ref: alici adresi IMZADAN gelir (imzalayan = tahsisin
+/// alicisi olmali, node.rs claim yolunda dogrulanir). Boylece kimse baskasinin
+/// tahsisini claim edemez.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaimTalebi {
+    pub odeme_ref: u64,
+}
+const CLAIM_LEN: usize = 1 + 8; // tip(1) + odeme_ref(8)
+
+impl ClaimTalebi {
+    pub fn new(odeme_ref: u64) -> Self {
+        ClaimTalebi { odeme_ref }
+    }
+    pub fn encode(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(CLAIM_LEN);
+        out.push(TX_TYPE_ON_SATIS_CLAIM);
+        out.extend_from_slice(&self.odeme_ref.to_be_bytes());
+        out
+    }
+    pub fn decode(bytes: &[u8]) -> Result<ClaimTalebi, TxError> {
+        let &first = bytes.first().ok_or(TxError::Empty)?;
+        if first != TX_TYPE_ON_SATIS_CLAIM {
+            return Err(TxError::UnknownType(first));
+        }
+        if bytes.len() != CLAIM_LEN {
+            return Err(TxError::BadLength {
+                expected: CLAIM_LEN,
+                got: bytes.len(),
+            });
+        }
+        let mut b8 = [0u8; 8];
+        b8.copy_from_slice(&bytes[1..CLAIM_LEN]);
+        Ok(ClaimTalebi {
+            odeme_ref: u64::from_be_bytes(b8),
         })
     }
 }

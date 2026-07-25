@@ -1251,9 +1251,47 @@ impl EslestirmeRegistry {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OnSatisKaydi {
     pub alici: [u8; 20],
-    pub aidag: Tutar,
-    pub lsc_hediye: Tutar,
-    pub zaman: u64,
+    pub aidag: Tutar,        // TAHSIS edilen toplam AIDAG (owner'da bekler, TGE'de claim edilir)
+    pub lsc_hediye: Tutar,   // claim aninda verilecek LSC hediye (gas icin)
+    pub zaman: u64,          // tahsis (satis) zamani
+    pub claimlenen: Tutar,   // simdiye kadar claim edilmis AIDAG (baslangicta 0)
+    pub lsc_verildi: bool,   // LSC hediye bir kez verildi mi (ilk claim'de)
+}
+
+impl OnSatisKaydi {
+    /// Verilen anda bu tahsisin ne kadari HAK EDILMIS (claim edilebilir toplam)?
+    /// Vesting: %20 TGE aninda + %80 TGE sonrasi 12 ay (360 gun) dogrusal.
+    /// tge_baslangic'tan ONCE 0. tge + 360 gun ve sonrasi TAMAMI.
+    /// Bu, node.rs'teki vesting_kilitli mantiginin AYNASI (tutarli olmali):
+    /// vesting_kilitli = aidag - hak_edilen (kilitli = henuz hak edilmeyen).
+    pub fn hak_edilen(&self, simdi: u64, tge_baslangic: u64) -> Tutar {
+        if simdi < tge_baslangic {
+            return 0;
+        }
+        let tge_aninda = self.aidag * crate::genesis::ON_SATIS_TGE_YUZDE / 100; // %20
+        let vesting_kismi = self.aidag - tge_aninda; // %80
+        let gecen = simdi - tge_baslangic;
+        let sure = crate::genesis::ON_SATIS_VESTING_SURE; // 360 gun
+        if gecen >= sure {
+            return self.aidag; // tamami acildi
+        }
+        // dogrusal: vesting_kismi * gecen / sure
+        let acilan_vesting = vesting_kismi
+            .saturating_mul(gecen as u128)
+            / (sure as u128);
+        tge_aninda + acilan_vesting
+    }
+
+    /// Su an claim edilebilecek MIKTAR (hak edilen - simdiye kadar claimlenen).
+    pub fn claim_edilebilir(&self, simdi: u64, tge_baslangic: u64) -> Tutar {
+        self.hak_edilen(simdi, tge_baslangic)
+            .saturating_sub(self.claimlenen)
+    }
+
+    /// Tahsisin tamami claim edildi mi?
+    pub fn tamamlandi(&self) -> bool {
+        self.claimlenen >= self.aidag
+    }
 }
 
 pub struct OnSatisRegistry {
@@ -1293,6 +1331,8 @@ impl OnSatisRegistry {
                 aidag,
                 lsc_hediye,
                 zaman,
+                claimlenen: 0,
+                lsc_verildi: false,
             },
         );
         true
@@ -1346,11 +1386,93 @@ impl OnSatisRegistry {
             .map(|k| k.aidag)
             .sum()
     }
+
+    /// CLAIM: bir tahsis kaydinin claimlenen degerini artir ve lsc_verildi isaretle.
+    /// node.rs claim yolu, transferleri BASARIYLA yaptiktan SONRA bunu cagirir.
+    /// Kayit yoksa false. Deterministik: tum dugumler ayni cagriyi yapar.
+    pub fn claim_isle(
+        &mut self,
+        odeme_ref: u64,
+        eklenen_claim: Tutar,
+        lsc_verildi: bool,
+    ) -> bool {
+        if let Some(k) = self.kayitlar.get_mut(&odeme_ref) {
+            k.claimlenen = k.claimlenen.saturating_add(eklenen_claim);
+            if lsc_verildi {
+                k.lsc_verildi = true;
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Bir odeme_ref icin su an claim edilebilir AIDAG (vesting'e gore).
+    pub fn claim_edilebilir(&self, odeme_ref: u64, simdi: u64, tge: u64) -> Tutar {
+        self.kayitlar
+            .get(&odeme_ref)
+            .map(|k| k.claim_edilebilir(simdi, tge))
+            .unwrap_or(0)
+    }
 }
 
 #[cfg(test)]
 mod on_satis_testleri {
     use super::OnSatisRegistry;
+    use super::OnSatisKaydi;
+
+    #[test]
+    fn hak_edilen_vesting_egrisi_dogru() {
+        let tge = 1_000_000u64;
+        let gun = 86400u64;
+        let od = crate::genesis::ONDALIK;
+        let k = OnSatisKaydi {
+            alici: [1u8; 20],
+            aidag: 1000 * od,
+            lsc_hediye: 0,
+            zaman: tge - 100,
+            claimlenen: 0,
+            lsc_verildi: false,
+        };
+        // TGE'den ONCE: 0
+        assert_eq!(k.hak_edilen(tge - 1, tge), 0, "TGE oncesi 0 olmali");
+        // TGE aninda: %20 = 200
+        assert_eq!(k.hak_edilen(tge, tge), 200 * od, "TGE'de %20");
+        // TGE + 180 gun (yarisi): %20 + %80/2 = %60 = 600
+        assert_eq!(k.hak_edilen(tge + 180 * gun, tge), 600 * od, "6 ay: %60");
+        // TGE + 360 gun: %100 = 1000
+        assert_eq!(k.hak_edilen(tge + 360 * gun, tge), 1000 * od, "12 ay: %100");
+        // TGE + 500 gun (asiri): yine %100, tavan
+        assert_eq!(k.hak_edilen(tge + 500 * gun, tge), 1000 * od, "sonrasi da %100");
+    }
+
+    #[test]
+    fn claim_edilebilir_claimleneni_dususur() {
+        let tge = 1_000_000u64;
+        let gun = 86400u64;
+        let od = crate::genesis::ONDALIK;
+        let mut k = OnSatisKaydi {
+            alici: [2u8; 20],
+            aidag: 1000 * od,
+            lsc_hediye: 0,
+            zaman: tge - 100,
+            claimlenen: 0,
+            lsc_verildi: false,
+        };
+        // TGE'de claim edilebilir = 200 (hak edilen 200, claimlenen 0)
+        assert_eq!(k.claim_edilebilir(tge, tge), 200 * od);
+        // 200 claim edildi diyelim
+        k.claimlenen = 200 * od;
+        // Ayni anda tekrar: 0 (hak edilen hala 200, hepsi claimlendi)
+        assert_eq!(k.claim_edilebilir(tge, tge), 0, "ayni anda tekrar claim = 0");
+        // 6 ay sonra: hak edilen 600, claimlenen 200 -> 400 cekebilir
+        assert_eq!(k.claim_edilebilir(tge + 180 * gun, tge), 400 * od, "6 ayda kalan 400");
+        // hepsini claimle
+        k.claimlenen = 1000 * od;
+        assert!(k.tamamlandi(), "tamami claimlendi");
+        assert_eq!(k.claim_edilebilir(tge + 360 * gun, tge), 0, "bitince 0");
+    }
+
 
     #[test]
     fn cifte_dagitim_engellenir() {

@@ -1057,83 +1057,77 @@ impl NodeState {
                             && islem_ok
                             && tavan_ok
                         {
-                            // 1) AIDAG transferi ZORUNLU basarili olmali. Owner bakiyesi
-                            //    yetersizse transfer HATA verir -> KAYIT TUTMA, dagitma.
-                            //    (Aksi halde kayit "dagitildi" der ama AIDAG gitmemis olur =
-                            //    seffafliga ihanet. "Gerceklesmeyen dagitim kaydedilmez.")
-                            let aidag_ok = if d.aidag > 0 {
-                                matches!(
-                                    self.bakiye_registry.transfer(&cagiran, &d.alici, d.aidag),
-                                    crate::registry::TransferSonuc::Basarili { .. }
-                                )
-                            } else {
-                                true // 0 AIDAG: gecerli (sadece LSC hediye senaryosu)
-                            };
+                            // YENI MODEL (tahsis kaydi): SATIS aninda AIDAG TRANSFER EDILMEZ.
+                            // Token owner'da bekler; alici TGE sonrasi CLAIM (tip=11) ile ceker.
+                            // Burada sadece TAHSIS kaydi yazilir: "bu adrese su kadar AIDAG
+                            // ayrildi, odeme_ref=X, claimlenen=0". Alici bunu zincirde GORUR.
+                            // Vesting ve LSC hediye CLAIM aninda uygulanir (node.rs claim yolu).
+                            // Cifte-tahsis engeli: kullanilmis(odeme_ref) yukarida kontrol edildi.
+                            // Guvenlik sinirlari (tavan/islem/zaman) da yukarida uygulandi.
+                            let _ = self.on_satis_registry.kaydet(
+                                d.odeme_ref,
+                                d.alici,
+                                d.aidag,
+                                d.lsc_hediye, // claim'de verilecek hediye MIKTARI (henuz verilmedi)
+                                zaman,
+                            );
+                        }
+                    }
+                }
+            }
 
-                            if aidag_ok {
-                                // 2) LSC hediye (AIDAG basariliysa). Hediye basarisiz olsa bile
-                                //    AIDAG gitti -> kayit tutulur (asil urun AIDAG'dir).
-                                // A4 (SEFFAFLIK): transfer sonucu KONTROL edilir; kayda GERCEKTEN
-                                // gonderilen tutar yazilir. Owner LSC'si yetersizse hediye gitmez
-                                // ve kayda 0 yazilir -> "gonderildi" YALANI kaydedilmez.
-                                // DETERMINIZM: owner bakiyesi tum dugumlerde ayni -> gonderilen
-                                // tutar da ayni -> on_satis_registry ayrisimaz.
-                                let lsc_gonderilen = if d.lsc_hediye > 0 {
-                                    match self.lsc_registry.transfer(
-                                        &cagiran,
-                                        &d.alici,
-                                        d.lsc_hediye,
-                                    ) {
-                                        crate::registry::TransferSonuc::Basarili { .. } => {
-                                            d.lsc_hediye
-                                        }
-                                        _ => {
-                                            eprintln!(
-                                                "[UYARI] ON SATIS LSC HEDIYE BASARISIZ: owner LSC bakiyesi yetersiz olabilir. odeme_ref={}, istenen_lsc={}. AIDAG dagitildi; hediye 0 kaydedildi.",
-                                                d.odeme_ref, d.lsc_hediye
-                                            );
-                                            0
-                                        }
-                                    }
-                                } else {
-                                    0
-                                };
-                                // 3) KAYDET: AIDAG gercekten gitti + GERCEK hediye tutari.
-                                //    Kayit = gercek dagitim (seffaf).
-                                let _ = self.on_satis_registry.kaydet(
-                                    d.odeme_ref,
-                                    d.alici,
-                                    d.aidag,
-                                    lsc_gonderilen,
-                                    zaman,
-                                );
-                                // 4) FAZ2 VESTING: dagitilan AIDAG KILITLI (%20 TGE hemen +
-                                //    kalan %80 12 ay dogrusal). Birden cok dagitim alan alici
-                                //    icin kilit BIRIKIR (vesting_biriktir). Takvim SABIT (TGE
-                                //    = MAINNET_VESTING_BASLANGIC) -> tum dugumlerde deterministik.
-                                if d.aidag > 0 {
-                                    let tge_acik =
-                                        d.aidag * crate::genesis::ON_SATIS_TGE_YUZDE / 100;
-                                    self.bakiye_registry.vesting_biriktir(
-                                        d.alici,
-                                        crate::registry::VestingKaydi {
-                                            toplam: d.aidag,
-                                            baslangic: crate::mainnet::MAINNET_VESTING_BASLANGIC,
-                                            cliff_sure: 0,
-                                            toplam_sure: crate::genesis::ON_SATIS_VESTING_SURE,
-                                            tge_acik,
-                                        },
+            // tip=11: ON SATIS CLAIM. ALICI cagirir (owner degil). Kendi tahsisinden
+            // vesting'e gore ACILAN kismi owner'dan kendine ceker. Guvenlik:
+            //  (1) imzalayan == tahsisin alicisi olmali (baskasinin tahsisi CLAIM edilemez)
+            //  (2) sadece HAK EDILEN (claim_edilebilir) kadar
+            //  (3) cifte-claim yok: claimlenen takibi, tekrar cagri fazladan vermez
+            //  (4) owner bakiyesi yetersizse SESSIZ GEC (kayit bozulmaz, tekrar denenebilir)
+            // Deterministik: tge sabit, owner bakiyesi tum dugumlerde ayni.
+            Some(&crate::tx::TX_TYPE_ON_SATIS_CLAIM) => {
+                if let Ok(c) = crate::tx::ClaimTalebi::decode(payload) {
+                    let cagiran = crate::registry::public_key_to_adres(signer);
+                    // Kaydi bul + imzalayan == alici DOGRULA
+                    let kayit = self.on_satis_registry.sorgula(c.odeme_ref).cloned();
+                    if let Some(k) = kayit {
+                        if k.alici == cagiran {
+                            let tge = crate::mainnet::MAINNET_VESTING_BASLANGIC;
+                            let cekilebilir = k.claim_edilebilir(zaman, tge);
+                            if cekilebilir > 0 {
+                                // owner (faucet_owner) tahsisi tutan taraf; ondan alici'ya
+                                if let Some(owner) = self.faucet_owner {
+                                    let aidag_ok = matches!(
+                                        self.bakiye_registry.transfer(
+                                            &owner, &cagiran, cekilebilir
+                                        ),
+                                        crate::registry::TransferSonuc::Basarili { .. }
                                     );
+                                    if aidag_ok {
+                                        // ILK CLAIM ise LSC hediyeyi ver (gas icin)
+                                        let ilk_claim = !k.lsc_verildi;
+                                        let mut lsc_verildi_flag = false;
+                                        if ilk_claim && k.lsc_hediye > 0 {
+                                            if let crate::registry::TransferSonuc::Basarili { .. } =
+                                                self.lsc_registry.transfer(
+                                                    &owner, &cagiran, k.lsc_hediye
+                                                )
+                                            {
+                                                lsc_verildi_flag = true;
+                                            }
+                                        } else if ilk_claim {
+                                            // hediye 0 ise de "verildi" say (tekrar denenmesin)
+                                            lsc_verildi_flag = true;
+                                        }
+                                        // claimlenen guncelle + lsc_verildi isaretle
+                                        let _ = self.on_satis_registry.claim_isle(
+                                            c.odeme_ref,
+                                            cekilebilir,
+                                            lsc_verildi_flag,
+                                        );
+                                    }
                                 }
-                            } else {
-                                // AIDAG transferi basarisiz (owner bakiyesi yetersiz vb.):
-                                // SESSIZ GECME -> uyar. Dagitim YAPILMADI, kayit YOK.
-                                eprintln!(
-                                    "[UYARI] ON SATIS BASARISIZ: owner bakiyesi yetersiz olabilir. odeme_ref={}, istenen_aidag={}. Dagitim YAPILMADI, kayit TUTULMADI.",
-                                    d.odeme_ref, d.aidag
-                                );
                             }
                         }
+                        // imzalayan != alici -> SESSIZ RED (hicbir sey yapma)
                     }
                 }
             }
@@ -2837,45 +2831,83 @@ mod tests {
     // YETERSIZ. AIDAG dagitilir; ama kayit GERCEKTEN gonderilen hediyeyi (0) saklar,
     // istenen (buyuk) tutari DEGIL. "Gonderildi" yalani zincire yazilmaz.
     #[test]
-    fn on_satis_lsc_hediye_yetersizse_kayit_gercegi_yansitir_a4() {
+#[test]
+    fn on_satis_claim_vesting_ve_guvenlik() {
         use crate::registry::public_key_to_adres;
-        use crate::tx::OnSatisDagitim;
-        let now = crate::mainnet::ON_SATIS_BASLANGIC;
+        use crate::tx::{ClaimTalebi, OnSatisDagitim};
+        let tge = crate::mainnet::ON_SATIS_BASLANGIC; // = MAINNET_VESTING_BASLANGIC
+        let gun = 86400u64;
+        let od = crate::genesis::ONDALIK;
+
         let mut node = NodeState::new_devnet(NET);
-        let (gen, gid) = genesis_bytes(1, now);
-        node.ingest_networked(&gen, now);
+        let (gen, gid) = genesis_bytes(1, tge);
+        node.ingest_networked(&gen, tge);
 
-        let sk = SigningKey::from_bytes(&[0x77u8; 32]);
-        let owner = public_key_to_adres(&sk.verifying_key().to_bytes());
+        // owner (faucet) tahsisi tutan taraf; bol AIDAG + LSC
+        let osk = SigningKey::from_bytes(&[0x91u8; 32]);
+        let owner = public_key_to_adres(&osk.verifying_key().to_bytes());
         node.faucet_owner_ayarla(owner);
-        node.test_bakiye_ekle(owner, 1_000_000); // AIDAG: bol
-        node.lsc_test_bakiye_ekle(owner, 5); // LSC: YETERSIZ (hediye 10_000 istenecek)
+        node.test_bakiye_ekle(owner, 1_000_000 * od);
+        node.lsc_test_bakiye_ekle(owner, 1_000_000 * od);
 
-        let alici = [0x55u8; 20];
-        let odeme_ref = 4242u64;
+        // ALICI'nin kendi imza anahtari (claim'i alici imzalar)
+        let ask = SigningKey::from_bytes(&[0x44u8; 32]);
+        let alici = public_key_to_adres(&ask.verifying_key().to_bytes());
 
-        // Owner: aliciya 5000 AIDAG + 10_000 LSC hediye. AIDAG gider, LSC hediye GITMEZ.
-        let payload = OnSatisDagitim::new(alici, 5000, 10_000, odeme_ref).encode();
-        let v = Vertex::new_signed(NET, vec![gid], payload, now, &sk).expect("on satis");
-        node.ingest_networked(&wire::encode(&v), now);
+        // 1) SATIS: owner aliciya 1000 AIDAG tahsis eder (+ 5 LSC hediye), odeme_ref=500
+        let sat = OnSatisDagitim::new(alici, 1000 * od, 5 * od, 500).encode();
+        let vs = Vertex::new_signed(NET, vec![gid], sat, tge, &osk).expect("satis");
+        node.ingest_networked(&wire::encode(&vs), tge);
+        assert_eq!(node.bakiye(&alici), 0, "satista transfer yok");
+        assert_eq!(node.on_satis_toplam_aidag(), 1000 * od, "tahsis kaydi 1000");
 
-        // KANIT 1: AIDAG dagitildi (asil urun).
-        assert_eq!(node.bakiye(&alici), 5000, "alici AIDAG aldi");
-        // KANIT 2: LSC hediye GITMEDI (owner bakiyesi yetersizdi).
-        assert_eq!(
-            node.lsc_bakiye(&alici),
-            0,
-            "LSC hediye gitmedi (owner yetersiz)"
-        );
-        // KANIT 3 (A4): kayit GERCEGI yansitir -> lsc_hediye=0, istenen 10_000 DEGIL.
-        let k = node
-            .on_satis_sorgula(odeme_ref)
-            .expect("kayit olusmali (AIDAG gitti)");
-        assert_eq!(k.aidag, 5000, "kayit: gercek AIDAG");
-        assert_eq!(
-            k.lsc_hediye, 0,
-            "A4: kayit GERCEK hediyeyi (0) saklar, 'gonderildi' yalanini DEGIL"
-        );
+        // 2) TGE ONCESI CLAIM -> 0 (hak edilmemis)
+        let c0 = ClaimTalebi::new(500).encode();
+        let vc0 = Vertex::new_signed(NET, vec![*vs.id()], c0, tge - 10, &ask).expect("c0");
+        node.ingest_networked(&wire::encode(&vc0), tge - 10);
+        assert_eq!(node.bakiye(&alici), 0, "TGE oncesi claim = 0");
+
+        // 3) TGE'de CLAIM -> %20 = 200
+        let c1 = ClaimTalebi::new(500).encode();
+        let vc1 = Vertex::new_signed(NET, vec![*vs.id()], c1, tge, &ask).expect("c1");
+        node.ingest_networked(&wire::encode(&vc1), tge);
+        assert_eq!(node.bakiye(&alici), 200 * od, "TGE claim: %20 = 200");
+        // LSC hediye ILK claim'de verildi
+        assert_eq!(node.lsc_bakiye(&alici), 5 * od, "ilk claim: 5 LSC hediye verildi");
+
+        // 4) AYNI ANDA TEKRAR CLAIM -> fazladan 0 (cifte-claim engeli)
+        let c2 = ClaimTalebi::new(500).encode();
+        let vc2 = Vertex::new_signed(NET, vec![*vc1.id()], c2, tge, &ask).expect("c2");
+        node.ingest_networked(&wire::encode(&vc2), tge);
+        assert_eq!(node.bakiye(&alici), 200 * od, "ayni anda tekrar claim: fazladan 0");
+        assert_eq!(node.lsc_bakiye(&alici), 5 * od, "LSC hediye TEKRAR verilmez");
+
+        // 5) 6 AY SONRA CLAIM -> %60'a tamamlar (200 -> 600, yani +400)
+        let c3 = ClaimTalebi::new(500).encode();
+        let vc3 = Vertex::new_signed(NET, vec![*vc2.id()], c3, tge + 180 * gun, &ask).expect("c3");
+        node.ingest_networked(&wire::encode(&vc3), tge + 180 * gun);
+        assert_eq!(node.bakiye(&alici), 600 * od, "6 ay: toplam %60 = 600");
+
+        // 6) 12 AY SONRA CLAIM -> %100 (600 -> 1000)
+        let c4 = ClaimTalebi::new(500).encode();
+        let vc4 = Vertex::new_signed(NET, vec![*vc3.id()], c4, tge + 360 * gun, &ask).expect("c4");
+        node.ingest_networked(&wire::encode(&vc4), tge + 360 * gun);
+        assert_eq!(node.bakiye(&alici), 1000 * od, "12 ay: tamami %100 = 1000");
+
+        // 7) BASKASI claim etmeye calisir -> RED (owner bakiyesinden HIC cikmaz)
+        // yeni tahsis: baska aliciya 500, odeme_ref=600
+        let baska_sk = SigningKey::from_bytes(&[0x55u8; 32]);
+        let baska = public_key_to_adres(&baska_sk.verifying_key().to_bytes());
+        let sat2 = OnSatisDagitim::new(baska, 500 * od, 0, 600).encode();
+        let vs2 = Vertex::new_signed(NET, vec![*vc4.id()], sat2, tge, &osk).expect("satis2");
+        node.ingest_networked(&wire::encode(&vs2), tge);
+        // saldirgan (alici) baskasinin ref'ini claim etmeye calisir
+        let kotu = ClaimTalebi::new(600).encode();
+        let vkotu = Vertex::new_signed(NET, vec![*vs2.id()], kotu, tge, &ask).expect("kotu");
+        let alici_once = node.bakiye(&alici);
+        node.ingest_networked(&wire::encode(&vkotu), tge);
+        assert_eq!(node.bakiye(&alici), alici_once, "baskasinin tahsisi claim EDILEMEZ");
+        assert_eq!(node.bakiye(&baska), 0, "gercek sahibi henuz claim etmedi");
     }
 
     #[test]
@@ -2937,7 +2969,10 @@ mod tests {
         let p = OnSatisDagitim::new(alici, tam, 0, 4).encode();
         let v = Vertex::new_signed(NET, vec![gid], p, t0, &sk).expect("v");
         node.ingest_networked(&wire::encode(&v), t0);
-        assert_eq!(node.bakiye(&alici), tam, "tam 50k KABUL edilmeli");
+        // YENI MODEL: satista transfer YOK, sadece TAHSIS kaydi. Bakiye 0 kalir.
+        assert_eq!(node.bakiye(&alici), 0, "satista AIDAG transfer edilmez");
+        assert_eq!(node.on_satis_toplam_aidag(), tam, "tam 50k TAHSIS edildi");
+        assert_eq!(node.on_satis_sayisi(), 1, "tahsis kaydi olustu");
     }
 
     #[test]
@@ -2968,64 +3003,19 @@ mod tests {
         let p = OnSatisDagitim::new(alici_son, 7_000 * od, 0, ref_no).encode();
         let v = Vertex::new_signed(NET, vec![parent], p, t0, &sk).expect("v");
         node.ingest_networked(&wire::encode(&v), t0);
-        assert_eq!(node.bakiye(&alici_son), 0, "630k ustu RED");
-        assert_eq!(node.on_satis_toplam_aidag(), 624_000 * od, "toplam degismedi");
+        // satista transfer yok; RED = tahsis kaydi olusmadi (toplam degismez)
+        assert_eq!(node.on_satis_toplam_aidag(), 624_000 * od, "630k ustu RED: toplam degismedi");
         let p2 = OnSatisDagitim::new(alici_son, 6_000 * od, 0, ref_no + 1).encode();
         let v2 = Vertex::new_signed(NET, vec![parent], p2, t0, &sk).expect("v2");
         node.ingest_networked(&wire::encode(&v2), t0);
-        assert_eq!(node.bakiye(&alici_son), 6_000 * od, "sinira kadar KABUL");
-        assert_eq!(node.on_satis_toplam_aidag(), 630_000 * od, "tam 630k");
+        // sinira kadar KABUL = tahsis kaydi olustu (bakiye degil, tahsis artar)
+        assert_eq!(node.on_satis_toplam_aidag(), 630_000 * od, "sinira kadar KABUL: tam 630k tahsis");
     }
 
     // FAZ2 KANIT (on-satis vesting): dagitilan AIDAG %20 TGE hemen + kalan %80 12 ay
     // kilitli; birden cok dagitim BIRIKIR; 12 ay sonra tam acik.
     #[test]
-    fn on_satis_dagitim_vestingli_ve_birikimli_faz2() {
-        use crate::registry::public_key_to_adres;
-        use crate::tx::OnSatisDagitim;
-        let tge = crate::mainnet::MAINNET_VESTING_BASLANGIC;
-        let mut node = NodeState::new_devnet(NET);
-        let (gen, gid) = genesis_bytes(1, tge);
-        node.ingest_networked(&gen, tge);
-
-        let sk = SigningKey::from_bytes(&[0x91u8; 32]);
-        let owner = public_key_to_adres(&sk.verifying_key().to_bytes());
-        node.faucet_owner_ayarla(owner);
-        node.test_bakiye_ekle(owner, 1_000_000);
-
-        let alici = [0x55u8; 20];
-
-        // 1) Dagitim: alici 10.000 AIDAG (TGE aninda)
-        let p1 = OnSatisDagitim::new(alici, 10_000, 0, 111).encode();
-        let v1 = Vertex::new_signed(NET, vec![gid], p1, tge, &sk).expect("d1");
-        node.ingest_networked(&wire::encode(&v1), tge);
-        assert_eq!(node.bakiye(&alici), 10_000, "alici 10k AIDAG aldi");
-        assert_eq!(
-            node.vesting_kilitli(&alici, tge),
-            8_000,
-            "TGE'de %80 (8k) KILITLI -> harcanabilir 2k"
-        );
-
-        // 2) Ikinci dagitim: alici +5.000 (farkli odeme_ref) -> vesting BIRIKIR
-        let p2 = OnSatisDagitim::new(alici, 5_000, 0, 222).encode();
-        let v2 = Vertex::new_signed(NET, vec![*v1.id()], p2, tge, &sk).expect("d2");
-        node.ingest_networked(&wire::encode(&v2), tge);
-        assert_eq!(node.bakiye(&alici), 15_000, "toplam 15k AIDAG");
-        assert_eq!(
-            node.vesting_kilitli(&alici, tge),
-            12_000,
-            "kilit BIRIKTI: %80 (12k) kilitli"
-        );
-
-        // 3) 12 ay sonra tam acik
-        assert_eq!(
-            node.vesting_kilitli(&alici, tge + 360 * 86400),
-            0,
-            "12 ay sonra %0 kilitli (tam acik)"
-        );
-    }
-
-    #[test]
+#[test]
     fn on_satis_replay_ile_kalici() {
         use crate::registry::public_key_to_adres;
         use crate::tx::OnSatisDagitim;
@@ -3049,9 +3039,10 @@ mod tests {
         let v = Vertex::new_signed(NET, vec![gid], payload, now, &sk).expect("on satis vertex");
         src.ingest_networked(&wire::encode(&v), now);
 
-        // 3) KANIT (kaynak): alici bakiye 5000, on satis kaydi var
-        assert_eq!(src.bakiye(&alici), 5000, "src: alici AIDAG aldi");
-        assert_eq!(src.on_satis_sayisi(), 1, "src: on satis kaydi olustu");
+        // 3) KANIT (kaynak): YENI MODEL — satista transfer YOK, sadece TAHSIS kaydi.
+        assert_eq!(src.bakiye(&alici), 0, "src: satista AIDAG transfer edilmez");
+        assert_eq!(src.on_satis_sayisi(), 1, "src: tahsis kaydi olustu");
+        assert_eq!(src.on_satis_toplam_aidag(), 5000, "src: 5000 tahsis edildi");
         let k = src
             .on_satis_sorgula(odeme_ref)
             .expect("src: kayit bulunmali");
@@ -3068,8 +3059,9 @@ mod tests {
             dst.ingest_networked(bytes, now);
         }
 
-        // 5) KANIT (replay): yeni node'da da alici bakiye 5000 + kayit var
-        assert_eq!(dst.bakiye(&alici), 5000, "dst: alici AIDAG replay ile aldi");
+        // 5) KANIT (replay): YENI MODEL — tahsis kaydi replay ile kuruluyor (transfer yok)
+        assert_eq!(dst.bakiye(&alici), 0, "dst: satista transfer yok, bakiye 0");
+        assert_eq!(dst.on_satis_toplam_aidag(), 5000, "dst: 5000 tahsis replay ile kuruldu");
         assert_eq!(
             dst.on_satis_sayisi(),
             1,
@@ -3152,22 +3144,14 @@ mod tests {
         let v = Vertex::new_signed(NET, vec![gid], payload, now, &sk).expect("vertex");
         node.ingest_networked(&wire::encode(&v), now);
 
-        // KANIT: AIDAG gitmedi (owner bakiyesi yoktu)
-        assert_eq!(
-            node.bakiye(&alici),
-            0,
-            "yetersiz bakiye: alici AIDAG almamali"
-        );
-        // KANIT: KAYIT TUTULMADI (sahte 'dagitildi' kaydi yok)
-        assert_eq!(
-            node.on_satis_sayisi(),
-            0,
-            "transfer basarisizsa kayit TUTULMAMALI (seffafliga ihanet etmez)"
-        );
-        // KANIT: odeme_ref kullanilmis sayilmaz -> owner bakiye edinince TEKRAR deneyebilir
+        // YENI MODEL: satis = sadece TAHSIS kaydi (transfer YOK). Owner bakiyesi
+        // 0 olsa bile tahsis kaydi tutulur -> alici zincirde "bana ayrildi" gorur.
+        // AIDAG owner'da bekler; asil bakiye kontrolu CLAIM aninda yapilir (Adim 4).
+        assert_eq!(node.bakiye(&alici), 0, "satista transfer yok, bakiye 0");
+        assert_eq!(node.on_satis_sayisi(), 1, "tahsis kaydi TUTULUR (bakiyeye bakmaz)");
         assert!(
-            node.on_satis_sorgula(31337).is_none(),
-            "basarisiz dagitim kaydi olusturmaz, ref tekrar kullanilabilir"
+            node.on_satis_sorgula(31337).is_some(),
+            "tahsis kaydi olusturulur"
         );
     }
 
