@@ -246,3 +246,24 @@ mod tests {
         s
     }
 }
+
+// ===================================================================
+// ON SATIS KONSENSUS GUVENLIK SINIRLARI (2026-07-25)
+// Otomatik toplu dagitim oncesi eklendi. Bu kurallar KONSENSUS
+// seviyesinde: faucet_owner anahtari ele gecse ya da otomatik dagitim
+// dongusu kacsa bile bu sinirlar asilmaz. Tum dugumler ayni kurali
+// uygular -> deterministik.
+// ===================================================================
+
+/// Faz-1 on satis KUMULATIF TAVAN: 630.000 AIDAG (arzin %3'u).
+/// on_satis_registry.toplam_aidag() + yeni dagitim bu tavani asamaz.
+pub const ON_SATIS_FAZ1_TAVAN: u128 = 630_000 * crate::genesis::ONDALIK;
+
+/// Islem basina ust sinir: tek bir tip=10 dagitimi en fazla bu kadar
+/// AIDAG dagitabilir. Tek hamlede buyuk bosaltmayi engeller.
+pub const ON_SATIS_ISLEM_UST_SINIR: u128 = 50_000 * crate::genesis::ONDALIK;
+
+/// On satis dagitiminin baslayabilecegi en erken zaman (Unix saniye).
+/// Bu damgadan ONCE gelen tip=10 dagitimi reddedilir. Ucu ACIK: bitis
+/// yok, denetim uzarsa satis bloklanmaz. Simdilik TGE ile ayni referans.
+pub const ON_SATIS_BASLANGIC: u64 = MAINNET_VESTING_BASLANGIC;

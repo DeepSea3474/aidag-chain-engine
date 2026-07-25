@@ -1039,9 +1039,24 @@ impl NodeState {
                 if let Ok(d) = crate::tx::OnSatisDagitim::decode(payload) {
                     let cagiran = crate::registry::public_key_to_adres(signer);
                     if self.faucet_owner == Some(cagiran) {
+                        // ON SATIS KONSENSUS SINIRLARI (mainnet.rs). Otomatik toplu
+                        // dagitim kacsa ya da owner anahtari ele gecse bile bu uc
+                        // kural asilmaz. Sinir ihlali = SESSIZ RED (kayit tutulmaz,
+                        // AIDAG gitmez); tum dugumler ayni kurali uygular.
+                        let zaman_ok = zaman >= crate::mainnet::ON_SATIS_BASLANGIC;
+                        let islem_ok = d.aidag <= crate::mainnet::ON_SATIS_ISLEM_UST_SINIR;
+                        let tavan_ok = self
+                            .on_satis_registry
+                            .toplam_aidag()
+                            .saturating_add(d.aidag)
+                            <= crate::mainnet::ON_SATIS_FAZ1_TAVAN;
                         // CIFTE DAGITIM ENGELI: bu odeme_ref daha once kullanildiysa HICBIR SEY YAPMA.
                         // (Owner yanlislikla ayni odemeyi iki kez gonderse bile cifte AIDAG gitmez.)
-                        if !self.on_satis_registry.kullanilmis(d.odeme_ref) {
+                        if !self.on_satis_registry.kullanilmis(d.odeme_ref)
+                            && zaman_ok
+                            && islem_ok
+                            && tavan_ok
+                        {
                             // 1) AIDAG transferi ZORUNLU basarili olmali. Owner bakiyesi
                             //    yetersizse transfer HATA verir -> KAYIT TUTMA, dagitma.
                             //    (Aksi halde kayit "dagitildi" der ama AIDAG gitmemis olur =
@@ -1321,7 +1336,7 @@ mod tests {
     fn ingest_yoluyla_gelen_token_kalkana_islenir() {
         use crate::registry::public_key_to_adres;
         use crate::tx::StakeKaydi;
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let mut node = NodeState::new_devnet(NET);
         let (gen, gid) = genesis_bytes(1, now);
         node.ingest_networked(&gen, now);
@@ -1347,7 +1362,7 @@ mod tests {
     // 9d KANIT: STAKE ETMEYEN kaydedicinin token'i REDDEDILIR (deftere girmez).
     #[test]
     fn ingest_stake_etmeyen_token_reddedilir() {
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let mut node = NodeState::new_devnet(NET);
         let (gen, gid) = genesis_bytes(1, now);
         node.ingest_networked(&gen, now);
@@ -1366,7 +1381,7 @@ mod tests {
     fn ingest_yoluyla_gelen_sahte_token_reddedilir() {
         use crate::registry::public_key_to_adres;
         use crate::tx::StakeKaydi;
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let mut node = NodeState::new_devnet(NET);
         let (gen, gid) = genesis_bytes(1, now);
         node.ingest_networked(&gen, now);
@@ -1402,7 +1417,7 @@ mod tests {
     fn taklit_deneyenin_stakei_yakilir() {
         use crate::registry::public_key_to_adres;
         use crate::tx::StakeKaydi;
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let mut node = NodeState::new_devnet(NET);
         let (gen, gid) = genesis_bytes(1, now);
         node.ingest_networked(&gen, now);
@@ -1466,7 +1481,7 @@ mod tests {
     #[test]
     fn ingest_yoluyla_gelen_stake_islenir() {
         use crate::tx::StakeKaydi;
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let mut node = NodeState::new_devnet(NET);
         let (gen, gid) = genesis_bytes(1, now);
         node.ingest_networked(&gen, now);
@@ -1508,7 +1523,7 @@ mod tests {
     #[test]
     fn ingest_first_vertex_establishes_genesis() {
         let mut node = NodeState::new_devnet(NET);
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let bytes = signed_genesis_bytes(now);
         let id = node.ingest(&bytes, now).expect("ingest genesis");
         assert_eq!(node.vertex_count(), 1);
@@ -1519,7 +1534,7 @@ mod tests {
     #[test]
     fn ingest_garbage_leaves_state_untouched() {
         let mut node = NodeState::new_devnet(NET);
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let res = node.ingest(b"not-a-valid-vertex", now);
         assert!(res.is_err());
         assert_eq!(node.vertex_count(), 0);
@@ -1529,7 +1544,7 @@ mod tests {
     #[test]
     fn duplicate_ingest_rejected_count_stable() {
         let mut node = NodeState::new_devnet(NET);
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let bytes = signed_genesis_bytes(now);
         node.ingest(&bytes, now).expect("first ingest ok");
         assert_eq!(node.vertex_count(), 1);
@@ -1939,7 +1954,7 @@ mod tests {
     #[test]
     fn networked_orphan_buffered_when_parent_missing() {
         let mut node = NodeState::new_devnet(NET);
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         // Once bir genesis kur (graf'ta bir sey olsun).
         let (gb, gid) = genesis_bytes(1, now);
         assert!(matches!(
@@ -1961,7 +1976,7 @@ mod tests {
     #[test]
     fn networked_integrates_when_parent_present() {
         let mut node = NodeState::new_devnet(NET);
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let (gb, gid) = genesis_bytes(1, now);
         node.ingest_networked(&gb, now);
 
@@ -1979,7 +1994,7 @@ mod tests {
         // genesis <- B <- C. Ama SIRASIZ gelir: once C (B'yi bekler),
         // sonra B (genesis'i bekler). Genesis zaten var.
         let mut node = NodeState::new_devnet(NET);
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let (gb, gid) = genesis_bytes(1, now);
         node.ingest_networked(&gb, now);
 
@@ -2007,7 +2022,7 @@ mod tests {
     #[test]
     fn networked_duplicate_detected() {
         let mut node = NodeState::new_devnet(NET);
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let (gb, _gid) = genesis_bytes(1, now);
         assert!(matches!(
             node.ingest_networked(&gb, now),
@@ -2024,7 +2039,7 @@ mod tests {
     #[test]
     fn networked_garbage_rejected() {
         let mut node = NodeState::new_devnet(NET);
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let out = node.ingest_networked(b"not-a-vertex", now);
         assert!(matches!(out, NetworkIngestOutcome::Rejected(_)));
         assert_eq!(node.vertex_count(), 0);
@@ -2041,7 +2056,7 @@ mod tests {
 
     #[test]
     fn export_reimport_roundtrip_preserves_dag() {
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         // 1) Kaynak node: genesis + 3 vertex'lik bir zincir kur.
         let mut src = NodeState::new_devnet(NET);
         let (gb, gid) = genesis_bytes(1, now);
@@ -2137,7 +2152,7 @@ mod tests {
     fn ingest_transfer_bakiye_gunceller() {
         use crate::registry::public_key_to_adres;
         use crate::tx::TransferKaydi;
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let mut node = NodeState::new_devnet(NET);
         let (gen, gid) = genesis_bytes(1, now);
         node.ingest_networked(&gen, now);
@@ -2169,7 +2184,7 @@ mod tests {
     fn ingest_lsc_transfer_bakiye_gunceller() {
         use crate::registry::public_key_to_adres;
         use crate::tx::LscTransferKaydi;
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let mut node = NodeState::new_devnet(NET);
         let (gen, gid) = genesis_bytes(1, now);
         node.ingest_networked(&gen, now);
@@ -2201,7 +2216,7 @@ mod tests {
     fn ingest_transfer_yetersiz_bakiye_degistirmez() {
         use crate::registry::public_key_to_adres;
         use crate::tx::TransferKaydi;
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let mut node = NodeState::new_devnet(NET);
         let (gen, gid) = genesis_bytes(1, now);
         node.ingest_networked(&gen, now);
@@ -2232,7 +2247,7 @@ mod tests {
     fn ingest_transfer_baskasinin_parasi_harcanamaz() {
         use crate::registry::public_key_to_adres;
         use crate::tx::TransferKaydi;
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let mut node = NodeState::new_devnet(NET);
         let (gen, gid) = genesis_bytes(1, now);
         node.ingest_networked(&gen, now);
@@ -2270,7 +2285,7 @@ mod tests {
     fn ingest_transfer_replay_reddedilir() {
         use crate::registry::public_key_to_adres;
         use crate::tx::TransferKaydi;
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let mut node = NodeState::new_devnet(NET);
         let (gen, gid) = genesis_bytes(1, now);
         node.ingest_networked(&gen, now);
@@ -2332,7 +2347,7 @@ mod tests {
     fn ingest_transfer_yetersiz_nonce_ilerletmez() {
         use crate::registry::public_key_to_adres;
         use crate::tx::TransferKaydi;
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let mut node = NodeState::new_devnet(NET);
         let (gen, gid) = genesis_bytes(1, now);
         node.ingest_networked(&gen, now);
@@ -2373,7 +2388,7 @@ mod tests {
     fn ingest_avm_cagri_deger_ve_gas() {
         use crate::registry::public_key_to_adres;
         use crate::tx::AvmCagri;
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let mut node = NodeState::new_devnet(NET);
         let (gen, gid) = genesis_bytes(1, now);
         node.ingest_networked(&gen, now);
@@ -2420,7 +2435,7 @@ mod tests {
     fn ingest_avm_kontrat_deploy() {
         use crate::registry::public_key_to_adres;
         use crate::tx::AvmCagri;
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let mut node = NodeState::new_devnet(NET);
         let (gen, gid) = genesis_bytes(1, now);
         node.ingest_networked(&gen, now);
@@ -2475,7 +2490,7 @@ mod tests {
     fn avm_kontrat_ici_transfer_gercek_deftere_yansir_b1() {
         use crate::registry::public_key_to_adres;
         use crate::tx::AvmCagri;
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let mut node = NodeState::new_devnet(NET);
         let (gen, gid) = genesis_bytes(1, now);
         node.ingest_networked(&gen, now);
@@ -2563,7 +2578,7 @@ mod tests {
     fn avm_ayni_hesap_iki_kontrat_deploy_edebilir_b3() {
         use crate::registry::public_key_to_adres;
         use crate::tx::AvmCagri;
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let mut node = NodeState::new_devnet(NET);
         let (gen, gid) = genesis_bytes(1, now);
         node.ingest_networked(&gen, now);
@@ -2616,7 +2631,7 @@ mod tests {
         use alloy_signer::SignerSync;
         use alloy_signer_local::PrivateKeySigner;
 
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let mut node = NodeState::new_devnet(NET);
         let (gen, gid) = genesis_bytes(1, now);
         node.ingest_networked(&gen, now);
@@ -2713,7 +2728,7 @@ mod tests {
     fn b6_create_nonce_birlesik_nonce_ile_tutarli() {
         use crate::registry::public_key_to_adres;
         use crate::tx::{AvmCagri, TransferKaydi};
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let mut node = NodeState::new_devnet(NET);
         let (gen, gid) = genesis_bytes(1, now);
         node.ingest_networked(&gen, now);
@@ -2768,7 +2783,7 @@ mod tests {
     fn avm_kontrat_replay_ile_kalici() {
         use crate::registry::public_key_to_adres;
         use crate::tx::AvmCagri;
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
 
         // 1) Kaynak node: genesis + kontrat deploy
         let mut src = NodeState::new_devnet(NET);
@@ -2825,7 +2840,7 @@ mod tests {
     fn on_satis_lsc_hediye_yetersizse_kayit_gercegi_yansitir_a4() {
         use crate::registry::public_key_to_adres;
         use crate::tx::OnSatisDagitim;
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let mut node = NodeState::new_devnet(NET);
         let (gen, gid) = genesis_bytes(1, now);
         node.ingest_networked(&gen, now);
@@ -2861,6 +2876,105 @@ mod tests {
             k.lsc_hediye, 0,
             "A4: kayit GERCEK hediyeyi (0) saklar, 'gonderildi' yalanini DEGIL"
         );
+    }
+
+    #[test]
+    fn on_satis_zaman_penceresi_baslangictan_once_reddedilir() {
+        use crate::registry::public_key_to_adres;
+        use crate::tx::OnSatisDagitim;
+        let t0 = crate::mainnet::ON_SATIS_BASLANGIC;
+        let sk = SigningKey::from_bytes(&[0x77u8; 32]);
+        let owner = public_key_to_adres(&sk.verifying_key().to_bytes());
+        let mut node = NodeState::new_devnet(NET);
+        let (gen, gid) = genesis_bytes(1, t0 - 100);
+        node.ingest_networked(&gen, t0 - 100);
+        node.faucet_owner_ayarla(owner);
+        node.test_bakiye_ekle(owner, 1_000_000);
+        let alici = [0x11u8; 20];
+        let p = OnSatisDagitim::new(alici, 1000, 0, 1).encode();
+        let v = Vertex::new_signed(NET, vec![gid], p, t0 - 1, &sk).expect("v");
+        node.ingest_networked(&wire::encode(&v), t0 - 1);
+        assert_eq!(node.bakiye(&alici), 0, "baslangictan once dagitim OLMAMALI");
+        assert_eq!(node.on_satis_sayisi(), 0, "kayit tutulmamali");
+    }
+
+    #[test]
+    fn on_satis_islem_ust_siniri_asilirsa_reddedilir() {
+        use crate::registry::public_key_to_adres;
+        use crate::tx::OnSatisDagitim;
+        let t0 = crate::mainnet::ON_SATIS_BASLANGIC;
+        let od = crate::genesis::ONDALIK;
+        let sk = SigningKey::from_bytes(&[0x78u8; 32]);
+        let owner = public_key_to_adres(&sk.verifying_key().to_bytes());
+        let mut node = NodeState::new_devnet(NET);
+        let (gen, gid) = genesis_bytes(1, t0);
+        node.ingest_networked(&gen, t0);
+        node.faucet_owner_ayarla(owner);
+        node.test_bakiye_ekle(owner, 200_000 * od);
+        let alici = [0x22u8; 20];
+        let p = OnSatisDagitim::new(alici, 50_000 * od + 1, 0, 2).encode();
+        let v = Vertex::new_signed(NET, vec![gid], p, t0, &sk).expect("v");
+        node.ingest_networked(&wire::encode(&v), t0);
+        assert_eq!(node.bakiye(&alici), 0, "50k ustu dagitim OLMAMALI");
+        assert_eq!(node.on_satis_sayisi(), 0, "kayit tutulmamali");
+    }
+
+    #[test]
+    fn on_satis_islem_tam_sinirda_kabul() {
+        use crate::registry::public_key_to_adres;
+        use crate::tx::OnSatisDagitim;
+        let t0 = crate::mainnet::ON_SATIS_BASLANGIC;
+        let od = crate::genesis::ONDALIK;
+        let sk = SigningKey::from_bytes(&[0x79u8; 32]);
+        let owner = public_key_to_adres(&sk.verifying_key().to_bytes());
+        let mut node = NodeState::new_devnet(NET);
+        let (gen, gid) = genesis_bytes(1, t0);
+        node.ingest_networked(&gen, t0);
+        node.faucet_owner_ayarla(owner);
+        node.test_bakiye_ekle(owner, 200_000 * od);
+        let alici = [0x23u8; 20];
+        let tam = 50_000 * od;
+        let p = OnSatisDagitim::new(alici, tam, 0, 4).encode();
+        let v = Vertex::new_signed(NET, vec![gid], p, t0, &sk).expect("v");
+        node.ingest_networked(&wire::encode(&v), t0);
+        assert_eq!(node.bakiye(&alici), tam, "tam 50k KABUL edilmeli");
+    }
+
+    #[test]
+    fn on_satis_kumulatif_tavan_630k_asilamaz() {
+        use crate::registry::public_key_to_adres;
+        use crate::tx::OnSatisDagitim;
+        let t0 = crate::mainnet::ON_SATIS_BASLANGIC;
+        let od = crate::genesis::ONDALIK;
+        let sk = SigningKey::from_bytes(&[0x7Au8; 32]);
+        let owner = public_key_to_adres(&sk.verifying_key().to_bytes());
+        let mut node = NodeState::new_devnet(NET);
+        let (gen, gid) = genesis_bytes(1, t0);
+        node.ingest_networked(&gen, t0);
+        node.faucet_owner_ayarla(owner);
+        node.test_bakiye_ekle(owner, 1_000_000 * od);
+        let mut parent = gid;
+        let mut ref_no = 100u64;
+        for i in 0..13u8 {
+            let alici = [0x30u8 + i; 20];
+            let p = OnSatisDagitim::new(alici, 48_000 * od, 0, ref_no).encode();
+            let v = Vertex::new_signed(NET, vec![parent], p, t0, &sk).expect("v");
+            node.ingest_networked(&wire::encode(&v), t0);
+            parent = *v.id();
+            ref_no += 1;
+        }
+        assert_eq!(node.on_satis_toplam_aidag(), 624_000 * od, "624k gecti");
+        let alici_son = [0xAAu8; 20];
+        let p = OnSatisDagitim::new(alici_son, 7_000 * od, 0, ref_no).encode();
+        let v = Vertex::new_signed(NET, vec![parent], p, t0, &sk).expect("v");
+        node.ingest_networked(&wire::encode(&v), t0);
+        assert_eq!(node.bakiye(&alici_son), 0, "630k ustu RED");
+        assert_eq!(node.on_satis_toplam_aidag(), 624_000 * od, "toplam degismedi");
+        let p2 = OnSatisDagitim::new(alici_son, 6_000 * od, 0, ref_no + 1).encode();
+        let v2 = Vertex::new_signed(NET, vec![parent], p2, t0, &sk).expect("v2");
+        node.ingest_networked(&wire::encode(&v2), t0);
+        assert_eq!(node.bakiye(&alici_son), 6_000 * od, "sinira kadar KABUL");
+        assert_eq!(node.on_satis_toplam_aidag(), 630_000 * od, "tam 630k");
     }
 
     // FAZ2 KANIT (on-satis vesting): dagitilan AIDAG %20 TGE hemen + kalan %80 12 ay
@@ -2915,7 +3029,7 @@ mod tests {
     fn on_satis_replay_ile_kalici() {
         use crate::registry::public_key_to_adres;
         use crate::tx::OnSatisDagitim;
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
 
         // 1) Kaynak node: genesis + owner ayarla + owner'a AIDAG/LSC bakiye
         let mut src = NodeState::new_devnet(NET);
@@ -2977,7 +3091,7 @@ mod tests {
     fn on_satis_owner_disi_reddedilir() {
         use crate::registry::public_key_to_adres;
         use crate::tx::OnSatisDagitim;
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
 
         let mut node = NodeState::new_devnet(NET);
         let (gen, gid) = genesis_bytes(1, now);
@@ -3021,7 +3135,7 @@ mod tests {
     fn on_satis_yetersiz_bakiye_kayit_tutmaz() {
         use crate::registry::public_key_to_adres;
         use crate::tx::OnSatisDagitim;
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
 
         let mut node = NodeState::new_devnet(NET);
         let (gen, gid) = genesis_bytes(1, now);
@@ -3064,7 +3178,7 @@ mod tests {
         use crate::registry::public_key_to_adres;
         use crate::tx::AvmCagri;
         use revm::primitives::keccak256;
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let mut node = NodeState::new_devnet(NET);
         let (gen, gid) = genesis_bytes(1, now);
         node.ingest_networked(&gen, now);
@@ -3123,7 +3237,7 @@ mod tests {
     fn ingest_avm_deger_transferi_arz_korunur() {
         use crate::registry::public_key_to_adres;
         use crate::tx::AvmCagri;
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let mut node = NodeState::new_devnet(NET);
         let (gen, gid) = genesis_bytes(1, now);
         node.ingest_networked(&gen, now);
@@ -3165,7 +3279,7 @@ mod tests {
     fn ingest_avm_cagri_yetersiz_bakiye() {
         use crate::registry::public_key_to_adres;
         use crate::tx::AvmCagri;
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let mut node = NodeState::new_devnet(NET);
         let (gen, gid) = genesis_bytes(1, now);
         node.ingest_networked(&gen, now);
@@ -3559,7 +3673,7 @@ mod tests {
         };
         use sha3::{Digest, Keccak256};
 
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let mut node = NodeState::new_devnet(NET);
         let (gen, gid) = genesis_bytes(1, now);
         node.ingest_networked(&gen, now);
@@ -3629,7 +3743,7 @@ mod tests {
     fn cok_node_senkron_ayni_duruma_yakinsar() {
         use crate::registry::public_key_to_adres;
         use crate::tx::TransferKaydi;
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let (mut n1, mut n2, gid) = iki_node(now);
         let sk = SigningKey::from_bytes(&[11u8; 32]);
         let gonderen = public_key_to_adres(&sk.verifying_key().to_bytes());
@@ -3661,7 +3775,7 @@ mod tests {
     fn cok_node_eszamanli_ayni_nonce_cift_harcama() {
         use crate::registry::public_key_to_adres;
         use crate::tx::TransferKaydi;
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let (mut n1, mut n2, gid) = iki_node(now);
         let sk = SigningKey::from_bytes(&[12u8; 32]);
         let gonderen = public_key_to_adres(&sk.verifying_key().to_bytes());
@@ -3721,7 +3835,7 @@ mod tests {
     fn cok_node_bolunme_birlesme_yakinsar() {
         use crate::registry::public_key_to_adres;
         use crate::tx::TransferKaydi;
-        let now = 1_000_000;
+        let now = crate::mainnet::ON_SATIS_BASLANGIC;
         let (mut n1, mut n2, gid) = iki_node(now);
         let sk_x = SigningKey::from_bytes(&[13u8; 32]);
         let sk_y = SigningKey::from_bytes(&[14u8; 32]);
