@@ -407,6 +407,63 @@ async fn on_satis_adres(State(st): State<RpcState>, Path(adres_hex): Path<String
     }))
 }
 
+/// GET /on-satis-tahsis/:adres — CLAIM EKRANI: alicinin her tahsisi icin
+/// su an ne kadari HAK EDILMIS (claim edilebilir), ne kadari KILITLI, ne kadari
+/// zaten CLAIM edilmis. Web sitesi bunu gosterir: "1000 tahsis, 200 cekilebilir,
+/// 800 kilitli". TGE = MAINNET_VESTING_BASLANGIC (sabit). simdi = sunucu saati.
+async fn on_satis_tahsis(State(st): State<RpcState>, Path(adres_hex): Path<String>) -> Json<Value> {
+    let b = match hex::decode(adres_hex.trim()) {
+        Ok(b) if b.len() == 20 => b,
+        _ => return Json(json!({ "ok": false, "hata": "adres 40 hex olmali" })),
+    };
+    let mut adres = [0u8; 20];
+    adres.copy_from_slice(&b);
+    let simdi = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let tge = lsc_engine::mainnet::MAINNET_VESTING_BASLANGIC;
+    let alimlar_ham = { st.node.read().await.on_satis_adrese_gore(&adres) };
+    let mut toplam_tahsis: u128 = 0;
+    let mut toplam_hak: u128 = 0;
+    let mut toplam_claimlenen: u128 = 0;
+    let tahsisler: Vec<Value> = alimlar_ham
+        .iter()
+        .map(|(odeme_ref, k)| {
+            let hak = k.hak_edilen(simdi, tge);
+            let cekilebilir = k.claim_edilebilir(simdi, tge);
+            let kilitli = k.aidag.saturating_sub(hak);
+            toplam_tahsis = toplam_tahsis.saturating_add(k.aidag);
+            toplam_hak = toplam_hak.saturating_add(hak);
+            toplam_claimlenen = toplam_claimlenen.saturating_add(k.claimlenen);
+            json!({
+                "odeme_ref": odeme_ref,
+                "tahsis": k.aidag.to_string(),
+                "hak_edilen": hak.to_string(),
+                "claimlenen": k.claimlenen.to_string(),
+                "claim_edilebilir": cekilebilir.to_string(),
+                "kilitli": kilitli.to_string(),
+                "lsc_hediye": k.lsc_hediye.to_string(),
+                "lsc_verildi": k.lsc_verildi,
+                "tamamlandi": k.tamamlandi(),
+            })
+        })
+        .collect();
+    let toplam_cekilebilir = toplam_hak.saturating_sub(toplam_claimlenen);
+    Json(json!({
+        "ok": true,
+        "adres": adres_hex.trim(),
+        "tge": tge,
+        "simdi": simdi,
+        "tge_gecti": simdi >= tge,
+        "toplam_tahsis": toplam_tahsis.to_string(),
+        "toplam_claim_edilebilir": toplam_cekilebilir.to_string(),
+        "toplam_claimlenen": toplam_claimlenen.to_string(),
+        "tahsis_sayisi": tahsisler.len(),
+        "tahsisler": tahsisler,
+    }))
+}
+
 /// GET /testnet-durum/:adres — kullanicinin testnet hesap ozeti (tek sorgu).
 /// Test cuzdaniyla kendi durumunu gormek icin: AIDAG + LSC bakiye + stake.
 async fn testnet_durum(State(st): State<RpcState>, Path(adres_hex): Path<String>) -> Json<Value> {
@@ -931,7 +988,8 @@ pub fn router(
         .route("/eslesme/:adres", get(eslesme))
         .route("/on-satis/:odeme_ref", get(on_satis_sorgu))
         .route("/on-satis-ozet", get(on_satis_ozet))
-        .route("/on-satis-adres/:adres", get(on_satis_adres));
+        .route("/on-satis-adres/:adres", get(on_satis_adres))
+        .route("/on-satis-tahsis/:adres", get(on_satis_tahsis));
 
     // FAUCET: anti-spam korumali (bakiye limitli), production da dahil ACIK.
     // test_bakiye/lsc_test_bakiye: sinirsiz basma -> sadece GELISTIRME modunda.
