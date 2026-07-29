@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  go_cell:
+    build:
+      context: ./go_node
+    container_name: soulware_go_cell
+    restart: unless-stopped
+    ports:
+      - "9001:9001/udp"
+    networks:
+      - cell_network
+
+  python_agent:
+    build:
+      context: ./python_agent
+    container_name: soulware_python_agent
+    restart: unless-stopped
+    environment:
+      - PYTHONUNFUFFERED=1
+    networks:
+      - cell_network
+
+networks:
+  cell_network:
+    driver: bridge
