@@ -1,8 +1,8 @@
 ##  AIDAG-WIND (Layer-1 Verifiable AI Mesh Engine)
 
  <p align="center">
-   <a href="https://asciinema.org/a/UtHp2Z4xXbHHU0c2">
-     <img src="https://asciinema.org/a/UtHp2Z4xXbHHU0c2.svg" alt="asciinema recording" width="600"/>
+   <a href="https://asciinema.org/a/szjimoe4uPdQeezK">
+     <img src="https://asciinema.org/a/szjimoe4uPdQeezK.svg" alt="asciinema recording" width="600"/>
    </a>
  </p>
 
