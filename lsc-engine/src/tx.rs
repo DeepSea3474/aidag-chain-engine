@@ -1167,6 +1167,242 @@ impl EvmTransfer {
     }
 }
 
+// ============================================================================
+// tip=14: EVM-UYUMLU ON-SATIS CLAIM (MetaMask self-claim).
+// tip=13 (ON_SATIS_CLAIM)'in EVM kardesi. TEK FARK: claim eden, dis vertex
+// imzalayanindan DEGIL, alicinin EIP-712 secp256k1 imzasindan (ecrecover) cikar.
+// Boylece MetaMask kullanicisi TGE'de kendi tahsisini kendi cuzdanina ceker.
+// Relayer (RPC node) dis vertex'i sarar; yetki alicinin EIP-712 imzasidir.
+// Vesting/claimlenen/cifte-claim korumalari tip=13 ile AYNI (paylasilan yol).
+// ============================================================================
+
+/// EVM-uyumlu on-satis claim tip kimligi (=14).
+pub const TX_TYPE_EVM_ON_SATIS_CLAIM: u8 = 14;
+
+/// Kodlanmis EVM claim: [tip:1][odeme_ref:8][recovery_id:1][imza:64] = 74 bayt.
+const EVM_CLAIM_ENCODED_LEN: usize = 1 + 8 + 1 + 64;
+
+/// secp256k1 (EIP-712) imzali on-satis claim (cozulmus hali).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EvmClaimTalebi {
+    /// Hangi tahsis (odeme referansi) claim ediliyor.
+    pub odeme_ref: u64,
+    /// ecrecover recovery id (0 veya 1). MetaMask v (27/28) -> v-27.
+    pub recovery_id: u8,
+    /// secp256k1 imza (64 bayt, r||s).
+    pub imza: [u8; 64],
+}
+
+/// EIP-712 digest — MetaMask `eth_signTypedData_v4`'un HESAPLADIGININ AYNISI.
+/// domain = {name:"AIDAG-Chain", version:"1", chainId}; tip = OnSatisClaim(uint64 odemeRef).
+/// chainId, vertex network_id'sine baglanir -> capraz-zincir replay engellenir.
+pub fn eip712_claim_digest(odeme_ref: u64, chain_id: u64) -> [u8; 32] {
+    use sha3::{Digest, Keccak256};
+    // EIP-712 uintN -> 32-bayt big-endian word.
+    fn word_u64(v: u64) -> [u8; 32] {
+        let mut w = [0u8; 32];
+        w[24..].copy_from_slice(&v.to_be_bytes());
+        w
+    }
+    let domain_type_hash =
+        Keccak256::digest(b"EIP712Domain(string name,string version,uint256 chainId)");
+    let name_hash = Keccak256::digest(b"AIDAG-Chain");
+    let version_hash = Keccak256::digest(b"1");
+    let mut dom = Keccak256::new();
+    dom.update(domain_type_hash);
+    dom.update(name_hash);
+    dom.update(version_hash);
+    dom.update(word_u64(chain_id));
+    let domain_separator = dom.finalize();
+
+    let struct_type_hash = Keccak256::digest(b"OnSatisClaim(uint64 odemeRef)");
+    let mut st = Keccak256::new();
+    st.update(struct_type_hash);
+    st.update(word_u64(odeme_ref));
+    let struct_hash = st.finalize();
+
+    // digest = keccak256(0x19 0x01 || domainSeparator || structHash)
+    let mut d = Keccak256::new();
+    d.update([0x19u8, 0x01u8]);
+    d.update(domain_separator);
+    d.update(struct_hash);
+    d.finalize().into()
+}
+
+impl EvmClaimTalebi {
+    /// Kodla: [TX_TYPE_EVM_ON_SATIS_CLAIM][odeme_ref:8][recovery_id:1][imza:64].
+    pub fn encode(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(EVM_CLAIM_ENCODED_LEN);
+        out.push(TX_TYPE_EVM_ON_SATIS_CLAIM);
+        out.extend_from_slice(&self.odeme_ref.to_be_bytes());
+        out.push(self.recovery_id);
+        out.extend_from_slice(&self.imza);
+        out
+    }
+
+    /// Coz: tip + boyut dogrula, alanlari cikar.
+    pub fn decode(bytes: &[u8]) -> Result<EvmClaimTalebi, TxError> {
+        let &first = bytes.first().ok_or(TxError::Empty)?;
+        if first != TX_TYPE_EVM_ON_SATIS_CLAIM {
+            return Err(TxError::UnknownType(first));
+        }
+        if bytes.len() != EVM_CLAIM_ENCODED_LEN {
+            return Err(TxError::BadLength {
+                expected: EVM_CLAIM_ENCODED_LEN,
+                got: bytes.len(),
+            });
+        }
+        let mut ref_bytes = [0u8; 8];
+        ref_bytes.copy_from_slice(&bytes[1..9]);
+        let odeme_ref = u64::from_be_bytes(ref_bytes);
+        let recovery_id = bytes[9];
+        let mut imza = [0u8; 64];
+        imza.copy_from_slice(&bytes[10..EVM_CLAIM_ENCODED_LEN]);
+        Ok(EvmClaimTalebi {
+            odeme_ref,
+            recovery_id,
+            imza,
+        })
+    }
+
+    /// ecrecover: EIP-712 imzasindan CLAIM EDENIN 0x adresini kurtar. `chain_id`,
+    /// dogrulayan node'un network_id'sidir (imza o zincire baglidir). Gecersiz -> None.
+    pub fn claim_eden_adres(&self, chain_id: u64) -> Option<[u8; ADDR_LEN]> {
+        use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
+        use sha3::{Digest, Keccak256};
+
+        let digest = eip712_claim_digest(self.odeme_ref, chain_id);
+        let sig = Signature::from_slice(&self.imza).ok()?;
+        let recid = RecoveryId::from_byte(self.recovery_id)?;
+        let vk = VerifyingKey::recover_from_prehash(&digest, &sig, recid).ok()?;
+        let nokta = vk.to_encoded_point(false);
+        let hash = Keccak256::digest(&nokta.as_bytes()[1..]);
+        let mut adres = [0u8; ADDR_LEN];
+        adres.copy_from_slice(&hash[12..]);
+        Some(adres)
+    }
+}
+
+// ============================================================================
+// tip=15: ON-SATIS TGE AYARLA (owner). On-satis claim'in acildigi (TGE) zamani
+// ZINCIRDEN ayarlar -> tum dugumler ayni tarihi gorur, node yeniden baslatmaya
+// GEREK YOK. Listeleme tarihi netlesince owner bunu gonderir. SADECE owner cagirir.
+// ============================================================================
+
+/// ON-SATIS TGE ayarlama tip kimligi (=15).
+pub const TX_TYPE_TGE_AYARLA: u8 = 15;
+
+/// Kodlanmis: [tip:1][tge:8] = 9 bayt.
+const TGE_AYARLA_ENCODED_LEN: usize = 1 + 8;
+
+/// Owner TGE ayarlama (cozulmus).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TgeAyarla {
+    /// Yeni TGE (Unix saniye). On-satis claim/vesting bu andan itibaren acilir.
+    pub tge: u64,
+}
+
+impl TgeAyarla {
+    pub fn new(tge: u64) -> Self {
+        TgeAyarla { tge }
+    }
+    pub fn encode(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(TGE_AYARLA_ENCODED_LEN);
+        out.push(TX_TYPE_TGE_AYARLA);
+        out.extend_from_slice(&self.tge.to_be_bytes());
+        out
+    }
+    pub fn decode(bytes: &[u8]) -> Result<TgeAyarla, TxError> {
+        let &first = bytes.first().ok_or(TxError::Empty)?;
+        if first != TX_TYPE_TGE_AYARLA {
+            return Err(TxError::UnknownType(first));
+        }
+        if bytes.len() != TGE_AYARLA_ENCODED_LEN {
+            return Err(TxError::BadLength {
+                expected: TGE_AYARLA_ENCODED_LEN,
+                got: bytes.len(),
+            });
+        }
+        let mut b = [0u8; 8];
+        b.copy_from_slice(&bytes[1..9]);
+        Ok(TgeAyarla {
+            tge: u64::from_be_bytes(b),
+        })
+    }
+}
+
+#[cfg(test)]
+mod evm_claim_tests {
+    use super::*;
+    use k256::ecdsa::{signature::hazmat::PrehashSigner, RecoveryId, Signature, SigningKey};
+    use sha3::{Digest, Keccak256};
+
+    /// Yardimci: bir k256 anahtariyla EIP-712 on-satis claim imzala.
+    fn imzali_claim(sk: &SigningKey, odeme_ref: u64, chain_id: u64) -> EvmClaimTalebi {
+        let digest = eip712_claim_digest(odeme_ref, chain_id);
+        let (sig, recid): (Signature, RecoveryId) = sk.sign_prehash(&digest).expect("imza");
+        EvmClaimTalebi {
+            odeme_ref,
+            recovery_id: recid.to_byte(),
+            imza: sig.to_bytes().into(),
+        }
+    }
+
+    /// k256 anahtarindan gercek 0x adres (keccak yontemi).
+    fn evm_adres(sk: &SigningKey) -> [u8; ADDR_LEN] {
+        use k256::ecdsa::VerifyingKey;
+        let vk = VerifyingKey::from(sk);
+        let nokta = vk.to_encoded_point(false);
+        let h = Keccak256::digest(&nokta.as_bytes()[1..]);
+        let mut a = [0u8; ADDR_LEN];
+        a.copy_from_slice(&h[12..]);
+        a
+    }
+
+    #[test]
+    fn evm_claim_roundtrip_encode_decode() {
+        let sk = SigningKey::random(&mut rand::rngs::OsRng);
+        let c = imzali_claim(&sk, 1042, 3474);
+        let kodlu = c.encode();
+        assert_eq!(kodlu.len(), EVM_CLAIM_ENCODED_LEN);
+        assert_eq!(EvmClaimTalebi::decode(&kodlu).expect("decode"), c);
+    }
+
+    #[test]
+    fn evm_claim_eden_dogru_kurtarilir() {
+        let sk = SigningKey::random(&mut rand::rngs::OsRng);
+        let gercek = evm_adres(&sk);
+        let c = imzali_claim(&sk, 500, 3474);
+        assert_eq!(
+            c.claim_eden_adres(3474),
+            Some(gercek),
+            "ecrecover claim edeni dogru bulmali"
+        );
+    }
+
+    #[test]
+    fn evm_claim_yanlis_chain_farkli_adres() {
+        // Imza chainId=3474 icin; farkli chainId ile dogrulanirsa adres TUTMAZ.
+        let sk = SigningKey::random(&mut rand::rngs::OsRng);
+        let gercek = evm_adres(&sk);
+        let c = imzali_claim(&sk, 500, 3474);
+        assert_ne!(
+            c.claim_eden_adres(1),
+            Some(gercek),
+            "yanlis chainId -> capraz-zincir replay engellenir"
+        );
+    }
+
+    #[test]
+    fn evm_claim_farkli_ref_farkli_digest() {
+        assert_ne!(
+            eip712_claim_digest(1, 3474),
+            eip712_claim_digest(2, 3474),
+            "farkli odeme_ref -> farkli imza (baska tahsis claim edilemez)"
+        );
+    }
+}
+
 #[cfg(test)]
 mod evm_transfer_tests {
     use super::*;

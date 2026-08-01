@@ -53,6 +53,10 @@ pub struct NodeState {
     eslestirme_registry: crate::registry::EslestirmeRegistry,
     /// On satis dagitim defteri: odeme_ref -> kayit (cifte dagitim engeli, seffaflik).
     on_satis_registry: crate::registry::OnSatisRegistry,
+    /// ON-SATIS TGE (Unix sn). Owner tip=15 ile ZINCIRDEN ayarlar; None ise pinli
+    /// sabit (MAINNET_VESTING_BASLANGIC) kullanilir. DAG total_order'dan turer ->
+    /// tum dugumler ayni; node yeniden baslatma gerekmez.
+    on_satis_tge: Option<u64>,
 
     /// Faucet owner adresi. On-satis (tip=10) ve faucet (tip=6) yetki kapisi.
     /// Mainnet'te new_mainnet() PINLI kurucu adrese sabitler (env override YOK) ->
@@ -166,6 +170,7 @@ impl NodeState {
             kurum_registry: crate::registry::KurumRegistry::yeni(),
             eslestirme_registry: crate::registry::EslestirmeRegistry::yeni(),
             on_satis_registry: crate::registry::OnSatisRegistry::yeni(),
+            on_satis_tge: None,
             faucet_owner: None,
             faucet_verildi: std::collections::HashSet::new(),
             avm_db: crate::avm::AidagDatabase::yeni(),
@@ -779,6 +784,7 @@ impl NodeState {
         self.kurum_registry = crate::registry::KurumRegistry::yeni();
         self.eslestirme_registry = crate::registry::EslestirmeRegistry::yeni();
         self.on_satis_registry = crate::registry::OnSatisRegistry::yeni();
+        self.on_satis_tge = None;
         self.faucet_verildi = std::collections::HashSet::new();
         self.avm_db = crate::avm::AidagDatabase::yeni();
 
@@ -809,6 +815,61 @@ impl NodeState {
             self.kalkana_yonlendir(&payload, &signer, zaman);
         }
         self.son_uygulanan_sira = sira;
+    }
+
+    /// ON-SATIS TGE (Unix sn): owner tip=15 ile ayarladiysa o deger, yoksa pinli
+    /// sabit (MAINNET_VESTING_BASLANGIC). Claim + goruntuleme bunu kullanir.
+    pub fn on_satis_tge(&self) -> u64 {
+        self.on_satis_tge
+            .unwrap_or(crate::mainnet::MAINNET_VESTING_BASLANGIC)
+    }
+
+    /// ON-SATIS CLAIM ortak yolu — tip=13 (ed25519 native) ve tip=14 (EVM/EIP-712)
+    /// PAYLASIR. `cagiran` = claim eden adres (tip=13: vertex imzalayani; tip=14:
+    /// ecrecover ile alicinin 0x adresi). Kurallar TEK yerde: tahsis bul, `alici ==
+    /// cagiran` dogrula, vesting'e gore acilan kismi owner escrow'dan cagiran'a
+    /// transfer et, ilk claim'de LSC hediyeyi ver, `claimlenen`'i guncelle. Boylece
+    /// iki yol arasinda kural ayrismasi (drift) IMKANSIZ; cifte-claim/vesting korumasi tek.
+    fn on_satis_claim_uygula(&mut self, odeme_ref: u64, cagiran: [u8; 20], zaman: u64) {
+        let kayit = self.on_satis_registry.sorgula(odeme_ref).cloned();
+        if let Some(k) = kayit {
+            // alici != cagiran -> SESSIZ RED (baskasinin tahsisi claim EDILEMEZ).
+            if k.alici == cagiran {
+                let tge = self.on_satis_tge(); // owner ayarladiysa o, yoksa pinli sabit
+                let cekilebilir = k.claim_edilebilir(zaman, tge);
+                if cekilebilir > 0 {
+                    // owner (faucet_owner) tahsisi tutan taraf; ondan alici'ya
+                    if let Some(owner) = self.faucet_owner {
+                        let aidag_ok = matches!(
+                            self.bakiye_registry
+                                .transfer(&owner, &cagiran, cekilebilir),
+                            crate::registry::TransferSonuc::Basarili { .. }
+                        );
+                        if aidag_ok {
+                            // ILK CLAIM ise LSC hediyeyi ver (gas icin)
+                            let ilk_claim = !k.lsc_verildi;
+                            let mut lsc_verildi_flag = false;
+                            if ilk_claim && k.lsc_hediye > 0 {
+                                if let crate::registry::TransferSonuc::Basarili { .. } =
+                                    self.lsc_registry.transfer(&owner, &cagiran, k.lsc_hediye)
+                                {
+                                    lsc_verildi_flag = true;
+                                }
+                            } else if ilk_claim {
+                                // hediye 0 ise de "verildi" say (tekrar denenmesin)
+                                lsc_verildi_flag = true;
+                            }
+                            // claimlenen guncelle + lsc_verildi isaretle
+                            let _ = self.on_satis_registry.claim_isle(
+                                odeme_ref,
+                                cekilebilir,
+                                lsc_verildi_flag,
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// KALKAN yonlendirme: payload tip=2 (TokenKaydi) ise registry'ye kaydet.
@@ -1085,49 +1146,35 @@ impl NodeState {
             // Deterministik: tge sabit, owner bakiyesi tum dugumlerde ayni.
             Some(&crate::tx::TX_TYPE_ON_SATIS_CLAIM) => {
                 if let Ok(c) = crate::tx::ClaimTalebi::decode(payload) {
+                    // claim eden = dis vertex imzalayani (native ed25519 cuzdan).
                     let cagiran = crate::registry::public_key_to_adres(signer);
-                    // Kaydi bul + imzalayan == alici DOGRULA
-                    let kayit = self.on_satis_registry.sorgula(c.odeme_ref).cloned();
-                    if let Some(k) = kayit {
-                        if k.alici == cagiran {
-                            let tge = crate::mainnet::MAINNET_VESTING_BASLANGIC;
-                            let cekilebilir = k.claim_edilebilir(zaman, tge);
-                            if cekilebilir > 0 {
-                                // owner (faucet_owner) tahsisi tutan taraf; ondan alici'ya
-                                if let Some(owner) = self.faucet_owner {
-                                    let aidag_ok = matches!(
-                                        self.bakiye_registry.transfer(
-                                            &owner, &cagiran, cekilebilir
-                                        ),
-                                        crate::registry::TransferSonuc::Basarili { .. }
-                                    );
-                                    if aidag_ok {
-                                        // ILK CLAIM ise LSC hediyeyi ver (gas icin)
-                                        let ilk_claim = !k.lsc_verildi;
-                                        let mut lsc_verildi_flag = false;
-                                        if ilk_claim && k.lsc_hediye > 0 {
-                                            if let crate::registry::TransferSonuc::Basarili { .. } =
-                                                self.lsc_registry.transfer(
-                                                    &owner, &cagiran, k.lsc_hediye
-                                                )
-                                            {
-                                                lsc_verildi_flag = true;
-                                            }
-                                        } else if ilk_claim {
-                                            // hediye 0 ise de "verildi" say (tekrar denenmesin)
-                                            lsc_verildi_flag = true;
-                                        }
-                                        // claimlenen guncelle + lsc_verildi isaretle
-                                        let _ = self.on_satis_registry.claim_isle(
-                                            c.odeme_ref,
-                                            cekilebilir,
-                                            lsc_verildi_flag,
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                        // imzalayan != alici -> SESSIZ RED (hicbir sey yapma)
+                    self.on_satis_claim_uygula(c.odeme_ref, cagiran, zaman);
+                }
+            }
+            // tip=14: EVM-UYUMLU ON-SATIS CLAIM (MetaMask self-claim). tip=13'un
+            // EVM kardesi. Claim eden, dis vertex imzalayanindan DEGIL, alicinin
+            // EIP-712 secp256k1 imzasindan (ecrecover) cikar -> relayer (RPC node)
+            // dis vertex'i sarabilir, yetki alicinindir. Vesting/claimlenen/cifte-claim
+            // korumalari tip=13 ile AYNI paylasilan yoldan (on_satis_claim_uygula).
+            Some(&crate::tx::TX_TYPE_EVM_ON_SATIS_CLAIM) => {
+                if let Ok(c) = crate::tx::EvmClaimTalebi::decode(payload) {
+                    // chainId = node network_id; imza o zincire bagli (capraz-zincir replay yok).
+                    let chain_id = self.graph.network_id() as u64;
+                    // Imza gecersizse claim_eden None -> hicbir sey degismez.
+                    if let Some(cagiran) = c.claim_eden_adres(chain_id) {
+                        self.on_satis_claim_uygula(c.odeme_ref, cagiran, zaman);
+                    }
+                }
+            }
+            // tip=15: ON-SATIS TGE AYARLA. SADECE owner. On-satis claim/vesting'in
+            // acildigi zamani (TGE) ZINCIRDEN ayarlar — listeleme netlesince. DAG
+            // total_order'dan turer -> tum dugumler ayni; node yeniden baslatmaya
+            // GEREK YOK. Owner-disi cagri SESSIZ RED (hicbir sey yapmaz).
+            Some(&crate::tx::TX_TYPE_TGE_AYARLA) => {
+                if let Ok(t) = crate::tx::TgeAyarla::decode(payload) {
+                    let cagiran = crate::registry::public_key_to_adres(signer);
+                    if self.faucet_owner == Some(cagiran) {
+                        self.on_satis_tge = Some(t.tge);
                     }
                 }
             }
@@ -2835,13 +2882,17 @@ mod tests {
     fn on_satis_claim_vesting_ve_guvenlik() {
         use crate::registry::public_key_to_adres;
         use crate::tx::{ClaimTalebi, OnSatisDagitim};
-        let tge = crate::mainnet::ON_SATIS_BASLANGIC; // = MAINNET_VESTING_BASLANGIC
+        // AYRI TARIHLER: satis penceresi TGE'den ONCE acilir. Satis/tahsis
+        // `satis` aninda olur; claim/vesting ise GERCEK TGE'ye gore odenir.
+        let satis = crate::mainnet::ON_SATIS_BASLANGIC;
+        let tge = crate::mainnet::MAINNET_VESTING_BASLANGIC;
+        assert!(satis < tge, "on-satis penceresi TGE'den once acilmali");
         let gun = 86400u64;
         let od = crate::genesis::ONDALIK;
 
         let mut node = NodeState::new_devnet(NET);
-        let (gen, gid) = genesis_bytes(1, tge);
-        node.ingest_networked(&gen, tge);
+        let (gen, gid) = genesis_bytes(1, satis);
+        node.ingest_networked(&gen, satis);
 
         // owner (faucet) tahsisi tutan taraf; bol AIDAG + LSC
         let osk = SigningKey::from_bytes(&[0x91u8; 32]);
@@ -2855,21 +2906,30 @@ mod tests {
         let alici = public_key_to_adres(&ask.verifying_key().to_bytes());
 
         // 1) SATIS: owner aliciya 1000 AIDAG tahsis eder (+ 5 LSC hediye), odeme_ref=500
+        //    SATIS penceresinde (TGE'den once) yapilir.
         let sat = OnSatisDagitim::new(alici, 1000 * od, 5 * od, 500).encode();
-        let vs = Vertex::new_signed(NET, vec![gid], sat, tge, &osk).expect("satis");
-        node.ingest_networked(&wire::encode(&vs), tge);
+        let vs = Vertex::new_signed(NET, vec![gid], sat, satis, &osk).expect("satis");
+        node.ingest_networked(&wire::encode(&vs), satis);
         assert_eq!(node.bakiye(&alici), 0, "satista transfer yok");
         assert_eq!(node.on_satis_toplam_aidag(), 1000 * od, "tahsis kaydi 1000");
 
-        // 2) TGE ONCESI CLAIM -> 0 (hak edilmemis)
+        // 2a) SATIS PENCERESINDE (TGE'den once) CLAIM -> 0. Ayristirmanin asil
+        //     garantisi: satis acik olsa da TGE gelmeden token cekilemez.
+        let cs = ClaimTalebi::new(500).encode();
+        let vcs = Vertex::new_signed(NET, vec![*vs.id()], cs, satis, &ask).expect("cs");
+        node.ingest_networked(&wire::encode(&vcs), satis);
+        assert_eq!(node.bakiye(&alici), 0, "satis aninda claim = 0 (TGE gelmedi)");
+
+        // 2b) TGE'ye YAKIN AMA ONCE CLAIM -> 0 (hak edilmemis)
         let c0 = ClaimTalebi::new(500).encode();
-        let vc0 = Vertex::new_signed(NET, vec![*vs.id()], c0, tge - 10, &ask).expect("c0");
+        let vc0 = Vertex::new_signed(NET, vec![*vcs.id()], c0, tge - 10, &ask).expect("c0");
         node.ingest_networked(&wire::encode(&vc0), tge - 10);
         assert_eq!(node.bakiye(&alici), 0, "TGE oncesi claim = 0");
 
-        // 3) TGE'de CLAIM -> %20 = 200
+        // 3) TGE'de CLAIM -> %20 = 200. Zincir: vc0 -> vc1 (fork DEGIL; total_order
+        //    belirlenimci, tiebreak'e bagli beklemede-uc olusmaz).
         let c1 = ClaimTalebi::new(500).encode();
-        let vc1 = Vertex::new_signed(NET, vec![*vs.id()], c1, tge, &ask).expect("c1");
+        let vc1 = Vertex::new_signed(NET, vec![*vc0.id()], c1, tge, &ask).expect("c1");
         node.ingest_networked(&wire::encode(&vc1), tge);
         assert_eq!(node.bakiye(&alici), 200 * od, "TGE claim: %20 = 200");
         // LSC hediye ILK claim'de verildi
@@ -3005,8 +3065,11 @@ mod tests {
         node.ingest_networked(&wire::encode(&v), t0);
         // satista transfer yok; RED = tahsis kaydi olusmadi (toplam degismez)
         assert_eq!(node.on_satis_toplam_aidag(), 624_000 * od, "630k ustu RED: toplam degismedi");
+        // 6k satisi 7k'nin uzerine ZINCIRLENIR (fork DEGIL). Kardes-uc kurulursa
+        // ghostdag total_order tiebreak'ine gore biri beklemede kalabilir; satista
+        // ardisik zincir (owner sirayla imzalar) belirlenimci sonucu garanti eder.
         let p2 = OnSatisDagitim::new(alici_son, 6_000 * od, 0, ref_no + 1).encode();
-        let v2 = Vertex::new_signed(NET, vec![parent], p2, t0, &sk).expect("v2");
+        let v2 = Vertex::new_signed(NET, vec![*v.id()], p2, t0, &sk).expect("v2");
         node.ingest_networked(&wire::encode(&v2), t0);
         // sinira kadar KABUL = tahsis kaydi olustu (bakiye degil, tahsis artar)
         assert_eq!(node.on_satis_toplam_aidag(), 630_000 * od, "sinira kadar KABUL: tam 630k tahsis");
@@ -3153,6 +3216,56 @@ mod tests {
             node.on_satis_sorgula(31337).is_some(),
             "tahsis kaydi olusturulur"
         );
+    }
+
+    // OPERASYONEL KANIT: GERCEK satis yolu (owner araci/SDK, faucet gibi) her
+    // satis vertex'ini `node.tips()` = TUM mevcut uclar uzerine kurar. Boylece her
+    // satis, onceki uclari MERGE eder ve TEK uc olur -> ardisik satislar dogal
+    // ZINCIR olusturur, FORK olmaz. Fork olsaydi GHOSTDAG total_order tiebreak'ine
+    // gore kardes uclardan biri BEKLEMEDE kalir, tahsis kaydi gecikirdi. Bu test
+    // her satistan SONRA (a) tek uc kaldigini, (b) tahsisin ANINDA uygulandigini
+    // dogrular -> operasyonel akista beklemede-tahsis IMKANSIZ.
+    #[test]
+    fn on_satis_tips_yolu_zincir_olusturur_beklemede_birakmaz() {
+        use crate::registry::public_key_to_adres;
+        use crate::tx::OnSatisDagitim;
+        let t0 = crate::mainnet::ON_SATIS_BASLANGIC;
+        let od = crate::genesis::ONDALIK;
+        let sk = SigningKey::from_bytes(&[0x7Cu8; 32]);
+        let owner = public_key_to_adres(&sk.verifying_key().to_bytes());
+        let mut node = NodeState::new_devnet(NET);
+        let (gen, _gid) = genesis_bytes(1, t0);
+        node.ingest_networked(&gen, t0);
+        node.faucet_owner_ayarla(owner);
+        node.test_bakiye_ekle(owner, 1_000_000 * od);
+
+        // 8 alici, her biri 40k -> hepsi tavan (630k) altinda, islem sinirinin (50k) altinda.
+        let mut beklenen = 0u128;
+        for i in 0..8u64 {
+            let alici = [0x40u8 + i as u8; 20];
+            // GERCEK YOL: parent = TUM uclar (faucet rpc.rs:528 ile ayni desen).
+            let mut parents = node.tips();
+            parents.sort();
+            let p = OnSatisDagitim::new(alici, 40_000 * od, 0, 200 + i).encode();
+            let v = Vertex::new_signed(NET, parents, p, t0, &sk).expect("satis");
+            node.ingest_networked(&wire::encode(&v), t0);
+            beklenen += 40_000 * od;
+
+            // (a) Her satis tum uclari merge etti -> TEK uc (zincir, fork degil).
+            assert_eq!(node.tips().len(), 1, "satis sonrasi tek uc (merge) olmali");
+            // (b) Tahsis ANINDA uygulandi -> beklemede kalan yok.
+            assert_eq!(
+                node.on_satis_sayisi(),
+                (i + 1) as usize,
+                "her satis aninda kayit olusturur (beklemede yok)"
+            );
+            assert_eq!(
+                node.on_satis_toplam_aidag(),
+                beklenen,
+                "tahsis toplami aninda dogru (gecikme yok)"
+            );
+        }
+        assert_eq!(node.on_satis_toplam_aidag(), 320_000 * od, "8x40k = 320k tahsis");
     }
 
     // KOPRU 5 (canli CALL): node yolundan kontrat CAGIRMA.
@@ -3705,6 +3818,152 @@ mod tests {
         );
         assert_eq!(node.beklenen_nonce(&gonderen), 1, "gonderen nonce ilerledi");
         assert_eq!(node.toplam_bakiye_arzi(), arz_basta, "TOPLAM ARZ KORUNDU");
+    }
+
+    // tip=14: EVM-UYUMLU ON-SATIS CLAIM node testi (gercek MetaMask self-claim).
+    // Alicinin tahsisi 0x adresine kaydedilir; alici EIP-712 imzasiyla KENDI
+    // tahsisini KENDI cuzdanina ceker. Yetki dis vertex imzalayanda DEGIL, alicinin
+    // secp256k1 imzasinda. Vesting %20 TGE dogru; baskasinin imzasi claim EDEMEZ.
+    #[test]
+    fn ingest_evm_on_satis_claim_metamask_ceker() {
+        use crate::registry::public_key_to_adres;
+        use crate::tx::{eip712_claim_digest, EvmClaimTalebi, OnSatisDagitim};
+        use k256::ecdsa::{
+            signature::hazmat::PrehashSigner, RecoveryId, Signature as K256Sig,
+            SigningKey as K256Sk, VerifyingKey as K256Vk,
+        };
+        use sha3::{Digest, Keccak256};
+
+        let od = crate::genesis::ONDALIK;
+        let satis = crate::mainnet::ON_SATIS_BASLANGIC;
+        let tge = crate::mainnet::MAINNET_VESTING_BASLANGIC;
+        let gun = 86400u64;
+
+        let mut node = NodeState::new_devnet(NET);
+        let (gen, gid) = genesis_bytes(1, satis);
+        node.ingest_networked(&gen, satis);
+
+        // owner (escrow) — tahsisi tutan ed25519 kurucu; bol AIDAG + LSC
+        let osk = SigningKey::from_bytes(&[0x91u8; 32]);
+        let owner = public_key_to_adres(&osk.verifying_key().to_bytes());
+        node.faucet_owner_ayarla(owner);
+        node.test_bakiye_ekle(owner, 1_000_000 * od);
+        node.lsc_test_bakiye_ekle(owner, 1_000_000 * od);
+
+        // ALICI = MetaMask (secp256k1) -> 0x adresi (keccak yontemi)
+        let k_sk = K256Sk::from_slice(&[0x44u8; 32]).expect("k256 anahtar");
+        let k_vk = K256Vk::from(&k_sk);
+        let nokta = k_vk.to_encoded_point(false);
+        let h = Keccak256::digest(&nokta.as_bytes()[1..]);
+        let mut alici = [0u8; 20];
+        alici.copy_from_slice(&h[12..]);
+
+        // 1) SATIS: owner, alicinin 0x ADRESINE 1000 AIDAG tahsis + 5 LSC (odeme_ref=500)
+        let sat = OnSatisDagitim::new(alici, 1000 * od, 5 * od, 500).encode();
+        let vs = Vertex::new_signed(NET, vec![gid], sat, satis, &osk).expect("satis");
+        node.ingest_networked(&wire::encode(&vs), satis);
+        assert_eq!(node.bakiye(&alici), 0, "satista transfer yok");
+
+        // 2) TGE'de EVM CLAIM: alici EIP-712 imzasiyla ceker; vertex'i AYRI relay sarar.
+        let mk_claim = |k: &K256Sk| -> EvmClaimTalebi {
+            let digest = eip712_claim_digest(500, NET as u64);
+            let (sig, recid): (K256Sig, RecoveryId) = k.sign_prehash(&digest).expect("imza");
+            EvmClaimTalebi {
+                odeme_ref: 500,
+                recovery_id: recid.to_byte(),
+                imza: sig.to_bytes().into(),
+            }
+        };
+        let relay = SigningKey::from_bytes(&[0x77u8; 32]);
+        let vc = Vertex::new_signed(NET, vec![*vs.id()], mk_claim(&k_sk).encode(), tge, &relay)
+            .expect("claim vertex");
+        node.ingest_networked(&wire::encode(&vc), tge);
+
+        // 3) KANIT: %20 TGE dilimi alicinin 0x adresine geldi + LSC hediye verildi
+        assert_eq!(node.bakiye(&alici), 200 * od, "TGE EVM claim: %20 = 200");
+        assert_eq!(node.lsc_bakiye(&alici), 5 * od, "ilk claim: 5 LSC hediye");
+
+        // 4) BASKA MetaMask cuzdani ayni tahsisi claim etmeye calisir -> RED
+        let baska_sk = K256Sk::from_slice(&[0x55u8; 32]).expect("k256");
+        let vkotu = Vertex::new_signed(NET, vec![*vc.id()], mk_claim(&baska_sk).encode(), tge, &relay)
+            .expect("kotu vertex");
+        let alici_once = node.bakiye(&alici);
+        node.ingest_networked(&wire::encode(&vkotu), tge);
+        assert_eq!(
+            node.bakiye(&alici),
+            alici_once,
+            "baskasinin imzasi tahsisi claim EDEMEZ"
+        );
+
+        // 5) 12 AY SONRA: kalan acilir -> toplam %100 = 1000
+        let vc3 = Vertex::new_signed(
+            NET,
+            vec![*vkotu.id()],
+            mk_claim(&k_sk).encode(),
+            tge + 360 * gun,
+            &relay,
+        )
+        .expect("claim3");
+        node.ingest_networked(&wire::encode(&vc3), tge + 360 * gun);
+        assert_eq!(node.bakiye(&alici), 1000 * od, "12 ay sonra tamami: %100 = 1000");
+    }
+
+    // tip=15: ON-SATIS TGE owner tarafindan ZINCIRDEN ayarlanir; claim yeni TGE'yi
+    // kullanir; owner-disi ayarlayamaz.
+    #[test]
+    fn on_satis_tge_owner_ayarlar_claim_kullanir() {
+        use crate::registry::public_key_to_adres;
+        use crate::tx::{ClaimTalebi, OnSatisDagitim, TgeAyarla};
+        let od = crate::genesis::ONDALIK;
+        let satis = crate::mainnet::ON_SATIS_BASLANGIC;
+        let yeni_tge = satis + 100 * 86400; // owner'in ayarlayacagi TGE
+
+        let mut node = NodeState::new_devnet(NET);
+        let (gen, gid) = genesis_bytes(1, satis);
+        node.ingest_networked(&gen, satis);
+        // varsayilan: pinli sabit
+        assert_eq!(node.on_satis_tge(), crate::mainnet::MAINNET_VESTING_BASLANGIC);
+
+        let osk = SigningKey::from_bytes(&[0x91u8; 32]);
+        let owner = public_key_to_adres(&osk.verifying_key().to_bytes());
+        node.faucet_owner_ayarla(owner);
+        node.test_bakiye_ekle(owner, 1_000_000 * od);
+
+        // BASKASI TGE ayarlamaya calisir -> RED (deger degismez)
+        let bsk = SigningKey::from_bytes(&[0x55u8; 32]);
+        let vb = Vertex::new_signed(NET, vec![gid], TgeAyarla::new(1).encode(), satis, &bsk)
+            .expect("vb");
+        node.ingest_networked(&wire::encode(&vb), satis);
+        assert_eq!(
+            node.on_satis_tge(),
+            crate::mainnet::MAINNET_VESTING_BASLANGIC,
+            "owner-disi TGE ayarlayamaz"
+        );
+
+        // OWNER TGE ayarlar -> deger degisir
+        let vt = Vertex::new_signed(NET, vec![*vb.id()], TgeAyarla::new(yeni_tge).encode(), satis, &osk)
+            .expect("vt");
+        node.ingest_networked(&wire::encode(&vt), satis);
+        assert_eq!(node.on_satis_tge(), yeni_tge, "owner TGE ayarladi");
+
+        // Satis + claim: TGE yeni_tge'ye gore
+        let ask = SigningKey::from_bytes(&[0x44u8; 32]);
+        let alici = public_key_to_adres(&ask.verifying_key().to_bytes());
+        let sat = OnSatisDagitim::new(alici, 1000 * od, 0, 500).encode();
+        let vs = Vertex::new_signed(NET, vec![*vt.id()], sat, satis, &osk).expect("satis");
+        node.ingest_networked(&wire::encode(&vs), satis);
+
+        // yeni_tge ONCESI claim -> 0
+        let vc0 = Vertex::new_signed(NET, vec![*vs.id()], ClaimTalebi::new(500).encode(), yeni_tge - 10, &ask)
+            .expect("c0");
+        node.ingest_networked(&wire::encode(&vc0), yeni_tge - 10);
+        assert_eq!(node.bakiye(&alici), 0, "yeni TGE oncesi claim=0");
+
+        // yeni_tge'de claim -> %20 = 200
+        let vc1 = Vertex::new_signed(NET, vec![*vc0.id()], ClaimTalebi::new(500).encode(), yeni_tge, &ask)
+            .expect("c1");
+        node.ingest_networked(&wire::encode(&vc1), yeni_tge);
+        assert_eq!(node.bakiye(&alici), 200 * od, "yeni TGE'de %20=200");
     }
 
     // ===============================================================

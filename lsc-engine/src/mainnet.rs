@@ -33,12 +33,14 @@ pub const MAINNET_GENESIS_ZAMANI: u64 = 1_185_926_400;
 /// Genesis payload (opak). Genesis id'sinin parcasi — degisirse id degisir.
 pub const MAINNET_GENESIS_PAYLOAD: &[u8] = b"AIDAG-MAINNET-GENESIS-v1";
 
-/// VESTING BASLANGICI (Unix saniye) — kurucu/destekci/likidite kilit sayaci
-/// buradan baslar. **SABIT** olmali: `SystemTime::now()` kullanilirsa her dugum
-/// farkli kilit takvimi hesaplar → bakiye/transfer gecerliligi ayrisir (konsensus
-/// bolunmesi). Bu yuzden koda pinli. Su an referans: 2026-07-15 00:00:00 UTC.
-/// GERCEK MAINNET LAUNCH tarihinde bu deger guncellenip yeniden derlenir.
-pub const MAINNET_VESTING_BASLANGIC: u64 = 1_784_073_600;
+/// VESTING BASLANGICI = TGE (Unix saniye) — kurucu/destekci/likidite kilit
+/// sayaci VE on-satis claim'i buradan baslar. Bu damgadan ONCE hic kimse token
+/// CEKEMEZ (on-satis tahsisleri bekler, claim 0 doner). **SABIT** olmali:
+/// `SystemTime::now()` kullanilirsa her dugum farkli kilit takvimi hesaplar →
+/// bakiye/transfer gecerliligi ayrisir (konsensus bolunmesi). Bu yuzden koda
+/// pinli. Referans: 2026-08-26 00:00:00 UTC (on-satis penceresinden ~1 ay sonra;
+/// bkz. ON_SATIS_BASLANGIC). GERCEK LAUNCH'ta bu deger guncellenip yeniden derlenir.
+pub const MAINNET_VESTING_BASLANGIC: u64 = 1_787_702_400;
 
 // === Asagidaki degerler `uret_mainnet_genesis` ciktisiyla doldurulur ===
 
@@ -263,7 +265,12 @@ pub const ON_SATIS_FAZ1_TAVAN: u128 = 630_000 * crate::genesis::ONDALIK;
 /// AIDAG dagitabilir. Tek hamlede buyuk bosaltmayi engeller.
 pub const ON_SATIS_ISLEM_UST_SINIR: u128 = 50_000 * crate::genesis::ONDALIK;
 
-/// On satis dagitiminin baslayabilecegi en erken zaman (Unix saniye).
-/// Bu damgadan ONCE gelen tip=10 dagitimi reddedilir. Ucu ACIK: bitis
-/// yok, denetim uzarsa satis bloklanmaz. Simdilik TGE ile ayni referans.
-pub const ON_SATIS_BASLANGIC: u64 = MAINNET_VESTING_BASLANGIC;
+/// On satis dagitiminin (tip=10 TAHSIS) baslayabilecegi en erken zaman (Unix
+/// saniye). Bu damgadan ONCE gelen tahsis reddedilir. Ucu ACIK: bitis yok,
+/// denetim uzarsa satis bloklanmaz.
+///
+/// TGE'DEN AYRI: satis penceresi TGE'den ONCE acilir. "Once sat (tahsis), TGE'de
+/// ac (claim)" modeli boyle calisir — satista AIDAG transfer edilmez, alici token'i
+/// ancak MAINNET_VESTING_BASLANGIC (TGE) sonrasi claim eder. Referans: 2026-07-26
+/// 00:00:00 UTC (TGE'den ~1 ay once).
+pub const ON_SATIS_BASLANGIC: u64 = 1_785_024_000;

@@ -422,8 +422,10 @@ async fn on_satis_tahsis(State(st): State<RpcState>, Path(adres_hex): Path<Strin
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let tge = lsc_engine::mainnet::MAINNET_VESTING_BASLANGIC;
-    let alimlar_ham = { st.node.read().await.on_satis_adrese_gore(&adres) };
+    let (tge, alimlar_ham) = {
+        let n = st.node.read().await;
+        (n.on_satis_tge(), n.on_satis_adrese_gore(&adres))
+    };
     let mut toplam_tahsis: u128 = 0;
     let mut toplam_hak: u128 = 0;
     let mut toplam_claimlenen: u128 = 0;
@@ -461,6 +463,92 @@ async fn on_satis_tahsis(State(st): State<RpcState>, Path(adres_hex): Path<Strin
         "toplam_claimlenen": toplam_claimlenen.to_string(),
         "tahsis_sayisi": tahsisler.len(),
         "tahsisler": tahsisler,
+    }))
+}
+
+/// POST /on-satis-claim — EVM (MetaMask) SELF-CLAIM relay'i.
+/// Alici, EIP-712 (`eth_signTypedData_v4`) ile on-satis claim'ini imzalar; imza +
+/// odeme_ref buraya gelir. Node, tip=14 EvmClaimTalebi payload'ini uretip vertex'e
+/// sarar (kendi ed25519 anahtariyla — TASIYICI/relay; yetki alicinin secp256k1
+/// imzasidir, `claim_eden_adres` ecrecover ile bulur). parents = node.tips() ->
+/// ardisik zincir (fork degil). Body: {"odeme_ref": <u64>, "sig": "0x<130 hex>"}.
+/// sig = MetaMask 65-bayt imza (r||s||v); recovery_id = v-27 (ya da 0/1).
+async fn on_satis_claim_relay(State(st): State<RpcState>, Json(govde): Json<Value>) -> Json<Value> {
+    let odeme_ref = match govde.get("odeme_ref").and_then(|v| v.as_u64()) {
+        Some(r) => r,
+        None => return Json(json!({ "ok": false, "hata": "odeme_ref (u64) gerekli" })),
+    };
+    let sig_hex = govde
+        .get("sig")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .trim_start_matches("0x")
+        .trim_start_matches("0X");
+    let sig_bytes = match hex::decode(sig_hex) {
+        Ok(b) if b.len() == 65 => b,
+        _ => return Json(json!({ "ok": false, "hata": "sig 65 bayt (130 hex) olmali (r||s||v)" })),
+    };
+    let mut imza = [0u8; 64];
+    imza.copy_from_slice(&sig_bytes[..64]);
+    // MetaMask v: 27/28 (ya da bazi cuzdanlarda 0/1). recovery_id 0/1'e indir.
+    let v = sig_bytes[64];
+    let recovery_id = if v >= 27 { v - 27 } else { v };
+
+    let claim = lsc_engine::tx::EvmClaimTalebi {
+        odeme_ref,
+        recovery_id,
+        imza,
+    };
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    // ANTI-SPAM + NET HATA: vertex OLUSTURMADAN once claim'i dogrula. Bu ACIK bir
+    // POST ucu; on-dogrulama olmadan her cagri (gecersiz imza/olmayan tahsis dahil)
+    // DAG'a no-op vertex yazardi -> mainnet'te kaynak-tuketimi/spam vektoru (faucet'te
+    // anti-spam var, burada da olmali). Konsensus kurali AYRICA kalkana_yonlendir'de
+    // uygulanir; bu YEREL relay politikasidir (dugumler arasi ayrisma yaratmaz).
+    let (parents, net) = {
+        let node = st.node.read().await;
+        let net = node.network_id();
+        let cagiran = match claim.claim_eden_adres(net as u64) {
+            Some(a) => a,
+            None => return Json(json!({ "ok": false, "hata": "imza gecersiz (ecrecover basarisiz)" })),
+        };
+        match node.on_satis_sorgula(odeme_ref) {
+            None => {
+                return Json(json!({ "ok": false, "hata": "bu odeme_ref icin tahsis bulunamadi" }))
+            }
+            Some(k) if k.alici != cagiran => {
+                return Json(json!({ "ok": false, "hata": "bu tahsis bu cuzdana ait degil (imza/adres uyusmuyor)" }))
+            }
+            Some(k) => {
+                let tge = node.on_satis_tge();
+                if k.claim_edilebilir(now, tge) == 0 {
+                    return Json(json!({ "ok": false, "hata": "su an cekilebilir AIDAG yok (TGE gelmedi ya da tamami claimlendi)" }));
+                }
+            }
+        }
+        (node.tips(), net)
+    };
+    let payload = claim.encode();
+    let vertex = match lsc_engine::Vertex::new_signed(net, parents, payload, now, &st.signing_key) {
+        Ok(v) => v,
+        Err(e) => return Json(json!({ "ok": false, "hata": format!("vertex uretilemedi: {e:?}") })),
+    };
+    let bytes = lsc_engine::dag::wire::encode(&vertex);
+    let sonuc = { st.node.write().await.ingest_networked(&bytes, now) };
+    let kabul = !format!("{sonuc:?}").contains("Rejected");
+    if kabul {
+        let _ = st.submit_tx.send(bytes); // aga yayinla
+    }
+    Json(json!({
+        "ok": kabul,
+        "odeme_ref": odeme_ref,
+        "not": "Claim zincire yazildi. Acilan AIDAG cuzdanina gecti; MetaMask ile (EvmTransfer) kullanabilirsin. Tahsislerim ekranindan durumu gorursun.",
     }))
 }
 
@@ -989,7 +1077,8 @@ pub fn router(
         .route("/on-satis/:odeme_ref", get(on_satis_sorgu))
         .route("/on-satis-ozet", get(on_satis_ozet))
         .route("/on-satis-adres/:adres", get(on_satis_adres))
-        .route("/on-satis-tahsis/:adres", get(on_satis_tahsis));
+        .route("/on-satis-tahsis/:adres", get(on_satis_tahsis))
+        .route("/on-satis-claim", post(on_satis_claim_relay));
 
     // FAUCET: anti-spam korumali (bakiye limitli), production da dahil ACIK.
     // test_bakiye/lsc_test_bakiye: sinirsiz basma -> sadece GELISTIRME modunda.
