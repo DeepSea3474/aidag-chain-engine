@@ -56,20 +56,21 @@ fn hex32(s: &str) -> [u8; 32] {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() != 9 {
+    if args.len() != 10 {
         hata("8 arguman gerekli");
     }
     let key_path = &args[1];
     let net_id: u32 = args[2].parse().unwrap_or_else(|_| hata("net_id sayi olmali"));
     let alici = hex20(&args[3]);
-    let aidag_tam: u128 = args[4].parse().unwrap_or_else(|_| hata("aidag sayi olmali"));
-    let lsc_tam: u128 = args[5].parse().unwrap_or_else(|_| hata("lsc_hediye sayi olmali"));
-    let odeme_ref: u64 = args[6].parse().unwrap_or_else(|_| hata("odeme_ref sayi olmali"));
-    let ts: u64 = args[7].parse().unwrap_or_else(|_| hata("ts sayi olmali"));
-    let mut tips: Vec<[u8; 32]> = if args[8] == "-" || args[8].is_empty() {
+    let odeme_adresi = hex20(&args[4]);
+    let aidag_tam: u128 = args[5].parse().unwrap_or_else(|_| hata("aidag sayi olmali"));
+    let lsc_tam: u128 = args[6].parse().unwrap_or_else(|_| hata("lsc_hediye sayi olmali"));
+    let odeme_ref: u64 = args[7].parse().unwrap_or_else(|_| hata("odeme_ref sayi olmali"));
+    let ts: u64 = args[8].parse().unwrap_or_else(|_| hata("ts sayi olmali"));
+    let mut tips: Vec<[u8; 32]> = if args[9] == "-" || args[9].is_empty() {
         vec![]
     } else {
-        args[8].split(',').filter(|t| !t.is_empty()).map(hex32).collect()
+        args[9].split(',').filter(|t| !t.is_empty()).map(hex32).collect()
     };
     // Kanoniklik: parent seti KESIN ARTAN olmali (vertex check_bounds). Sirala.
     tips.sort();
@@ -91,7 +92,7 @@ fn main() {
         .checked_mul(ONDALIK)
         .unwrap_or_else(|| hata("lsc hediye tasti"));
 
-    let payload = OnSatisDagitim::new(alici, aidag, lsc, odeme_ref).encode();
+    let payload = OnSatisDagitim::new(odeme_adresi, alici, aidag, lsc, odeme_ref).encode();
     let v = Vertex::new_signed(net_id, tips, payload, ts, &sk)
         .unwrap_or_else(|e| hata(&format!("vertex uretilemedi: {e:?}")));
     let bytes = wire::encode(&v);

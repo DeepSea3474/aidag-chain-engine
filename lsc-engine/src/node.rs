@@ -1128,8 +1128,9 @@ impl NodeState {
                             let _ = self.on_satis_registry.kaydet(
                                 d.odeme_ref,
                                 d.alici,
+                                d.odeme_adresi,
                                 d.aidag,
-                                d.lsc_hediye, // claim'de verilecek hediye MIKTARI (henuz verilmedi)
+                                d.lsc_hediye,
                                 zaman,
                             );
                         }
@@ -2907,7 +2908,7 @@ mod tests {
 
         // 1) SATIS: owner aliciya 1000 AIDAG tahsis eder (+ 5 LSC hediye), odeme_ref=500
         //    SATIS penceresinde (TGE'den once) yapilir.
-        let sat = OnSatisDagitim::new(alici, 1000 * od, 5 * od, 500).encode();
+        let sat = OnSatisDagitim::new(alici, alici, 1000 * od, 5 * od, 500).encode();
         let vs = Vertex::new_signed(NET, vec![gid], sat, satis, &osk).expect("satis");
         node.ingest_networked(&wire::encode(&vs), satis);
         assert_eq!(node.bakiye(&alici), 0, "satista transfer yok");
@@ -2958,7 +2959,7 @@ mod tests {
         // yeni tahsis: baska aliciya 500, odeme_ref=600
         let baska_sk = SigningKey::from_bytes(&[0x55u8; 32]);
         let baska = public_key_to_adres(&baska_sk.verifying_key().to_bytes());
-        let sat2 = OnSatisDagitim::new(baska, 500 * od, 0, 600).encode();
+        let sat2 = OnSatisDagitim::new(baska, baska, 500 * od, 0, 600).encode();
         let vs2 = Vertex::new_signed(NET, vec![*vc4.id()], sat2, tge, &osk).expect("satis2");
         node.ingest_networked(&wire::encode(&vs2), tge);
         // saldirgan (alici) baskasinin ref'ini claim etmeye calisir
@@ -2983,7 +2984,7 @@ mod tests {
         node.faucet_owner_ayarla(owner);
         node.test_bakiye_ekle(owner, 1_000_000);
         let alici = [0x11u8; 20];
-        let p = OnSatisDagitim::new(alici, 1000, 0, 1).encode();
+        let p = OnSatisDagitim::new(alici, alici, 1000, 0, 1).encode();
         let v = Vertex::new_signed(NET, vec![gid], p, t0 - 1, &sk).expect("v");
         node.ingest_networked(&wire::encode(&v), t0 - 1);
         assert_eq!(node.bakiye(&alici), 0, "baslangictan once dagitim OLMAMALI");
@@ -3004,7 +3005,7 @@ mod tests {
         node.faucet_owner_ayarla(owner);
         node.test_bakiye_ekle(owner, 200_000 * od);
         let alici = [0x22u8; 20];
-        let p = OnSatisDagitim::new(alici, 50_000 * od + 1, 0, 2).encode();
+        let p = OnSatisDagitim::new(alici, alici, 50_000 * od + 1, 0, 2).encode();
         let v = Vertex::new_signed(NET, vec![gid], p, t0, &sk).expect("v");
         node.ingest_networked(&wire::encode(&v), t0);
         assert_eq!(node.bakiye(&alici), 0, "50k ustu dagitim OLMAMALI");
@@ -3026,7 +3027,7 @@ mod tests {
         node.test_bakiye_ekle(owner, 200_000 * od);
         let alici = [0x23u8; 20];
         let tam = 50_000 * od;
-        let p = OnSatisDagitim::new(alici, tam, 0, 4).encode();
+        let p = OnSatisDagitim::new(alici, alici, tam, 0, 4).encode();
         let v = Vertex::new_signed(NET, vec![gid], p, t0, &sk).expect("v");
         node.ingest_networked(&wire::encode(&v), t0);
         // YENI MODEL: satista transfer YOK, sadece TAHSIS kaydi. Bakiye 0 kalir.
@@ -3052,7 +3053,7 @@ mod tests {
         let mut ref_no = 100u64;
         for i in 0..13u8 {
             let alici = [0x30u8 + i; 20];
-            let p = OnSatisDagitim::new(alici, 48_000 * od, 0, ref_no).encode();
+            let p = OnSatisDagitim::new(alici, alici, 48_000 * od, 0, ref_no).encode();
             let v = Vertex::new_signed(NET, vec![parent], p, t0, &sk).expect("v");
             node.ingest_networked(&wire::encode(&v), t0);
             parent = *v.id();
@@ -3060,7 +3061,7 @@ mod tests {
         }
         assert_eq!(node.on_satis_toplam_aidag(), 624_000 * od, "624k gecti");
         let alici_son = [0xAAu8; 20];
-        let p = OnSatisDagitim::new(alici_son, 7_000 * od, 0, ref_no).encode();
+        let p = OnSatisDagitim::new(alici_son, alici_son, 7_000 * od, 0, ref_no).encode();
         let v = Vertex::new_signed(NET, vec![parent], p, t0, &sk).expect("v");
         node.ingest_networked(&wire::encode(&v), t0);
         // satista transfer yok; RED = tahsis kaydi olusmadi (toplam degismez)
@@ -3068,7 +3069,7 @@ mod tests {
         // 6k satisi 7k'nin uzerine ZINCIRLENIR (fork DEGIL). Kardes-uc kurulursa
         // ghostdag total_order tiebreak'ine gore biri beklemede kalabilir; satista
         // ardisik zincir (owner sirayla imzalar) belirlenimci sonucu garanti eder.
-        let p2 = OnSatisDagitim::new(alici_son, 6_000 * od, 0, ref_no + 1).encode();
+        let p2 = OnSatisDagitim::new(alici_son, alici_son, 6_000 * od, 0, ref_no + 1).encode();
         let v2 = Vertex::new_signed(NET, vec![*v.id()], p2, t0, &sk).expect("v2");
         node.ingest_networked(&wire::encode(&v2), t0);
         // sinira kadar KABUL = tahsis kaydi olustu (bakiye degil, tahsis artar)
@@ -3098,7 +3099,7 @@ mod tests {
         let odeme_ref = 777u64;
 
         // 2) Owner on satis dagitimi yapar: aliciya 5000 AIDAG + 10 LSC, odeme_ref=777
-        let payload = OnSatisDagitim::new(alici, 5000, 10, odeme_ref).encode();
+        let payload = OnSatisDagitim::new(alici, alici, 5000, 10, odeme_ref).encode();
         let v = Vertex::new_signed(NET, vec![gid], payload, now, &sk).expect("on satis vertex");
         src.ingest_networked(&wire::encode(&v), now);
 
@@ -3167,7 +3168,7 @@ mod tests {
         let alici_baslangic = node.bakiye(&alici);
 
         // Saldirgan tip=10 gondermeyi dener (kendini owner sanarak)
-        let payload = OnSatisDagitim::new(alici, 5000, 10, 888).encode();
+        let payload = OnSatisDagitim::new(alici, alici, 5000, 10, 888).encode();
         let v = Vertex::new_signed(NET, vec![gid], payload, now, &saldirgan_sk)
             .expect("saldirgan vertex");
         node.ingest_networked(&wire::encode(&v), now);
@@ -3203,7 +3204,7 @@ mod tests {
         // Bilerek bakiye VERMIYORUZ -> transfer basarisiz olmali.
 
         let alici = [0x66u8; 20];
-        let payload = OnSatisDagitim::new(alici, 5000, 10, 31337).encode();
+        let payload = OnSatisDagitim::new(alici, alici, 5000, 10, 31337).encode();
         let v = Vertex::new_signed(NET, vec![gid], payload, now, &sk).expect("vertex");
         node.ingest_networked(&wire::encode(&v), now);
 
@@ -3246,7 +3247,7 @@ mod tests {
             // GERCEK YOL: parent = TUM uclar (faucet rpc.rs:528 ile ayni desen).
             let mut parents = node.tips();
             parents.sort();
-            let p = OnSatisDagitim::new(alici, 40_000 * od, 0, 200 + i).encode();
+            let p = OnSatisDagitim::new(alici, alici, 40_000 * od, 0, 200 + i).encode();
             let v = Vertex::new_signed(NET, parents, p, t0, &sk).expect("satis");
             node.ingest_networked(&wire::encode(&v), t0);
             beklenen += 40_000 * od;
@@ -3859,7 +3860,7 @@ mod tests {
         alici.copy_from_slice(&h[12..]);
 
         // 1) SATIS: owner, alicinin 0x ADRESINE 1000 AIDAG tahsis + 5 LSC (odeme_ref=500)
-        let sat = OnSatisDagitim::new(alici, 1000 * od, 5 * od, 500).encode();
+        let sat = OnSatisDagitim::new(alici, alici, 1000 * od, 5 * od, 500).encode();
         let vs = Vertex::new_signed(NET, vec![gid], sat, satis, &osk).expect("satis");
         node.ingest_networked(&wire::encode(&vs), satis);
         assert_eq!(node.bakiye(&alici), 0, "satista transfer yok");
@@ -3949,7 +3950,7 @@ mod tests {
         // Satis + claim: TGE yeni_tge'ye gore
         let ask = SigningKey::from_bytes(&[0x44u8; 32]);
         let alici = public_key_to_adres(&ask.verifying_key().to_bytes());
-        let sat = OnSatisDagitim::new(alici, 1000 * od, 0, 500).encode();
+        let sat = OnSatisDagitim::new(alici, alici, 1000 * od, 0, 500).encode();
         let vs = Vertex::new_signed(NET, vec![*vt.id()], sat, satis, &osk).expect("satis");
         node.ingest_networked(&wire::encode(&vs), satis);
 

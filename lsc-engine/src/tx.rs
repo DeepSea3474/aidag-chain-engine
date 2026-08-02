@@ -547,58 +547,70 @@ impl AvmCagri {
 /// ON SATIS DAGITIM (tip=10). SADECE owner cagirir. Hazineden AIDAG + LSC hediye.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OnSatisDagitim {
+    pub odeme_adresi: [u8; ADDR_LEN],
     pub alici: [u8; ADDR_LEN],
     pub aidag: crate::registry::Tutar,
     pub lsc_hediye: crate::registry::Tutar,
     pub odeme_ref: u64,
 }
-const ON_SATIS_LEN: usize = 1 + ADDR_LEN + 16 + 16 + 8; // aidag(16)+lsc_hediye(16)+odeme_ref(8)
+
+const ON_SATIS_LEN: usize = 1 + ADDR_LEN + ADDR_LEN + 16 + 16 + 8;
 
 impl OnSatisDagitim {
     pub fn new(
+        odeme_adresi: [u8; ADDR_LEN],
         alici: [u8; ADDR_LEN],
         aidag: crate::registry::Tutar,
         lsc_hediye: crate::registry::Tutar,
         odeme_ref: u64,
     ) -> Self {
-        OnSatisDagitim {
+        Self {
+            odeme_adresi,
             alici,
             aidag,
             lsc_hediye,
             odeme_ref,
         }
     }
+
     pub fn encode(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(ON_SATIS_LEN);
         out.push(TX_TYPE_ON_SATIS);
+        out.extend_from_slice(&self.odeme_adresi);
         out.extend_from_slice(&self.alici);
         out.extend_from_slice(&self.aidag.to_be_bytes());
         out.extend_from_slice(&self.lsc_hediye.to_be_bytes());
         out.extend_from_slice(&self.odeme_ref.to_be_bytes());
         out
     }
+
     pub fn decode(bytes: &[u8]) -> Result<OnSatisDagitim, TxError> {
-        let &first = bytes.first().ok_or(TxError::Empty)?;
-        if first != TX_TYPE_ON_SATIS {
-            return Err(TxError::UnknownType(first));
-        }
         if bytes.len() != ON_SATIS_LEN {
             return Err(TxError::BadLength {
                 expected: ON_SATIS_LEN,
                 got: bytes.len(),
             });
         }
+
+        let mut odeme_adresi = [0u8; ADDR_LEN];
+        odeme_adresi.copy_from_slice(&bytes[1..21]);
+
         let mut alici = [0u8; ADDR_LEN];
-        alici.copy_from_slice(&bytes[1..1 + ADDR_LEN]);
-        let mut b16 = [0u8; 16];
-        b16.copy_from_slice(&bytes[1 + ADDR_LEN..1 + ADDR_LEN + 16]);
+        alici.copy_from_slice(&bytes[21..41]);
+
+        let mut b16 = [0u8;16];
+        b16.copy_from_slice(&bytes[41..57]);
         let aidag = u128::from_be_bytes(b16);
-        b16.copy_from_slice(&bytes[1 + ADDR_LEN + 16..1 + ADDR_LEN + 32]);
+
+        b16.copy_from_slice(&bytes[57..73]);
         let lsc_hediye = u128::from_be_bytes(b16);
-        let mut b8 = [0u8; 8];
-        b8.copy_from_slice(&bytes[1 + ADDR_LEN + 32..ON_SATIS_LEN]);
-        let odeme_ref = u64::from_be_bytes(b8);
-        Ok(OnSatisDagitim {
+
+        let mut b8=[0u8;8];
+        b8.copy_from_slice(&bytes[73..81]);
+        let odeme_ref=u64::from_be_bytes(b8);
+
+        Ok(Self{
+            odeme_adresi,
             alici,
             aidag,
             lsc_hediye,
@@ -606,8 +618,6 @@ impl OnSatisDagitim {
         })
     }
 }
-
-/// ON SATIS CLAIM (tip=11). Alici, TGE sonrasi hak ettigi AIDAG'i ceker.
 /// Payload SADECE odeme_ref: alici adresi IMZADAN gelir (imzalayan = tahsisin
 /// alicisi olmali, node.rs claim yolunda dogrulanir). Boylece kimse baskasinin
 /// tahsisini claim edemez.

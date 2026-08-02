@@ -1250,6 +1250,7 @@ impl EslestirmeRegistry {
 /// (bir ödeme = bir dağıtım; owner yanlışlıkla iki kez gönderse bile çifte AIDAG gitmez).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OnSatisKaydi {
+    pub odeme_adresi: [u8; 20],
     pub alici: [u8; 20],
     pub aidag: Tutar,        // TAHSIS edilen toplam AIDAG (owner'da bekler, TGE'de claim edilir)
     pub lsc_hediye: Tutar,   // claim aninda verilecek LSC hediye (gas icin)
@@ -1317,6 +1318,7 @@ impl OnSatisRegistry {
         &mut self,
         odeme_ref: u64,
         alici: [u8; 20],
+        odeme_adresi: [u8; 20],
         aidag: Tutar,
         lsc_hediye: Tutar,
         zaman: u64,
@@ -1327,6 +1329,7 @@ impl OnSatisRegistry {
         self.kayitlar.insert(
             odeme_ref,
             OnSatisKaydi {
+                odeme_adresi,
                 alici,
                 aidag,
                 lsc_hediye,
@@ -1427,6 +1430,7 @@ mod on_satis_testleri {
         let gun = 86400u64;
         let od = crate::genesis::ONDALIK;
         let k = OnSatisKaydi {
+            odeme_adresi: [0u8; 20],
             alici: [1u8; 20],
             aidag: 1000 * od,
             lsc_hediye: 0,
@@ -1452,6 +1456,7 @@ mod on_satis_testleri {
         let gun = 86400u64;
         let od = crate::genesis::ONDALIK;
         let mut k = OnSatisKaydi {
+            odeme_adresi: [0u8; 20],
             alici: [2u8; 20],
             aidag: 1000 * od,
             lsc_hediye: 0,
@@ -1480,14 +1485,14 @@ mod on_satis_testleri {
         let alici = [1u8; 20];
         // ilk dagitim: odeme_ref=100 -> kabul (true)
         assert!(
-            r.kaydet(100, alici, 5000, 10, 1234),
+            r.kaydet(100, alici, [0u8; 20], 5000, 10, 1234),
             "ilk dagitim kabul edilmeli"
         );
         assert_eq!(r.sayisi(), 1);
         assert_eq!(r.toplam_aidag(), 5000);
         // ayni odeme_ref=100 tekrar -> RED (false), cifte dagitim yok
         assert!(
-            !r.kaydet(100, alici, 5000, 10, 1235),
+            !r.kaydet(100, alici, [0u8; 20], 5000, 10, 1235),
             "ayni odeme_ref reddedilmeli"
         );
         assert_eq!(r.sayisi(), 1, "kayit sayisi degismemeli");
@@ -1498,7 +1503,7 @@ mod on_satis_testleri {
         );
         // farkli odeme_ref=200 -> kabul
         assert!(
-            r.kaydet(200, alici, 3000, 0, 1236),
+            r.kaydet(200, alici, [0u8; 20], 3000, 0, 1236),
             "yeni odeme_ref kabul edilmeli"
         );
         assert_eq!(r.sayisi(), 2);
@@ -1513,7 +1518,7 @@ mod on_satis_testleri {
     fn kullanilmis_kontrolu() {
         let mut r = OnSatisRegistry::yeni();
         assert!(!r.kullanilmis(42), "baslangicta kullanilmamis olmali");
-        r.kaydet(42, [2u8; 20], 1000, 0, 999);
+        r.kaydet(42, [2u8; 20], [0u8; 20], 1000, 0, 999);
         assert!(r.kullanilmis(42), "kayittan sonra kullanilmis olmali");
     }
 
@@ -1523,9 +1528,9 @@ mod on_satis_testleri {
         let ali = [0xAAu8; 20];
         let veli = [0xBBu8; 20];
         // Ali iki alim yapar (farkli zaman), Veli bir alim
-        r.kaydet(1, ali, 50, 0, 100); // Ali: 50 AIDAG, zaman 100
-        r.kaydet(2, veli, 30, 0, 150); // Veli: 30 AIDAG
-        r.kaydet(3, ali, 20, 0, 200); // Ali: 20 AIDAG, zaman 200
+        r.kaydet(1, ali, [0u8; 20], 50, 0, 100); // Ali: 50 AIDAG, zaman 100
+        r.kaydet(2, veli, [0u8; 20], 30, 0, 150); // Veli: 30 AIDAG
+        r.kaydet(3, ali, [0u8; 20], 20, 0, 200); // Ali: 20 AIDAG, zaman 200
 
         // Ali kendi alimlarini sorgular -> 2 alim, zamana sirali
         let ali_alimlar = r.adrese_gore(&ali);
