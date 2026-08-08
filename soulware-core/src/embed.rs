@@ -21,7 +21,7 @@ pub struct Embedder {
 impl Embedder {
     /// model_dir içinde config.json + tokenizer.json + model.safetensors bekler.
     pub fn load(model_dir: &str) -> anyhow::Result<Self> {
-        let device = Device::Cpu;
+        let device = Device::cuda_if_available(0).unwrap_or(Device::Cpu);
         let cfg_bytes = std::fs::read(format!("{model_dir}/config.json"))
             .map_err(|e| anyhow::anyhow!("embed config okunamadı: {e}"))?;
         let config: Config = serde_json::from_slice(&cfg_bytes)

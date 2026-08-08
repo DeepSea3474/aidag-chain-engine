@@ -27,3 +27,10 @@ candle-transformers = "0.8"
 candle-nn = "0.8"
 tokenizers = "0.20"
 anyhow = "1"
+
+# GPU: varsayilan CPU (temiz build). GPU sunucuda `cargo build --release --features cuda`
+# -> candle CUDA cekirdekleri; local_brain/embed cuda_if_available ile GPU'yu otomatik kullanir.
+# Buyuk acik modeller (Qwen-32B/72B, DeepSeek-32B) GPU'da hizli kosar -> asil model sicramasi.
+[features]
+default = []
+cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]

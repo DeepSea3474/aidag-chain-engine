@@ -40,7 +40,9 @@ impl LocalBrain {
     /// GGUF ağırlık + tokenizer.json'dan yükle. Dosyalar yoksa Err döner (servis
     /// yine ayakta kalır — beyin "yapılandırılmadı" olur, sahte cevap YOK).
     pub fn load(gguf_path: &str, tokenizer_path: &str, model_name: &str, sablon: Sablon) -> anyhow::Result<Self> {
-        let device = Device::Cpu;
+        // GPU varsa (cuda feature ile derlendiyse) otomatik kullan; yoksa CPU. Aynı kod
+        // hem CPU sunucuda hem GPU sunucuda çalışır → büyük model GPU'da hızlı koşar.
+        let device = Device::cuda_if_available(0).unwrap_or(Device::Cpu);
         let mut file = std::fs::File::open(gguf_path)
             .map_err(|e| anyhow::anyhow!("gguf açılamadı ({gguf_path}): {e}"))?;
         let content = gguf_file::Content::read(&mut file)
