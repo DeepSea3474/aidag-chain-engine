@@ -1,7 +1,7 @@
 [Unit]
 Description=SoulwareAI coordinator (compute+reward, :8647)
-After=aidag-node.service network-online.target
-Wants=aidag-node.service
+After=lsc-node.service network-online.target
+Wants=lsc-node.service
 
 [Service]
 Type=simple

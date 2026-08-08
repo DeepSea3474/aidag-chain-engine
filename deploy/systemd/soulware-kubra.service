@@ -1,7 +1,7 @@
 [Unit]
 Description=SoulwareAI KUBRA core (soulware-core, :8646, grounding)
-After=aidag-node.service network-online.target
-Wants=aidag-node.service
+After=lsc-node.service network-online.target
+Wants=lsc-node.service
 
 [Service]
 Type=simple
