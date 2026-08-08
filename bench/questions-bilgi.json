@@ -1,0 +1,11 @@
+{
+  "surum": "bilgi-v1",
+  "not": "Ingest edilen Wikipedia korpusunu (491+ belge) olcen BILGI-KAPSAMA seti. Bu sorularin cevaplari korpusa yuklenen makalelerin GIRIS ozetinde bulunur. Amac: bilgi ingestinin KUBRA'ya ne kadar YENI bilgi kazandirdigini olcmek. Temel set (questions.json) baseline izler; bu set korpus buyumesini izler.",
+  "sorular": [
+    { "id": 101, "kategori": "bilgi-tarih", "soru": "Mogol Imparatorlugu'nu kim kurdu? Tek isim.", "cevap": "cengiz", "frontier": true },
+    { "id": 102, "kategori": "bilgi-felsefe", "soru": "Karl Marx hangi milletten bir dusunurdur? Tek kelime.", "cevap": "alman", "frontier": true },
+    { "id": 103, "kategori": "bilgi-teknoloji", "soru": "Linux bir ne turudur? (isletim sistemi / cekirdek). Kisa yaz.", "cevap": "isletim", "frontier": true },
+    { "id": 104, "kategori": "bilgi-cografya", "soru": "Turkiye'nin en kalabalik sehri hangisidir? Tek kelime.", "cevap": "istanbul", "frontier": true },
+    { "id": 105, "kategori": "bilgi-kavram", "soru": "AIDAG-Chain hangi programlama diliyle yazilmistir? Tek kelime.", "cevap": "rust", "frontier": false }
+  ]
+}
