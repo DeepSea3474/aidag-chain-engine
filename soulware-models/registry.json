@@ -1,0 +1,16 @@
+{
+  "not": "KUBRA beyin registry'si — kullanabilecegi ACIK gelismis modeller. Beyin modelden BAGIMSIZ (pluggable). 'destek' = mevcut candle yukleyiciyle calisir mi. qwen2 mimarisi ZATEN destekli (0.5B..72B ayni yukleyici). llama/mistral/deepseek mimarileri icin yukleyici eklenecek (yol haritasi). Buyuk modeller GPU/RAM ister -> katki GPU'lari (DePIN).",
+  "aktif": "qwen2.5-1.5b",
+  "modeller": [
+    { "id": "qwen2.5-0.5b", "ad": "Qwen2.5-0.5B-Instruct", "arch": "qwen2", "parametre": "0.5B", "tier": 1, "gpu_gerek": false, "destek": "simdi", "kaynak": "hf:Qwen/Qwen2.5-0.5B-Instruct-GGUF", "yerel": null },
+    { "id": "qwen2.5-1.5b", "ad": "Qwen2.5-1.5B-Instruct", "arch": "qwen2", "parametre": "1.5B", "tier": 2, "gpu_gerek": false, "destek": "simdi", "kaynak": "hf:Qwen/Qwen2.5-1.5B-Instruct-GGUF", "yerel": "/root/aidag-lsc/soulware-models/qwen2.5-1.5b-instruct-q4_k_m.gguf" },
+    { "id": "qwen2.5-3b", "ad": "Qwen2.5-3B-Instruct", "arch": "qwen2", "parametre": "3B", "tier": 2, "gpu_gerek": false, "destek": "simdi", "kaynak": "hf:Qwen/Qwen2.5-3B-Instruct-GGUF", "yerel": "/root/aidag-lsc/soulware-models/qwen2.5-3b-instruct-q4_k_m.gguf" },
+    { "id": "qwen2.5-7b", "ad": "Qwen2.5-7B-Instruct", "arch": "qwen2", "parametre": "7B", "tier": 3, "gpu_gerek": false, "destek": "simdi", "kaynak": "hf:Qwen/Qwen2.5-7B-Instruct-GGUF", "yerel": null },
+    { "id": "qwen2.5-14b", "ad": "Qwen2.5-14B-Instruct", "arch": "qwen2", "parametre": "14B", "tier": 4, "gpu_gerek": true, "destek": "simdi", "kaynak": "hf:Qwen/Qwen2.5-14B-Instruct-GGUF", "yerel": null },
+    { "id": "qwen2.5-32b", "ad": "Qwen2.5-32B-Instruct", "arch": "qwen2", "parametre": "32B", "tier": 4, "gpu_gerek": true, "destek": "simdi", "kaynak": "hf:Qwen/Qwen2.5-32B-Instruct-GGUF", "yerel": null },
+    { "id": "qwen2.5-72b", "ad": "Qwen2.5-72B-Instruct", "arch": "qwen2", "parametre": "72B", "tier": 5, "gpu_gerek": true, "destek": "simdi", "kaynak": "hf:Qwen/Qwen2.5-72B-Instruct-GGUF", "yerel": null },
+    { "id": "llama-3.3-70b", "ad": "Llama-3.3-70B-Instruct", "arch": "llama", "parametre": "70B", "tier": 5, "gpu_gerek": true, "destek": "yukleyici-eklenecek", "kaynak": "hf:meta-llama (acik lisans)", "yerel": null },
+    { "id": "mistral-small-24b", "ad": "Mistral-Small-24B", "arch": "mistral", "parametre": "24B", "tier": 4, "gpu_gerek": true, "destek": "yukleyici-eklenecek", "kaynak": "hf:mistralai (Apache-2.0)", "yerel": null },
+    { "id": "deepseek-r1-distill", "ad": "DeepSeek-R1-Distill-Qwen", "arch": "qwen2", "parametre": "7B/32B", "tier": 5, "gpu_gerek": true, "destek": "simdi", "kaynak": "hf:deepseek-ai (MIT, muhakeme-guclu)", "yerel": null }
+  ]
+}
