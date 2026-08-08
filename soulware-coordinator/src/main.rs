@@ -267,11 +267,14 @@ async fn worker_submit(State(st): State<St>, Json(req): Json<Submit>) -> Json<Va
     let ts = now_secs();
     let hash = hex::encode(blake3::hash(req.answer.trim().as_bytes()).as_bytes());
 
-    // 1) Sonucu kaydet + doğrulama gerekli mi karar ver (kilit altında, await YOK).
-    let (reward_now, cfg, coord_addr): (Option<(u64, Vec<String>, String)>, Config, [u8; 20]) = {
+    // 1) Sonucu kaydet + doğrulama/karar (kilit altında, await YOK).
+    //    verdict = Some((job_id, kazananlar, slashlananlar)) doğrulandıysa.
+    let (verdict, cfg, coord_addr): (Option<(u64, Vec<String>, Vec<String>)>, Config, [u8; 20]) = {
         let mut c = st.lock().await;
         let cfg = c.cfg.clone();
         let coord_addr = c.key_addr;
+        let redundancy = cfg.redundancy;
+        let max_assign = cfg.max_assign;
         let job = match c.jobs.get_mut(&req.job_id) {
             Some(j) => j,
             None => return Json(json!({ "ok": false, "hata": "iş yok" })),
@@ -287,19 +290,23 @@ async fn worker_submit(State(st): State<St>, Json(req): Json<Submit>) -> Json<Va
         }
         job.results.push(WorkResult { worker: w.clone(), answer: req.answer.clone(), hash: hash.clone(), at: ts });
 
-        // Eşleşme sayımı: bir cevap-hash ≥ redundancy kez geldiyse DOĞRULANDI.
+        // Eşleşme sayımı: bir cevap-hash ≥ redundancy kez → DOĞRULANDI (o cevap doğru kabul).
         let mut sayac: HashMap<String, Vec<String>> = HashMap::new();
         for r in &job.results {
             sayac.entry(r.hash.clone()).or_default().push(r.worker.clone());
         }
-        let kazanan = sayac.iter().find(|(_, ws)| ws.len() >= cfg.redundancy);
+        let kazanan = sayac.iter().find(|(_, ws)| ws.len() >= redundancy).map(|(h, ws)| (h.clone(), ws.clone()));
+        let maxed = job.assigned.len() >= max_assign && job.results.len() >= job.assigned.len();
+
         if let Some((khash, kazananlar)) = kazanan {
-            let ans = job.results.iter().find(|r| &r.hash == khash).map(|r| r.answer.clone()).unwrap_or_default();
+            let ans = job.results.iter().find(|r| r.hash == khash).map(|r| r.answer.clone()).unwrap_or_default();
+            // SLASH: kazanan gruptan FARKLI cevap verenler = yanlış/sahtekâr → cezalandırılır.
+            let slashlananlar: Vec<String> = job.results.iter().filter(|r| r.hash != khash).map(|r| r.worker.clone()).collect();
             job.status = "verified".into();
             job.verified_answer = Some(ans);
-            (Some((req.job_id, kazananlar.clone(), khash.clone())), cfg, coord_addr)
-        } else if job.assigned.len() >= cfg.max_assign && job.results.len() >= job.assigned.len() {
-            // Kapasite doldu, eşleşme yok → tartışmalı (ödül yok).
+            (Some((req.job_id, kazananlar, slashlananlar)), cfg, coord_addr)
+        } else if maxed {
+            // Kapasite doldu, çoğunluk eşleşmesi yok → tartışmalı (ödül yok).
             job.status = "disputed".into();
             (None, cfg, coord_addr)
         } else {
@@ -307,19 +314,24 @@ async fn worker_submit(State(st): State<St>, Json(req): Json<Submit>) -> Json<Va
         }
     };
 
-    // 2) Ödül varsa: zincire imzalı kayıt (await — kilit DIŞINDA).
-    if let Some((job_id, kazananlar, _khash)) = reward_now {
-        let key = {
-            let c = st.lock().await;
-            c.key.clone()
-        };
+    // 2) Karar varsa: önce SLASH (kilit altı, await yok), sonra ÖDÜL (zincir, await).
+    if let Some((job_id, kazananlar, slashlananlar)) = verdict {
+        // SLASH: itibar düşür (sahtekâra caydırıcı). Gerçek stake yakımı ileride.
+        {
+            let mut c = st.lock().await;
+            for l in &slashlananlar {
+                if let Some(wk) = c.workers.get_mut(l) {
+                    wk.reputation -= 2;
+                }
+            }
+        }
+        let key = { let c = st.lock().await; c.key.clone() };
+        let http = { let c = st.lock().await; c.http.clone() };
         let mut odul_sonuc = Vec::new();
         for worker in &kazananlar {
             let (chain_ok, proof) = odul_zincire(
-                &{ let c = st.lock().await; c.http.clone() },
-                &cfg.chain_rpc, cfg.net_id, &key, &coord_addr, worker, job_id, cfg.reward_lsc, ts,
+                &http, &cfg.chain_rpc, cfg.net_id, &key, &coord_addr, worker, job_id, cfg.reward_lsc, ts,
             ).await;
-            // Durumu güncelle (kilit altında, await yok).
             let mut c = st.lock().await;
             if let Some(wk) = c.workers.get_mut(worker) {
                 wk.earned_lsc += cfg.reward_lsc;
@@ -331,7 +343,11 @@ async fn worker_submit(State(st): State<St>, Json(req): Json<Submit>) -> Json<Va
             }
             odul_sonuc.push(json!({ "worker": worker, "lsc": cfg.reward_lsc, "chain_ok": chain_ok, "proof": proof }));
         }
-        return Json(json!({ "ok": true, "durum": "verified", "oduller": odul_sonuc }));
+        return Json(json!({
+            "ok": true, "durum": "verified",
+            "kazananlar": kazananlar.len(), "slashlanan": slashlananlar.len(),
+            "oduller": odul_sonuc,
+        }));
     }
 
     Json(json!({ "ok": true, "durum": "kaydedildi", "not": "doğrulama için daha çok sonuç bekleniyor" }))
