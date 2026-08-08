@@ -50,3 +50,4 @@ faucet_anahtar.txt
 *.yedek*
 soulware-models/
 .soulware.key
+.data/

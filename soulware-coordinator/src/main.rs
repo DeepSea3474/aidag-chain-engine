@@ -41,6 +41,7 @@ struct Config {
     reward_lsc: u64,     // doğrulanan iş başına ödül (LSC, tam sayı)
     redundancy: usize,   // eşleşme için gereken worker sayısı (varsayılan 2)
     max_assign: usize,   // bir işe en fazla kaç worker (tiebreak için, varsayılan 3)
+    data_path: String,   // kalıcı durum dosyası (restart'ta kaybolmaz)
 }
 impl Config {
     fn from_env() -> Self {
@@ -53,12 +54,13 @@ impl Config {
             reward_lsc: ev("SOULWARE_REWARD_LSC", "1").parse().unwrap_or(1),
             redundancy: ev("SOULWARE_REDUNDANCY", "2").parse().unwrap_or(2),
             max_assign: ev("SOULWARE_MAX_ASSIGN", "3").parse().unwrap_or(3),
+            data_path: ev("SOULWARE_COORD_DATA", "/root/aidag-lsc/.data/soulware-coordinator.json"),
         }
     }
 }
 
 // ════════════════════════════ Durum modeli ════════════════════════════
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct Worker {
     wallet: String,
     reputation: i64,
@@ -67,7 +69,7 @@ struct Worker {
     registered_at: u64,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct WorkResult {
     worker: String,
     answer: String,
@@ -75,7 +77,7 @@ struct WorkResult {
     at: u64,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct RewardRec {
     worker: String,
     amount_lsc: u64,
@@ -83,7 +85,7 @@ struct RewardRec {
     chain_ok: bool,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct Job {
     id: u64,
     prompt: String,
@@ -104,6 +106,34 @@ struct Coord {
     workers: HashMap<String, Worker>,
     jobs: HashMap<u64, Job>,
     next_job: u64,
+}
+
+impl Coord {
+    /// Durumu diske yaz (restart'ta kaybolmasın). Atomik: önce .tmp, sonra rename.
+    fn save(&self) {
+        let v = json!({ "workers": self.workers, "jobs": self.jobs, "next_job": self.next_job });
+        let p = &self.cfg.data_path;
+        if let Some(dir) = std::path::Path::new(p).parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let tmp = format!("{p}.tmp");
+        if serde_json::to_vec_pretty(&v).ok().and_then(|b| std::fs::write(&tmp, b).ok()).is_some() {
+            let _ = std::fs::rename(&tmp, p);
+        }
+    }
+}
+
+/// Diskten durumu yükle (yoksa boş). Restart sonrası worker/iş/ödül korunur.
+fn load_state(path: &str) -> (HashMap<String, Worker>, HashMap<u64, Job>, u64) {
+    if let Ok(data) = std::fs::read(path) {
+        if let Ok(v) = serde_json::from_slice::<Value>(&data) {
+            let workers = v.get("workers").cloned().and_then(|x| serde_json::from_value(x).ok()).unwrap_or_default();
+            let jobs = v.get("jobs").cloned().and_then(|x| serde_json::from_value(x).ok()).unwrap_or_default();
+            let next_job = v.get("next_job").and_then(|x| x.as_u64()).unwrap_or(1);
+            return (workers, jobs, next_job);
+        }
+    }
+    (HashMap::new(), HashMap::new(), 1)
 }
 
 type St = Arc<Mutex<Coord>>;
@@ -211,6 +241,7 @@ async fn job_create(State(st): State<St>, Json(req): Json<CreateJob>) -> Json<Va
         id, prompt: req.prompt, deterministic: det, status: "pending".into(),
         assigned: vec![], results: vec![], verified_answer: None, rewards: vec![], created_at: now_secs(),
     });
+    c.save();
     Json(json!({ "ok": true, "job_id": id, "deterministic": det }))
 }
 
@@ -226,6 +257,7 @@ async fn worker_register(State(st): State<St>, Json(req): Json<Reg>) -> Json<Val
     c.workers.entry(w.clone()).or_insert_with(|| Worker {
         wallet: w.clone(), reputation: 0, earned_lsc: 0, jobs_done: 0, registered_at: now_secs(),
     });
+    c.save();
     Json(json!({ "ok": true, "wallet": w, "rıza": "GPU katkısı yalnızca istemci onayıyla" }))
 }
 
@@ -253,6 +285,7 @@ async fn worker_poll(State(st): State<St>, Path(wallet): Path<String>) -> Json<V
             if let Some(j) = c.jobs.get_mut(&id) {
                 j.assigned.push(w.clone());
             }
+            c.save();
             Json(json!({ "job_id": id, "prompt": prompt, "deterministic": det }))
         }
         None => Json(json!({ "none": true })),
@@ -298,20 +331,22 @@ async fn worker_submit(State(st): State<St>, Json(req): Json<Submit>) -> Json<Va
         let kazanan = sayac.iter().find(|(_, ws)| ws.len() >= redundancy).map(|(h, ws)| (h.clone(), ws.clone()));
         let maxed = job.assigned.len() >= max_assign && job.results.len() >= job.assigned.len();
 
-        if let Some((khash, kazananlar)) = kazanan {
+        let verdict = if let Some((khash, kazananlar)) = kazanan {
             let ans = job.results.iter().find(|r| r.hash == khash).map(|r| r.answer.clone()).unwrap_or_default();
             // SLASH: kazanan gruptan FARKLI cevap verenler = yanlış/sahtekâr → cezalandırılır.
             let slashlananlar: Vec<String> = job.results.iter().filter(|r| r.hash != khash).map(|r| r.worker.clone()).collect();
             job.status = "verified".into();
             job.verified_answer = Some(ans);
-            (Some((req.job_id, kazananlar, slashlananlar)), cfg, coord_addr)
+            Some((req.job_id, kazananlar, slashlananlar))
         } else if maxed {
             // Kapasite doldu, çoğunluk eşleşmesi yok → tartışmalı (ödül yok).
             job.status = "disputed".into();
-            (None, cfg, coord_addr)
+            None
         } else {
-            (None, cfg, coord_addr) // daha çok sonuç bekleniyor
-        }
+            None // daha çok sonuç bekleniyor
+        };
+        c.save();
+        (verdict, cfg, coord_addr)
     };
 
     // 2) Karar varsa: önce SLASH (kilit altı, await yok), sonra ÖDÜL (zincir, await).
@@ -343,6 +378,7 @@ async fn worker_submit(State(st): State<St>, Json(req): Json<Submit>) -> Json<Va
             }
             odul_sonuc.push(json!({ "worker": worker, "lsc": cfg.reward_lsc, "chain_ok": chain_ok, "proof": proof }));
         }
+        { let c = st.lock().await; c.save(); }
         return Json(json!({
             "ok": true, "durum": "verified",
             "kazananlar": kazananlar.len(), "slashlanan": slashlananlar.len(),
@@ -397,8 +433,13 @@ async fn main() {
     println!("   dinleme     : http://{listen}");
     println!("──────────────────────────────────────────────");
 
+    // KALICI durum: restart'ta worker/iş/ödül/itibar korunur.
+    let (workers, jobs, next_job) = load_state(&cfg.data_path);
+    if !workers.is_empty() || !jobs.is_empty() {
+        println!("   💾 durum yüklendi: {} worker · {} iş · next_job={}", workers.len(), jobs.len(), next_job);
+    }
     let st: St = Arc::new(Mutex::new(Coord {
-        cfg, http, key, key_addr, workers: HashMap::new(), jobs: HashMap::new(), next_job: 1,
+        cfg, http, key, key_addr, workers, jobs, next_job,
     }));
 
     let app = Router::new()
