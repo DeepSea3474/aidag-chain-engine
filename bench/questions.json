@@ -1,0 +1,15 @@
+{
+  "surum": "v1",
+  "not": "Temel yetenek seti. Bu sorularda frontier modeller ~%100 dogru yapar (kolay). Amac KUBRA'nin BUGUNKU seviyesini olcup her iyilestirmede tirmanisi izlemek. Zorlastikca ileri sorular eklenecek.",
+  "sorular": [
+    { "id": 1, "kategori": "aritmetik", "soru": "2 + 2 kactir? Sadece rakam yaz.", "cevap": "4", "frontier": true },
+    { "id": 2, "kategori": "aritmetik", "soru": "7 carpi 8 kactir? Sadece rakam yaz.", "cevap": "56", "frontier": true },
+    { "id": 3, "kategori": "aritmetik", "soru": "100 eksi 37 kactir? Sadece rakam yaz.", "cevap": "63", "frontier": true },
+    { "id": 4, "kategori": "olgu-korpus-ici", "soru": "Turkiye'nin baskenti neresidir? Tek kelime.", "cevap": "ankara", "frontier": true },
+    { "id": 5, "kategori": "olgu-korpus-ici", "soru": "Fransa'nin baskenti neresidir? Tek kelime.", "cevap": "paris", "frontier": true },
+    { "id": 6, "kategori": "olgu-korpus-ici", "soru": "AIDAG-Chain'in ag kimligi (network_id) kactir? Sadece rakam.", "cevap": "3474", "frontier": false },
+    { "id": 7, "kategori": "olgu-korpus-disi", "soru": "Japonya'nin baskenti neresidir? Tek kelime.", "cevap": "tokyo", "frontier": true },
+    { "id": 8, "kategori": "muhakeme", "soru": "Bir kalem 5 lira. 3 kalem kac lira eder? Sadece rakam.", "cevap": "15", "frontier": true },
+    { "id": 9, "kategori": "muhakeme", "soru": "Ali'nin 2 elmasi vardi, 3 elma daha aldi. Toplam kac elmasi oldu? Sadece rakam.", "cevap": "5", "frontier": true }
+  ]
+}
