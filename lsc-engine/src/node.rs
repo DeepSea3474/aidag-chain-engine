@@ -64,6 +64,11 @@ pub struct NodeState {
     faucet_owner: Option<[u8; 20]>,
     /// Faucet CIFTE-DAMLA engeli: bir adrese bir kez.
     faucet_verildi: std::collections::HashSet<[u8; 20]>,
+    /// tip=16 HESAPLAMA ODULU: reward_id cifte-basim engeli (bir odul bir kez).
+    /// DAG replay ile yeniden kurulur (deterministik).
+    compute_reward_verildi: std::collections::HashSet<u64>,
+    /// tip=16 kumulatif LSC emisyonu. Tavan: mainnet::COMPUTE_REWARD_EMISYON_TAVAN.
+    compute_reward_emitted: u128,
     /// MAINNET modu mu? new_mainnet()=true, new_devnet()=false. Deterministik launch
     /// konfigu (network_id ile korele). Faucet (tip=6, MINT) mainnet'te KAPALI ->
     /// 21M sabit AIDAG arzi korunur (yoktan bakiye basilmaz).
@@ -148,6 +153,13 @@ impl NodeState {
                 );
             }
         }
+        // ON-SATIS GAZ HEDIYE HAVUZU: escrow'a (dilim 6 = kurucu native = owner)
+        // baslangic LSC bakiyesi. AIDAG dilimleri gibi baslangic durumudur (DAG
+        // vertex'i DEGIL) -> pinli genesis id DEGISMEZ, her state-rebuild'de
+        // deterministik geri gelir, tum mainnet node'larinda ayni.
+        // Olmadan: her claim'in 2 LSC hediyesi sessizce basarisiz olur.
+        // Miktar gerekcesi: mainnet::ON_SATIS_LSC_HAVUZ dokumantasyonu.
+        self.lsc_test_bakiye_ekle(adresler[6], crate::mainnet::ON_SATIS_LSC_HAVUZ);
         self.vesting_zaman_ayarla(vesting_bas);
     }
 
@@ -173,6 +185,8 @@ impl NodeState {
             on_satis_tge: None,
             faucet_owner: None,
             faucet_verildi: std::collections::HashSet::new(),
+            compute_reward_verildi: std::collections::HashSet::new(),
+            compute_reward_emitted: 0,
             avm_db: crate::avm::AidagDatabase::yeni(),
             baslangic_bakiyeler: Vec::new(),
             baslangic_lsc: Vec::new(),
@@ -786,6 +800,8 @@ impl NodeState {
         self.on_satis_registry = crate::registry::OnSatisRegistry::yeni();
         self.on_satis_tge = None;
         self.faucet_verildi = std::collections::HashSet::new();
+        self.compute_reward_verildi = std::collections::HashSet::new();
+        self.compute_reward_emitted = 0;
         self.avm_db = crate::avm::AidagDatabase::yeni();
 
         // 2) BASLANGIC DURUMU (genesis/test) — DAG'da vertex karsiligi YOK.
@@ -1227,6 +1243,28 @@ impl NodeState {
                     }
                 }
                 // owner ayarsiz ya da MAINNET: faucet kapali, hicbir sey yapma.
+            }
+            // tip=16: SOULWAREAI HESAPLAMA ODULU. SADECE owner (kurucu) worker'a LSC
+            // BASAR (kontrollu emisyon). Guvenlik (hepsi deterministik, tum dugumlerde ayni):
+            //  (1) imzalayan == faucet_owner (kurucu) olmali
+            //  (2) reward_id daha once kullanilmadiysa (cifte-basim engeli)
+            //  (3) kumulatif emisyon COMPUTE_REWARD_EMISYON_TAVAN'i asmiyorsa
+            // Ihlal (owner-disi / tekrar reward_id / tavan asimi) -> SESSIZ RED (LSC basilmaz).
+            // NOT: faucet'ten farkli olarak mainnet'te de calisir (arz kontrollu, tavanli).
+            Some(&crate::tx::TX_TYPE_COMPUTE_REWARD) => {
+                if let Ok(r) = crate::tx::ComputeReward::decode(payload) {
+                    let cagiran = crate::registry::public_key_to_adres(signer);
+                    if self.faucet_owner == Some(cagiran)
+                        && !self.compute_reward_verildi.contains(&r.reward_id)
+                    {
+                        let yeni = self.compute_reward_emitted.saturating_add(r.lsc);
+                        if yeni <= crate::mainnet::COMPUTE_REWARD_EMISYON_TAVAN {
+                            self.lsc_registry.test_bakiye_ekle(r.worker, r.lsc);
+                            self.compute_reward_verildi.insert(r.reward_id);
+                            self.compute_reward_emitted = yeni;
+                        }
+                    }
+                }
             }
             // diger tipler: kalkan/staking/record disi, dokunma.
             // tip=12: HAM ETHEREUM TX (eth_sendRawTransaction). Payload = RLP eth tx.
@@ -3395,6 +3433,49 @@ mod tests {
         assert_eq!(node.lsc_bakiye(&gonderen), 5000, "bakiye degismedi");
         assert_eq!(node.lsc_bakiye(&hedef), 0, "hedef hicbir sey almadi");
         assert_eq!(node.beklenen_nonce(&gonderen), 0, "nonce ilerlemedi");
+    }
+
+    // ===== tip=16: SOULWAREAI HESAPLAMA ODULU (ComputeReward) — DEVNET TEST =====
+    // Owner (kurucu) doğrulanan worker'a LSC BASAR; çifte-basım + owner-dışı + kümülatif
+    // emisyon korumaları. Hiçbir canlı zincire dokunmaz (izole devnet node).
+    #[test]
+    fn compute_reward_owner_lsc_basar_ve_korumalar() {
+        use crate::registry::public_key_to_adres;
+        use crate::tx::ComputeReward;
+        let now = 1_700_000_000;
+        let mut node = NodeState::new_devnet(NET);
+        let (gen, gid) = genesis_bytes(1, now);
+        node.ingest_networked(&gen, now);
+
+        let sk_owner = SigningKey::from_bytes(&[7u8; 32]);
+        let owner = public_key_to_adres(&sk_owner.verifying_key().to_bytes());
+        node.faucet_owner_ayarla(owner);
+
+        let worker = [0xEE; 20];
+        assert_eq!(node.lsc_bakiye(&worker), 0, "baslangicta 0 LSC");
+        let odul: u128 = 100 * crate::genesis::ONDALIK;
+
+        // 1) OWNER imzali tip=16 -> worker'a LSC basilir.
+        let p = ComputeReward::new(worker, odul, 1).encode();
+        let v = Vertex::new_signed(NET, vec![gid], p, now, &sk_owner).expect("cr vertex");
+        assert!(matches!(node.ingest_networked(&wire::encode(&v), now), NetworkIngestOutcome::Integrated(_)));
+        assert_eq!(node.lsc_bakiye(&worker), odul, "owner odulu: LSC basildi");
+
+        // 2) CIFTE-BASIM: ayni reward_id tekrar -> bakiye DEGISMEZ.
+        let v2 = Vertex::new_signed(NET, vec![*v.id()], ComputeReward::new(worker, odul, 1).encode(), now + 1, &sk_owner).expect("v2");
+        node.ingest_networked(&wire::encode(&v2), now + 1);
+        assert_eq!(node.lsc_bakiye(&worker), odul, "ayni reward_id ikinci kez basmaz");
+
+        // 3) OWNER-DISI imza -> SESSIZ RED (bakiye degismez).
+        let sk_sahte = SigningKey::from_bytes(&[8u8; 32]);
+        let v3 = Vertex::new_signed(NET, vec![*v2.id()], ComputeReward::new(worker, odul, 2).encode(), now + 2, &sk_sahte).expect("v3");
+        node.ingest_networked(&wire::encode(&v3), now + 2);
+        assert_eq!(node.lsc_bakiye(&worker), odul, "owner-disi odul basamaz");
+
+        // 4) FARKLI reward_id, OWNER -> kumulatif emisyon.
+        let v4 = Vertex::new_signed(NET, vec![*v3.id()], ComputeReward::new(worker, odul, 3).encode(), now + 3, &sk_owner).expect("v4");
+        node.ingest_networked(&wire::encode(&v4), now + 3);
+        assert_eq!(node.lsc_bakiye(&worker), odul * 2, "farkli reward_id -> kumulatif LSC");
     }
 
     // ===== GERCEK DUNYA: belge dogrulama ingest entegrasyonu =====

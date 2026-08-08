@@ -274,3 +274,30 @@ pub const ON_SATIS_ISLEM_UST_SINIR: u128 = 50_000 * crate::genesis::ONDALIK;
 /// ancak MAINNET_VESTING_BASLANGIC (TGE) sonrasi claim eder. Referans: 2026-07-26
 /// 00:00:00 UTC (TGE'den ~1 ay once).
 pub const ON_SATIS_BASLANGIC: u64 = 1_785_024_000;
+
+/// ON-SATIS LSC GAZ HEDIYE HAVUZU — escrow'un (dilim 6) baslangic LSC bakiyesi.
+///
+/// NEDEN: her tahsise 2 LSC gaz hediyesi verilir; ilk claim'de owner (escrow)
+/// bakiyesinden alici'ya gecer (node.rs on_satis_claim_uygula). Escrow'un LSC'si
+/// yoksa transfer sessizce basarisiz olur -> alici AIDAG'ini alir ama gazi olmaz.
+///
+/// MIKTAR HESABI (Faz-1, 630.000 AIDAG tavani; hediye tahsis basina 2 LSC):
+/// en kotu durum = herkesin sayfadaki 1 USDT alt sinirindan almasi ->
+///   kademe 1: 210.000 / 5 AIDAG  =  42.000 tahsis   ($0.20)
+///   kademe 2: 210.000 / 4 AIDAG  =  52.500 tahsis   ($0.25)
+///   kademe 3: 210.000 / 3 AIDAG  =  70.000 tahsis   ($0.30)
+///   toplam ~164.500 tahsis x 2 LSC = ~329.000 LSC
+/// 500.000 LSC ~1,5x pay birakir (250.000 tahsis kapasitesi) ve toplam LSC
+/// arzinin yalnizca %0,024'udur.
+///
+/// UYARI: LSC'nin TAM 2.1B dagitim tablosu HENUZ KARARLASMADI (ON_SATIS_PLANI.md
+/// bolum 3 hala [?]). Bu, ON-SATIS icin ayrilmis OPERASYON dilimidir; tam tablo
+/// kilitlenirken bu 500.000 LSC onun ICINE sayilmalidir (ikinci kez yaratilmamali).
+pub const ON_SATIS_LSC_HAVUZ: u128 = 500_000 * crate::genesis::ONDALIK;
+
+/// SoulwareAI HESAPLAMA ÖDÜLÜ (tip=16) TOPLAM emisyon TAVANI (kontrollü enflasyon).
+/// Owner (kurucu) doğrulanan worker'lara bu tavana kadar LSC BASABİLİR; tavan aşılınca
+/// yeni ödül basılmaz. Node bunu deterministik uygular (tüm düğümlerde aynı). LSC arzı
+/// 2.1B; bu dilim compute-ekonomisi için ayrılmış üst sınırdır (dağıtım tablosuyla
+/// uyumlanacak — ON_SATIS_LSC_HAVUZ gibi ikinci kez yaratılmamalı).
+pub const COMPUTE_REWARD_EMISYON_TAVAN: u128 = 210_000_000 * crate::genesis::ONDALIK;

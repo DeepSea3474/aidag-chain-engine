@@ -463,6 +463,56 @@ impl FaucetKaydi {
     }
 }
 
+// ============ tip=16: HESAPLAMA ÖDÜLÜ (SoulwareAI ComputeReward) ============
+/// SoulwareAI hesaplama ödülü: owner (kurucu) doğrulanan worker'a LSC BASAR
+/// (kontrollü emisyon). Güvenlik: owner-imzalı + reward_id çifte-basım engeli +
+/// emisyon tavanı (mainnet::COMPUTE_REWARD_EMISYON_TAVAN) node'da uygulanır.
+pub const TX_TYPE_COMPUTE_REWARD: u8 = 16;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComputeReward {
+    pub worker: [u8; 20],
+    pub lsc: crate::registry::Tutar,
+    pub reward_id: u64,
+}
+
+impl ComputeReward {
+    pub fn new(worker: [u8; 20], lsc: crate::registry::Tutar, reward_id: u64) -> Self {
+        ComputeReward { worker, lsc, reward_id }
+    }
+
+    /// Kodla: `[16][worker:20][lsc:16 BE][reward_id:8 BE]` = 45 bayt.
+    pub fn encode(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(45);
+        out.push(TX_TYPE_COMPUTE_REWARD);
+        out.extend_from_slice(&self.worker);
+        out.extend_from_slice(&self.lsc.to_be_bytes());
+        out.extend_from_slice(&self.reward_id.to_be_bytes());
+        out
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<ComputeReward, TxError> {
+        let &first = bytes.first().ok_or(TxError::Empty)?;
+        if first != TX_TYPE_COMPUTE_REWARD {
+            return Err(TxError::UnknownType(first));
+        }
+        if bytes.len() != 45 {
+            return Err(TxError::BadLength { expected: 45, got: bytes.len() });
+        }
+        let mut worker = [0u8; 20];
+        worker.copy_from_slice(&bytes[1..21]);
+        let mut lsc_b = [0u8; 16];
+        lsc_b.copy_from_slice(&bytes[21..37]);
+        let mut rid = [0u8; 8];
+        rid.copy_from_slice(&bytes[37..45]);
+        Ok(ComputeReward {
+            worker,
+            lsc: u128::from_be_bytes(lsc_b),
+            reward_id: u64::from_be_bytes(rid),
+        })
+    }
+}
+
 /// AVM cagrisi (Kopru 4). EVM uzerinden LSC deger transferi.
 /// GONDEREN = vertex imzalayani (signer'dan turetilir); payload'da YOK.
 /// Format: [TX_TYPE_AVM_CAGRI][hedef:20][deger:8 BE][nonce:8 BE] -> 37 bayt.
