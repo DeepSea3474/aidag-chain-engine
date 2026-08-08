@@ -76,6 +76,8 @@ pub struct Depo {
     pub yol: String,
     /// Belge embeddings'leri (parallel; boş = embed edilmemiş). Semantik retrieval için.
     pub embeddings: Vec<Vec<f32>>,
+    /// KORUMALI başlıklar (küratörlü seed) — ingest bunları EZEMEZ (temiz cevap korunur).
+    pub korumali: HashSet<String>,
 }
 
 impl Depo {
@@ -85,7 +87,37 @@ impl Depo {
             .ok()
             .and_then(|b| serde_json::from_slice::<Vec<Belge>>(&b).ok())
             .unwrap_or_default();
-        Depo { belgeler, yol: yol.to_string(), embeddings: vec![] }
+        Depo { belgeler, yol: yol.to_string(), embeddings: vec![], korumali: HashSet::new() }
+    }
+
+    /// Küratörlü seed'i uygula: temiz seed belgeleri korpusa yaz (ham ingest ezmişse
+    /// DÜZELTIR) + başlıklarını KORUMALI işaretle (ingest bir daha ezemez). Döner:
+    /// içerik değişti mi (değiştiyse embedding cache bayat → yeniden embed gerekir).
+    pub fn seed_uygula(&mut self, seed_yol: &str) -> bool {
+        let mut degisti = false;
+        if let Ok(data) = std::fs::read(seed_yol) {
+            if let Ok(seed) = serde_json::from_slice::<Vec<Belge>>(&data) {
+                for sb in seed {
+                    self.korumali.insert(sb.baslik.to_lowercase());
+                    match self.belgeler.iter().position(|x| x.baslik.eq_ignore_ascii_case(&sb.baslik)) {
+                        Some(pos) => {
+                            if self.belgeler[pos].metin != sb.metin || self.belgeler[pos].url != sb.url {
+                                self.belgeler[pos] = sb;
+                                degisti = true;
+                            }
+                        }
+                        None => {
+                            self.belgeler.push(sb);
+                            degisti = true;
+                        }
+                    }
+                }
+                if degisti {
+                    self.kaydet();
+                }
+            }
+        }
+        degisti
     }
 
     /// Bir belgenin embedding metnini kur (başlık + metin — başlık anlamı güçlendirir).
@@ -196,6 +228,10 @@ impl Depo {
 
     /// Belge ekle + embedding'i SENKRON tut (embedder varsa). Semantik retrieval için.
     pub fn ekle_embed(&mut self, b: Belge, e: Option<&crate::embed::Embedder>) {
+        // KORUMALI (küratörlü seed) başlığı ingest EZEMEZ — temiz cevap korunur.
+        if self.korumali.contains(&b.baslik.to_lowercase()) {
+            return;
+        }
         while self.embeddings.len() < self.belgeler.len() {
             self.embeddings.push(vec![]);
         }
@@ -343,6 +379,7 @@ mod tests {
                 Belge { baslik: "Fransa".into(), metin: "Fransa bir ülkedir. Başkenti Paris'tir.".into(), url: None },
             ],
             embeddings: vec![],
+            korumali: HashSet::new(),
         }
     }
 

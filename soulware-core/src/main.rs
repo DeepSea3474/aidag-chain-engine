@@ -43,6 +43,7 @@ struct Config {
     // ── Grounding / kaynak (RAG) ──
     ground: bool,            // SOULWARE_GROUND=1 → soru öncesi kaynak getir (varsayılan açık)
     knowledge_path: String,  // egemen yerel bilgi deposu (JSON)
+    seed_path: String,       // küratörlü seed (ingest ezemez, temiz cevaplar korunur)
     wiki: bool,              // SOULWARE_WIKI=1 → canlı Wikipedia (bu sunucuda bloklu; varsayılan kapalı)
     wiki_langs: Vec<String>, // "tr,en"
     ground_k: usize,         // en fazla kaç pasaj sunulsun
@@ -70,6 +71,7 @@ impl Config {
             max_tokens: ev("SOULWARE_MAX_TOKENS", "320").parse().unwrap_or(320),
             ground: ev("SOULWARE_GROUND", "1") == "1",
             knowledge_path: ev("SOULWARE_KNOWLEDGE_PATH", "/root/aidag-lsc/soulware-knowledge/kb.json"),
+            seed_path: ev("SOULWARE_SEED_PATH", "/root/aidag-lsc/soulware-knowledge/kb.seed.json"),
             wiki: ev("SOULWARE_WIKI", "0") == "1",
             wiki_langs: ev("SOULWARE_WIKI_LANGS", "tr,en").split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
             ground_k: ev("SOULWARE_GROUND_K", "3").parse().unwrap_or(3),
@@ -604,6 +606,11 @@ async fn main() {
     let has_local = local.is_some();
     // EGEMEN YEREL BİLGİ DEPOSU (grounding kaynağı) yükle.
     let mut depo = retrieval::Depo::yukle(&cfg.knowledge_path);
+    // KÜRATÖRLÜ SEED uygula: temiz cevapları koru/geri getir (ham ingest ezmişse düzelt).
+    let seed_degisti = depo.seed_uygula(&cfg.seed_path);
+    if seed_degisti {
+        println!("🛡 küratörlü seed uygulandı (temiz cevaplar korundu/düzeltildi)");
+    }
     let belge_sayisi = depo.belgeler.len();
     let ground_acik = cfg.ground;
     let wiki_acik = cfg.wiki;
@@ -621,7 +628,8 @@ async fn main() {
     // Korpusu embed et (semantik retrieval için). Önce DİSK CACHE'i dene → restart hızlı.
     if let Some(e) = &embedder {
         if belge_sayisi > 0 {
-            if depo.embed_cache_yukle() {
+            // Seed değiştiyse cache bayat → yeniden embed. Değişmediyse cache'ten hızlı yükle.
+            if !seed_degisti && depo.embed_cache_yukle() {
                 println!("✅ embedding cache yüklendi ({belge_sayisi} belge, hızlı başlangıç)");
             } else {
                 println!("⏳ {belge_sayisi} belge embed ediliyor (bir kerelik, sonra cache)...");
