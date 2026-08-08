@@ -13,6 +13,7 @@
 //! Uçlar:  GET /health · GET / · POST /v1/ask {"prompt","context?"}
 
 mod local_brain; // egemen yerel beyin (candle) = KUBRA
+mod retrieval;   // grounding kaynak katmanı (yerel egemen depo + canlı wiki)
 
 use axum::{extract::State, routing::{get, post}, Json, Router};
 use ed25519_dalek::SigningKey;
@@ -38,6 +39,14 @@ struct Config {
     local_tokenizer: String,
     brain_pref: String, // "local" (varsayılan, egemen) | "claude" | "auto"
     max_tokens: usize,  // yerel beyin üretim sınırı (SOULWARE_MAX_TOKENS)
+    // ── Grounding / kaynak (RAG) ──
+    ground: bool,            // SOULWARE_GROUND=1 → soru öncesi kaynak getir (varsayılan açık)
+    knowledge_path: String,  // egemen yerel bilgi deposu (JSON)
+    wiki: bool,              // SOULWARE_WIKI=1 → canlı Wikipedia (bu sunucuda bloklu; varsayılan kapalı)
+    wiki_langs: Vec<String>, // "tr,en"
+    ground_k: usize,         // en fazla kaç pasaj sunulsun
+    ground_snippet: usize,   // pasaj başına maks karakter
+    ground_min: i64,         // min IDF skoru (altı = alakasız, grounding YOK)
 }
 
 impl Config {
@@ -54,6 +63,13 @@ impl Config {
             local_tokenizer: ev("SOULWARE_LOCAL_TOKENIZER", "/root/aidag-lsc/soulware-models/tokenizer.json"),
             brain_pref: ev("SOULWARE_BRAIN", "local"),
             max_tokens: ev("SOULWARE_MAX_TOKENS", "320").parse().unwrap_or(320),
+            ground: ev("SOULWARE_GROUND", "1") == "1",
+            knowledge_path: ev("SOULWARE_KNOWLEDGE_PATH", "/root/aidag-lsc/soulware-knowledge/kb.json"),
+            wiki: ev("SOULWARE_WIKI", "0") == "1",
+            wiki_langs: ev("SOULWARE_WIKI_LANGS", "tr,en").split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+            ground_k: ev("SOULWARE_GROUND_K", "3").parse().unwrap_or(3),
+            ground_snippet: ev("SOULWARE_GROUND_SNIPPET", "600").parse().unwrap_or(600),
+            ground_min: ev("SOULWARE_GROUND_MIN", "150").parse().unwrap_or(150),
         }
     }
 }
@@ -65,6 +81,7 @@ struct AppState {
     key_addr: [u8; 20],
     local: Option<Mutex<local_brain::LocalBrain>>,
     local_name: Option<String>,
+    depo: Mutex<retrieval::Depo>, // egemen yerel bilgi deposu (grounding)
 }
 
 // ════════════════════════════ Kimlik / grounding ════════════════════════════
@@ -76,7 +93,9 @@ ASLA uydurma — emin değilsen 'Bilmiyorum' de. Kullanıcının dilinde, kısa 
 fn grounded_user(prompt: &str, context: Option<&str>) -> String {
     match context {
         Some(c) if !c.trim().is_empty() => format!(
-            "BAĞLAM (yalnızca buna ve bilinen gerçeklere dayan; yoksa 'Bilmiyorum' de):\n{c}\n\nSORU:\n{prompt}"
+            "Aşağıda numaralı KAYNAKLAR var. Cevabını YALNIZCA bu kaynaklara dayandır. \
+Kaynaklarda cevap yoksa 'Bilmiyorum' de — TAHMİN ETME, UYDURMA. Kısa ve net yanıtla.\n\n\
+KAYNAKLAR:\n{c}\nSORU:\n{prompt}"
         ),
         _ => prompt.to_string(),
     }
@@ -255,6 +274,17 @@ struct AskReq {
     brain: Option<String>, // "local" | "claude" — istek başına geçersiz kılma
     #[serde(default)]
     deterministic: Option<bool>, // true → greedy (ağ doğrulaması için birebir tekrar)
+    #[serde(default)]
+    ground: Option<bool>, // kaynak getirmeyi istek başına aç/kapa (varsayılan: cfg)
+}
+
+/// Yanıtta gösterilen kaynak künyesi (şeffaflık: KUBRA neye dayandı — sahte YOK).
+#[derive(Serialize)]
+struct Kaynak {
+    kaynak: String,
+    baslik: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -265,6 +295,8 @@ struct AskResp {
     model: String,
     grounded: bool,
     abstained: bool,
+    #[serde(default)]
+    sources: Vec<Kaynak>, // KUBRA'nın dayandığı kaynaklar (grounding şeffaflığı)
     latency_ms: u128,
     input_tokens: Option<u64>,
     output_tokens: Option<u64>,
@@ -304,7 +336,39 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
         return Json(bos_hata("prompt boş olamaz"));
     }
 
-    let user_content = grounded_user(&req.prompt, req.context.as_deref());
+    // ── GROUNDING: açık bağlam yoksa ve grounding açıksa KAYNAK getir ──
+    // "En güçlü AI'ların kaynakları": önce egemen yerel depo, sonra (bloklu değilse)
+    // canlı Wikipedia. Cevap kaynaktan üretilir; kaynak yoksa model 'Bilmiyorum' der.
+    let ground_iste = req.ground.unwrap_or(st.cfg.ground);
+    let acik_baglam = req.context.as_deref().map(|c| !c.trim().is_empty()).unwrap_or(false);
+    let mut kaynaklar: Vec<Kaynak> = vec![];
+    let etkin_baglam: Option<String> = if acik_baglam {
+        req.context.clone()
+    } else if ground_iste {
+        // Yerel depo (senkron, kilit await dışında).
+        let mut pasajlar = {
+            let depo = match st.depo.lock() { Ok(g) => g, Err(p) => p.into_inner() };
+            depo.ara(&req.prompt, st.cfg.ground_k, st.cfg.ground_min)
+        };
+        // Canlı Wikipedia (opsiyonel; bu sunucuda bloklu → varsayılan kapalı).
+        if st.cfg.wiki && pasajlar.len() < st.cfg.ground_k {
+            if let Some(w) = retrieval::wiki_getir(&st.http, &st.cfg.wiki_langs, &req.prompt).await {
+                pasajlar.push(w);
+            }
+        }
+        if pasajlar.is_empty() {
+            None
+        } else {
+            for p in &pasajlar {
+                kaynaklar.push(Kaynak { kaynak: p.kaynak.clone(), baslik: p.baslik.clone(), url: p.url.clone() });
+            }
+            Some(retrieval::baglam_yap(&pasajlar, st.cfg.ground_snippet))
+        }
+    } else {
+        None
+    };
+
+    let user_content = grounded_user(&req.prompt, etkin_baglam.as_deref());
 
     // BEYİN SEÇİMİ: istek > yapılandırma. Egemen yerel (KUBRA) öncelik.
     let istek = req.brain.as_deref().unwrap_or(&st.cfg.brain_pref);
@@ -344,7 +408,7 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
         }
     };
 
-    let grounded = req.context.as_deref().map(|c| !c.trim().is_empty()).unwrap_or(false);
+    let grounded = etkin_baglam.as_deref().map(|c| !c.trim().is_empty()).unwrap_or(false);
     let is_abstained = abstained(&answer);
 
     // ZİNCİR: etkileşim hash'i imzalı Record olarak GERÇEK zincire.
@@ -367,6 +431,7 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
         model,
         grounded,
         abstained: is_abstained,
+        sources: kaynaklar,
         latency_ms: t0.elapsed().as_millis(),
         input_tokens: in_tok,
         output_tokens: out_tok,
@@ -379,7 +444,7 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
 fn bos_hata(mesaj: &str) -> AskResp {
     AskResp {
         ok: false, answer: String::new(), brain: String::new(), model: String::new(),
-        grounded: false, abstained: false, latency_ms: 0, input_tokens: None, output_tokens: None,
+        grounded: false, abstained: false, sources: vec![], latency_ms: 0, input_tokens: None, output_tokens: None,
         proof_hash: String::new(),
         chain: ChainProof {
             submitted: false, data_hash: String::new(), verify_path: String::new(),
@@ -387,6 +452,34 @@ fn bos_hata(mesaj: &str) -> AskResp {
         },
         hata: Some(mesaj.to_string()),
     }
+}
+
+// KB: yerel bilgi deposuna belge ekle (ingest). Korpus böyle BÜYÜR — sabit Q&A
+// değil; offline Wikipedia dump'ı, dokümanlar, olgusal metinler eklenebilir.
+#[derive(Deserialize)]
+struct IngestReq {
+    baslik: String,
+    metin: String,
+    #[serde(default)]
+    url: Option<String>,
+}
+
+async fn kb_ingest(State(st): State<Arc<AppState>>, Json(req): Json<IngestReq>) -> Json<Value> {
+    if req.baslik.trim().is_empty() || req.metin.trim().len() < 10 {
+        return Json(json!({ "ok": false, "hata": "baslik ve en az 10 karakter metin gerekli" }));
+    }
+    let n = {
+        let mut depo = match st.depo.lock() { Ok(g) => g, Err(p) => p.into_inner() };
+        depo.ekle(retrieval::Belge { baslik: req.baslik.trim().to_string(), metin: req.metin.trim().to_string(), url: req.url });
+        depo.belgeler.len()
+    };
+    Json(json!({ "ok": true, "belge_sayisi": n, "not": "korpus büyüdü; grounding bu belgeyi kullanabilir" }))
+}
+
+async fn kb_stats(State(st): State<Arc<AppState>>) -> Json<Value> {
+    let depo = match st.depo.lock() { Ok(g) => g, Err(p) => p.into_inner() };
+    let basliklar: Vec<&str> = depo.belgeler.iter().take(50).map(|b| b.baslik.as_str()).collect();
+    Json(json!({ "ok": true, "belge_sayisi": depo.belgeler.len(), "yol": depo.yol, "basliklar": basliklar }))
 }
 
 #[tokio::main]
@@ -420,13 +513,21 @@ async fn main() {
     let listen = cfg.listen.clone();
     let brain_ok = cfg.anthropic_key.is_some();
     let has_local = local.is_some();
-    let state = Arc::new(AppState { cfg, http, key, key_addr, local, local_name });
+    // EGEMEN YEREL BİLGİ DEPOSU (grounding kaynağı) yükle.
+    let depo = retrieval::Depo::yukle(&cfg.knowledge_path);
+    let belge_sayisi = depo.belgeler.len();
+    let ground_acik = cfg.ground;
+    let wiki_acik = cfg.wiki;
+    let state = Arc::new(AppState { cfg, http, key, key_addr, local, local_name, depo: Mutex::new(depo) });
 
     println!("──────────────────────────────────────────────");
     println!("🌀 SoulwareAI çekirdeği · yapay zeka: KUBRA (v0.1)");
     println!("   yerel beyin : {}", if has_local { "KUBRA (candle/CPU, egemen)" } else { "YOK" });
     println!("   claude      : {}", if brain_ok { "yapılandırıldı (hibrit)" } else { "yok" });
     println!("   beyin tercihi: {}", state.cfg.brain_pref);
+    println!("   grounding   : {} · yerel depo: {} belge · canlı wiki: {}",
+        if ground_acik { "AÇIK ✅" } else { "kapalı" }, belge_sayisi,
+        if wiki_acik { "açık" } else { "kapalı (sunucu bloklu)" });
     println!("   zincir RPC  : {}", state.cfg.chain_rpc);
     println!("   imzalayan   : 0x{}", hex::encode(state.key_addr));
     println!("   dinleme     : http://{listen}");
@@ -436,6 +537,8 @@ async fn main() {
         .route("/health", get(health))
         .route("/", get(info))
         .route("/v1/ask", post(ask))
+        .route("/kb/ingest", post(kb_ingest))
+        .route("/kb/stats", get(kb_stats))
         .with_state(state);
 
     let addr: SocketAddr = listen.parse().expect("SOULWARE_LISTEN geçersiz");

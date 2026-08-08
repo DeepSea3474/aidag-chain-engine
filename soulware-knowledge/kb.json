@@ -1,0 +1,37 @@
+[
+  {
+    "baslik": "Ankara",
+    "metin": "Ankara, Türkiye'nin başkenti ve Ankara ilinin merkezidir. İç Anadolu Bölgesi'nde yer alır. İstanbul'dan sonra Türkiye'nin nüfus bakımından ikinci büyük şehridir. Türkiye Büyük Millet Meclisi, Cumhurbaşkanlığı ve bakanlıklar Ankara'dadır. 13 Ekim 1923'te başkent ilan edilmiştir.",
+    "url": "https://tr.wikipedia.org/wiki/Ankara"
+  },
+  {
+    "baslik": "Türkiye",
+    "metin": "Türkiye, Avrupa ve Asya kıtalarında toprakları bulunan bir ülkedir. Başkenti Ankara, en büyük şehri İstanbul'dur. Resmî dili Türkçedir. Para birimi Türk lirasıdır. Anadolu ve Doğu Trakya'da yer alır.",
+    "url": "https://tr.wikipedia.org/wiki/Türkiye"
+  },
+  {
+    "baslik": "İstanbul",
+    "metin": "İstanbul, Türkiye'nin en kalabalık şehri ve ekonomik merkezidir. Boğaziçi ile Avrupa ve Asya yakalarına yayılır. Türkiye'nin başkenti DEĞİLDİR; başkent Ankara'dır. Tarihte Bizans ve Osmanlı İmparatorluklarına başkentlik yapmıştır.",
+    "url": "https://tr.wikipedia.org/wiki/İstanbul"
+  },
+  {
+    "baslik": "Fransa",
+    "metin": "Fransa, Batı Avrupa'da bir ülkedir. Başkenti Paris'tir. Resmî dili Fransızcadır. Para birimi Euro'dur.",
+    "url": "https://tr.wikipedia.org/wiki/Fransa"
+  },
+  {
+    "baslik": "AIDAG-Chain",
+    "metin": "AIDAG-Chain, EVM uyumlu, Rust ile yazılmış bir DAG (yönlü çevrimsiz çizge) tabanlı Layer-1 blok zinciridir. GHOSTDAG konsensüsü kullanır. Ağ kimliği (network_id) 3474'tür. Yerel para birimi AIDAG (21 milyon arz) ve gaz/yakıt coini LSC'dir (2.1 milyar arz). SoulwareAI ve KUBRA bu zincir üzerine kuruludur.",
+    "url": null
+  },
+  {
+    "baslik": "SoulwareAI",
+    "metin": "SoulwareAI, insanların boştaki GPU'larını AIDAG/LSC ödülüyle toplayıp merkeziyetsiz bir hesaplama ağı kuran ve bu güçle bağımsız bir yapay zeka geliştirmeyi amaçlayan sistemdir. Yapay zekasının adı KUBRA'dır. Rust tabanlıdır. Kazan-harca kapalı döngüsüyle çalışır: katkıcı worker'lar LSC kazanır, tüketiciler KUBRA'yı kullanmak için LSC harcar.",
+    "url": null
+  },
+  {
+    "baslik": "KUBRA",
+    "metin": "KUBRA, SoulwareAI sisteminin yapay zekasıdır. Halüsinasyona karşı grounding (kaynaktan cevap) ve abstention (emin değilse 'Bilmiyorum' deme) kullanır. Beyni modelden bağımsızdır: zayıf makinelerde küçük model, güçlü GPU'larda büyük model çalıştırabilir. Her etkileşimini AIDAG-Chain'e imzalı olarak yazar.",
+    "url": null
+  }
+]
