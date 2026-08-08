@@ -526,7 +526,10 @@ async fn main() {
         let ad = std::path::Path::new(&cfg.local_model)
             .file_stem().and_then(|s| s.to_str()).unwrap_or("yerel").to_string();
         println!("⏳ KUBRA yerel beyni yükleniyor: {} ...", cfg.local_model);
-        match local_brain::LocalBrain::load(&cfg.local_model, &cfg.local_tokenizer, &ad) {
+        // Şablon: SOULWARE_CHAT_TEMPLATE (chatml=Qwen varsayılan | deepseek). Bootstrap/
+        // öğretmen modeller farklı format ister; KUBRA modelden bağımsız kalır.
+        let sablon = local_brain::Sablon::from_str(&std::env::var("SOULWARE_CHAT_TEMPLATE").unwrap_or_default());
+        match local_brain::LocalBrain::load(&cfg.local_model, &cfg.local_tokenizer, &ad, sablon) {
             Ok(lb) => {
                 println!("✅ KUBRA yerel beyni yüklendi (egemen, ücretsiz, CPU).");
                 (Some(Mutex::new(lb)), Some(ad))

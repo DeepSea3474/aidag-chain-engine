@@ -1,6 +1,12 @@
 {
-  "not": "KUBRA beyin registry'si — kullanabilecegi ACIK gelismis modeller. Beyin modelden BAGIMSIZ (pluggable). 'destek' = mevcut candle yukleyiciyle calisir mi. qwen2 mimarisi ZATEN destekli (0.5B..72B ayni yukleyici). llama/mistral/deepseek mimarileri icin yukleyici eklenecek (yol haritasi). Buyuk modeller GPU/RAM ister -> katki GPU'lari (DePIN).",
+  "not": "KUBRA beyin registry'si. ILKE (kullanici): KUBRA BIZE AIT olmali, copy-paste DEGIL. Acik modeller (Qwen/DeepSeek/Llama) = OGRETMEN/BOOTSTRAP (gecici iskele + Faz3'te damitma ogretmeni, MIT/Apache yasal). ASIL HEDEF = KUBRA'nin KENDI modeli: acik ogretmenlerden BIZIM verimizle, BIZIM agimizin GPU'larinda, BIZIM degerlerimizle egitilmis kendi agirliklarimiz. Zihin/ruh (egemen Rust sistem) zaten %100 bizim. Kapali modeller (GPT/Claude) YOK (egemenlik+ToS).",
+  "sahiplik": {
+    "zihin_ruh": "BIZIM (egemen Rust sistem: grounding/hafiza/dogrulama/zincir/ekonomi/kimlik) - simdiden",
+    "bilgi": "BIZIM (grounding korpusu + ag verisi) - buyuyor",
+    "ham_zeka_motoru": "bugun ogretmen/odunc (acik model) -> Faz3'te BIZIM (kendi egittigimiz model)"
+  },
   "aktif": "qwen2.5-1.5b",
+  "hedef_oz_model": { "id": "kubra-oz-1", "ad": "KUBRA-Oz (bize ait, egitilecek)", "arch": "acik-tabandan-damitma", "durum": "Faz3 hedefi", "not": "Acik ogretmenlerden BIZIM verimizle egitilecek -> ogretmeni asan, bize ait model" },
   "modeller": [
     { "id": "qwen2.5-0.5b", "ad": "Qwen2.5-0.5B-Instruct", "arch": "qwen2", "parametre": "0.5B", "tier": 1, "gpu_gerek": false, "destek": "simdi", "kaynak": "hf:Qwen/Qwen2.5-0.5B-Instruct-GGUF", "yerel": null },
     { "id": "qwen2.5-1.5b", "ad": "Qwen2.5-1.5B-Instruct", "arch": "qwen2", "parametre": "1.5B", "tier": 2, "gpu_gerek": false, "destek": "simdi", "kaynak": "hf:Qwen/Qwen2.5-1.5B-Instruct-GGUF", "yerel": "/root/aidag-lsc/soulware-models/qwen2.5-1.5b-instruct-q4_k_m.gguf" },
