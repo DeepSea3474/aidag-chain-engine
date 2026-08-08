@@ -1,0 +1,28 @@
+[package]
+name = "soulware-core"
+version = "0.1.0"
+edition = "2021"
+description = "SoulwareAI cekirdegi — Beyin-Router (Claude bugun) + halusinasyon savunmasi + gercek AIDAG-Chain'e imzali kayit."
+
+[[bin]]
+name = "soulware-core"
+path = "src/main.rs"
+
+[dependencies]
+# Zincir: gercek vertex kur + imzala (aidag-lsc motoru). Tip=1 Record ile zincire yazar.
+lsc-engine = { path = "../lsc-engine" }
+ed25519-dalek = { version = "=2.1.1", default-features = false, features = ["std"] }
+blake3 = "=1.5.5"
+hex = "=0.4.3"
+rand = "=0.8.5"
+# HTTP sunucu (bu servisin API'si) + istemci (Claude API + zincir /submit)
+axum = "=0.7.9"
+tokio = { version = "=1.43.0", features = ["rt-multi-thread", "macros", "signal", "net", "time"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "=1.0.140"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# Egemen yerel beyin (candle, saf Rust) — CPU'da acik model calistirir. Ucretsiz.
+candle-core = "0.8"
+candle-transformers = "0.8"
+tokenizers = "0.20"
+anyhow = "1"

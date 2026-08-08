@@ -48,3 +48,5 @@ avm-sozlesmeler/token-cikti/
 *anahtar*
 faucet_anahtar.txt
 *.yedek*
+soulware-models/
+.soulware.key
