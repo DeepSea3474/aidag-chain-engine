@@ -15,6 +15,7 @@
 mod local_brain; // egemen yerel beyin (candle) = KUBRA
 mod retrieval;   // grounding kaynak katmanı (yerel egemen depo + canlı wiki)
 mod embed;       // semantik gömme (embedding) — anlam-bazlı retrieval
+mod hesap;       // deterministik hesap makinesi aracı (araç-kullanımı)
 
 use axum::{extract::State, routing::{get, post}, Json, Router};
 use ed25519_dalek::SigningKey;
@@ -414,6 +415,28 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
     let ts = now_secs();
     if req.prompt.trim().is_empty() {
         return Json(bos_hata("prompt boş olamaz"));
+    }
+
+    // ── ARAÇ-KULLANIMI: aritmetik ise ZAYIF MODELE bırakma, KESIN hesapla ──
+    // Güçlü AI'lar araç kullanır. "7 çarpı 8" → 56 garantili (deterministik).
+    // Yalnız açık aritmetik tetikler (sayısız/operatörsüz sorgu → normal yol).
+    if let Some(sonuc) = hesap::hesapla(&req.prompt) {
+        let mut h = blake3::Hasher::new();
+        h.update(&st.cfg.net_id.to_le_bytes());
+        h.update(&ts.to_le_bytes());
+        h.update(req.prompt.as_bytes());
+        h.update(&[0x1e]);
+        h.update(sonuc.as_bytes());
+        h.update(&[0x1e]);
+        h.update(b"hesap-makinesi");
+        let data_hash: [u8; 32] = *h.finalize().as_bytes();
+        let chain = zincire_yaz(&st, data_hash, ts).await;
+        return Json(AskResp {
+            ok: true, answer: sonuc, brain: "arac".into(), model: "hesap-makinesi".into(),
+            grounded: false, abstained: false, sources: vec![],
+            latency_ms: t0.elapsed().as_millis(), input_tokens: None, output_tokens: None,
+            proof_hash: hex::encode(data_hash), chain, hata: None,
+        });
     }
 
     // ── GROUNDING: açık bağlam yoksa ve grounding açıksa KAYNAK getir ──
