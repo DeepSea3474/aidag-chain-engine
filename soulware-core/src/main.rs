@@ -618,12 +618,16 @@ async fn main() {
         println!("ℹ embedding modeli yok ({}) → keyword retrieval", cfg.embed_dir); None
     };
     let embed_acik = embedder.is_some();
-    // Korpusu embed et (semantik retrieval için). 491 belge ~40sn (bir kerelik).
+    // Korpusu embed et (semantik retrieval için). Önce DİSK CACHE'i dene → restart hızlı.
     if let Some(e) = &embedder {
         if belge_sayisi > 0 {
-            println!("⏳ {belge_sayisi} belge embed ediliyor (semantik retrieval)...");
-            depo.embed_hepsi(e);
-            println!("✅ korpus embed edildi");
+            if depo.embed_cache_yukle() {
+                println!("✅ embedding cache yüklendi ({belge_sayisi} belge, hızlı başlangıç)");
+            } else {
+                println!("⏳ {belge_sayisi} belge embed ediliyor (bir kerelik, sonra cache)...");
+                depo.embed_hepsi(e);
+                println!("✅ korpus embed edildi + cache kaydedildi");
+            }
         }
     }
     let state = Arc::new(AppState { cfg, http, key, key_addr, local, local_name, depo: Mutex::new(depo), embedder });

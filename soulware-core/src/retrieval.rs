@@ -93,13 +93,39 @@ impl Depo {
         format!("{}. {}", b.baslik, b.metin)
     }
 
-    /// TÜM belgeleri embed et (başlangıçta / korpus değişince). Semantik retrieval'ı açar.
+    fn emb_yol(&self) -> String {
+        format!("{}.emb.json", self.yol)
+    }
+
+    /// Embedding cache'ini diske yaz (restart'ta yeniden embed gerekmesin).
+    fn embed_cache_kaydet(&self) {
+        let tmp = format!("{}.tmp", self.emb_yol());
+        if serde_json::to_vec(&self.embeddings).ok().and_then(|b| std::fs::write(&tmp, b).ok()).is_some() {
+            let _ = std::fs::rename(&tmp, self.emb_yol());
+        }
+    }
+
+    /// Embedding cache'ini diskten yükle. Belge sayısıyla eşleşiyorsa true → embed atlanır.
+    pub fn embed_cache_yukle(&mut self) -> bool {
+        if let Ok(data) = std::fs::read(self.emb_yol()) {
+            if let Ok(embs) = serde_json::from_slice::<Vec<Vec<f32>>>(&data) {
+                if embs.len() == self.belgeler.len() && !embs.is_empty() && embs.iter().all(|e| !e.is_empty()) {
+                    self.embeddings = embs;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// TÜM belgeleri embed et (başlangıçta / korpus değişince) + cache'e yaz.
     pub fn embed_hepsi(&mut self, e: &crate::embed::Embedder) {
         self.embeddings = self
             .belgeler
             .iter()
             .map(|b| e.embed(&Self::embed_metni(b)).unwrap_or_default())
             .collect();
+        self.embed_cache_kaydet();
     }
 
     /// SEMANTİK arama: sorgu vektörü ↔ belge vektörleri kosinüs benzerliği. Keyword
@@ -185,6 +211,7 @@ impl Depo {
         if let Some(emb) = e {
             let text = Self::embed_metni(&self.belgeler[idx]);
             self.embeddings[idx] = emb.embed(&text).unwrap_or_default();
+            self.embed_cache_kaydet();
         }
         self.kaydet();
     }
