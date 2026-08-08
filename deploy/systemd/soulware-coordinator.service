@@ -1,0 +1,18 @@
+[Unit]
+Description=SoulwareAI coordinator (compute+reward, :8647)
+After=aidag-node.service network-online.target
+Wants=aidag-node.service
+
+[Service]
+Type=simple
+WorkingDirectory=/root/aidag-lsc
+Environment=SOULWARE_CHAIN_RPC=http://127.0.0.1:8645
+Environment=SOULWARE_NET_ID=3474
+Environment=SOULWARE_COORD_LISTEN=127.0.0.1:8647
+# GUVENLIK: settle key/auto YOK -> mainnet-guvenli kuyruk modu (owner offline basar).
+ExecStart=/root/aidag-lsc/target/release/soulware-coordinator
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,19 @@
+[Unit]
+Description=SoulwareAI continuous learning (Wikipedia -> KUBRA korpus)
+After=soulware-kubra.service network-online.target
+Wants=soulware-kubra.service
+
+[Service]
+Type=simple
+WorkingDirectory=/root/aidag-lsc
+Environment=SOULWARE_KB_URL=http://127.0.0.1:8646
+Environment=SOULWARE_WIKI_CONFIG=20231101.tr
+Environment=SOULWARE_LEARN_BATCH=40
+Environment=SOULWARE_LEARN_SLEEP=600
+Environment=SOULWARE_LEARN_MAX=5000
+ExecStart=/usr/bin/env bash /root/aidag-lsc/soulware-ingest/daemon.sh
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

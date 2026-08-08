@@ -1,0 +1,27 @@
+[Unit]
+Description=SoulwareAI KUBRA core (soulware-core, :8646, grounding)
+After=aidag-node.service network-online.target
+Wants=aidag-node.service
+
+[Service]
+Type=simple
+WorkingDirectory=/root/aidag-lsc
+Environment=SOULWARE_BRAIN=local
+Environment=SOULWARE_CHAIN_RPC=http://127.0.0.1:8645
+Environment=SOULWARE_LISTEN=127.0.0.1:8646
+Environment=SOULWARE_NET_ID=3474
+Environment=SOULWARE_LOCAL_MODEL=/root/aidag-lsc/soulware-models/qwen2.5-1.5b-instruct-q4_k_m.gguf
+Environment=SOULWARE_LOCAL_TOKENIZER=/root/aidag-lsc/soulware-models/tokenizer-1.5b.json
+Environment=SOULWARE_MAX_TOKENS=16
+Environment=SOULWARE_GROUND=1
+Environment=SOULWARE_KNOWLEDGE_PATH=/root/aidag-lsc/soulware-knowledge/kb.json
+Environment=SOULWARE_GROUND_K=2
+Environment=SOULWARE_GROUND_SNIPPET=350
+Environment=SOULWARE_GROUND_MIN=150
+Environment=SOULWARE_GROUND_RATIO=40
+ExecStart=/root/aidag-lsc/target/release/soulware-core
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
