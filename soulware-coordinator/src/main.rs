@@ -413,6 +413,15 @@ async fn status(State(st): State<St>) -> Json<Value> {
     }))
 }
 
+// Tüketici: bir işin (kendi sorusunun) doğrulanmış sonucunu sorgular.
+async fn job_get(State(st): State<St>, Path(id): Path<u64>) -> Json<Value> {
+    let c = st.lock().await;
+    match c.jobs.get(&id) {
+        Some(j) => Json(json!({ "ok": true, "job": j })),
+        None => Json(json!({ "ok": false, "hata": "iş yok" })),
+    }
+}
+
 async fn health() -> Json<Value> {
     Json(json!({ "ok": true, "servis": "soulware-coordinator", "surum": "0.1.0" }))
 }
@@ -446,6 +455,7 @@ async fn main() {
         .route("/health", get(health))
         .route("/status", get(status))
         .route("/job/create", post(job_create))
+        .route("/job/:id", get(job_get))
         .route("/worker/register", post(worker_register))
         .route("/worker/poll/:wallet", get(worker_poll))
         .route("/worker/submit", post(worker_submit))
