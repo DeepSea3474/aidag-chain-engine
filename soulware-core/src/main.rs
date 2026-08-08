@@ -47,6 +47,7 @@ struct Config {
     ground_k: usize,         // en fazla kaç pasaj sunulsun
     ground_snippet: usize,   // pasaj başına maks karakter
     ground_min: i64,         // min IDF skoru (altı = alakasız, grounding YOK)
+    model_registry: String,  // kullanılabilir açık modeller kaydı (JSON)
 }
 
 impl Config {
@@ -70,6 +71,7 @@ impl Config {
             ground_k: ev("SOULWARE_GROUND_K", "3").parse().unwrap_or(3),
             ground_snippet: ev("SOULWARE_GROUND_SNIPPET", "600").parse().unwrap_or(600),
             ground_min: ev("SOULWARE_GROUND_MIN", "150").parse().unwrap_or(150),
+            model_registry: ev("SOULWARE_MODEL_REGISTRY", "/root/aidag-lsc/soulware-models/registry.json"),
         }
     }
 }
@@ -310,6 +312,34 @@ fn now_secs() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+// KUBRA'nın kullanabileceği AÇIK gelişmiş modeller + hangisi yüklü. Beyin pluggable:
+// qwen2 mimarisi 0.5B..72B aynı yükleyiciyle (büyükler GPU ister); llama/mistral için
+// yükleyici eklenecek. DÜRÜST: kapalı modeller (GPT/Claude) YOK — egemenlik/ToS.
+async fn models(State(st): State<Arc<AppState>>) -> Json<Value> {
+    let reg: Value = std::fs::read(&st.cfg.model_registry)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_else(|| json!({ "modeller": [] }));
+    // Yüklü modeli işaretle (yerel yolu, çalışan cfg.local_model ile eşleşen).
+    let mut modeller = reg.get("modeller").cloned().unwrap_or_else(|| json!([]));
+    if let Some(arr) = modeller.as_array_mut() {
+        for m in arr.iter_mut() {
+            let yuklu = m.get("yerel").and_then(|y| y.as_str()) == Some(st.cfg.local_model.as_str())
+                && st.local.is_some();
+            if let Some(obj) = m.as_object_mut() {
+                obj.insert("yuklu".into(), json!(yuklu));
+            }
+        }
+    }
+    Json(json!({
+        "ok": true,
+        "yuklu_model": st.local_name.clone().unwrap_or_else(|| "yok".into()),
+        "beyin_pluggable": true,
+        "not": reg.get("not").cloned().unwrap_or(Value::Null),
+        "modeller": modeller,
+    }))
+}
+
 async fn health() -> Json<Value> {
     Json(json!({ "ok": true, "servis": "soulware-core", "yapay_zeka": "KUBRA", "surum": "0.1.0" }))
 }
@@ -539,6 +569,7 @@ async fn main() {
         .route("/v1/ask", post(ask))
         .route("/kb/ingest", post(kb_ingest))
         .route("/kb/stats", get(kb_stats))
+        .route("/models", get(models))
         .with_state(state);
 
     let addr: SocketAddr = listen.parse().expect("SOULWARE_LISTEN geçersiz");
