@@ -109,8 +109,10 @@ struct PendingSettlement {
     lsc: u64,           // tam LSC (wei değil; emisyonda 10^18 ile çarpılır)
     job_id: u64,
     created_at: u64,
-    settled: bool,      // tip=16 zincire yazıldı & kabul edildi mi
+    settled: bool,      // zincire yazıldı & kabul edildi mi
     settled_at: u64,
+    #[serde(default)]
+    settled_via: String, // "havuz" (tip=7, ücret-fonlu) | "emisyon" (tip=16, bootstrap)
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -124,6 +126,11 @@ struct Job {
     verified_answer: Option<String>,
     rewards: Vec<RewardRec>,
     created_at: u64,
+    // Tüketici ücreti (kazan↔harca): bu işi açan taraf havuza ödediği LSC.
+    #[serde(default)]
+    fee_lsc: u64,
+    #[serde(default)]
+    payer: Option<String>,
 }
 
 struct Coord {
@@ -281,6 +288,60 @@ fn cuzdan20(w: &str) -> Option<[u8; 20]> {
     Some(a)
 }
 
+/// Bir adresin zincirdeki LSC bakiyesini (wei) çek. Hata → 0.
+async fn lsc_bakiye_cek(http: &reqwest::Client, rpc: &str, adres: &[u8; 20]) -> u128 {
+    let url = format!("{rpc}/lsc-bakiye/{}", hex::encode(adres));
+    if let Ok(resp) = http.get(url).send().await {
+        if let Ok(v) = resp.json::<Value>().await {
+            if let Some(s) = v.get("lsc_bakiye").and_then(|x| x.as_str()) {
+                return s.parse::<u128>().unwrap_or(0);
+            }
+        }
+    }
+    0
+}
+
+/// Bir adresin bir sonraki beklenen nonce'unu çek (tip=7 için). Hata → 0.
+async fn nonce_cek(http: &reqwest::Client, rpc: &str, adres: &[u8; 20]) -> u64 {
+    let url = format!("{rpc}/nonce/{}", hex::encode(adres));
+    if let Ok(resp) = http.get(url).send().await {
+        if let Ok(v) = resp.json::<Value>().await {
+            if let Some(n) = v.get("nonce").and_then(|x| x.as_u64()) {
+                return n;
+            }
+        }
+    }
+    0
+}
+
+/// HAVUZDAN ÖDEME: worker'a havuzdaki GERÇEK LSC'yi tip=7 ile TAŞI (emisyon DEĞİL).
+/// Havuz anahtarı (koordinatör) imzalar. Sadece var olan LSC'yi taşır — para basmaz.
+/// Bu, kazan↔harca döngüsünün "kazan" ödemesidir; kaynağı tüketici ücretleridir.
+async fn havuzdan_ode(
+    http: &reqwest::Client, rpc: &str, net_id: u32, pool_key: &SigningKey,
+    pool_addr: &[u8; 20], worker: [u8; 20], lsc_wei: u128, ts: u64,
+) -> (bool, String) {
+    let nonce = nonce_cek(http, rpc, pool_addr).await;
+    let tips = uclari_cek(http, rpc).await;
+    let payload = lsc_engine::tx::LscTransferKaydi::new(worker, lsc_wei, nonce).encode();
+    let vertex = match Vertex::new_signed(net_id, tips, payload, ts, pool_key) {
+        Ok(v) => v,
+        Err(_) => return (false, "vertex üretilemedi".into()),
+    };
+    let bytes = wire::encode(&vertex);
+    match http.post(format!("{rpc}/submit")).json(&json!({ "hex": hex::encode(&bytes) })).send().await {
+        Ok(resp) => match resp.json::<Value>().await {
+            Ok(v) => {
+                let ok = v.get("ok").and_then(|o| o.as_bool()).unwrap_or(false);
+                let sonuc = v.get("sonuc").and_then(|s| s.as_str()).unwrap_or("").to_string();
+                (ok && !sonuc.contains("Rejected"), sonuc)
+            }
+            Err(_) => (false, "yanıt okunamadı".into()),
+        },
+        Err(_) => (false, "gönderilemedi".into()),
+    }
+}
+
 /// SETTLEMENT: doğrulanmış kazancı GERÇEK LSC emisyonuna çevir (tip=16 ComputeReward).
 /// Owner (faucet) anahtarıyla imzalar; node emisyon tavanı + çifte-basım kilidini
 /// UYGULAR. Döner: (zincir kabul etti mi, kısa not). Sahte başarı YOK.
@@ -312,39 +373,50 @@ async fn settle_zincire(
     }
 }
 
-/// Arka plan SETTLEMENT döngüsü: kuyruğu tüketip tip=16 emisyonu yapar.
-/// YALNIZCA settle_auto=true VE owner anahtarı varsa çalışır (devnet). Mainnet'te
-/// varsayılan KAPALI → kuyruk owner tarafından offline boşaltılır.
+/// Arka plan SETTLEMENT döngüsü (kazan↔harca'nın "kazan" ödemesi).
+/// Her bekleyen kazanç için ÖNCE HAVUZDAN öder (tip=7, ücret-fonlu, para basmaz);
+/// havuz yetersizse VE owner anahtarı varsa EMİSYON (tip=16, sınırlı bootstrap).
+/// YALNIZCA SOULWARE_SETTLE_AUTO=1 iken çalışır. Mainnet varsayılanı KAPALI.
 async fn settle_loop(st: St) {
-    let (interval, has_key) = {
-        let c = st.lock().await;
-        (c.cfg.settle_interval.max(2), c.settle_key.is_some())
-    };
-    if !has_key { return; }
+    let interval = { st.lock().await.cfg.settle_interval.max(2) };
     loop {
         tokio::time::sleep(Duration::from_secs(interval)).await;
-        // Bekleyenleri kilit altında topla (imza malzemesi kopyala), await'i kilit dışında yap.
-        let (bekleyen, net_id, rpc, key): (Vec<PendingSettlement>, u32, String, Option<SigningKey>) = {
+        // Bekleyenleri + imza malzemesini kilit altında kopyala; await kilit dışında.
+        let (bekleyen, net_id, rpc, pool_key, pool_addr, owner_key) = {
             let c = st.lock().await;
             let bek: Vec<PendingSettlement> = c.settlements.iter().filter(|s| !s.settled).cloned().collect();
-            (bek, c.cfg.net_id, c.cfg.chain_rpc.clone(), c.settle_key.clone())
+            (bek, c.cfg.net_id, c.cfg.chain_rpc.clone(), c.key.clone(), c.key_addr, c.settle_key.clone())
         };
-        let key = match key { Some(k) => k, None => return };
-        let http = { let c = st.lock().await; c.http.clone() };
+        if bekleyen.is_empty() { continue; }
+        let http = { st.lock().await.http.clone() };
         for s in bekleyen {
             let w = match cuzdan20(&s.worker) { Some(w) => w, None => continue };
             let ts = now_secs();
-            let (ok, note) = settle_zincire(&http, &rpc, net_id, &key, w, s.lsc, s.reward_id, ts).await;
+            let need_wei = (s.lsc as u128).saturating_mul(ONDALIK);
+            let pool_bal = lsc_bakiye_cek(&http, &rpc, &pool_addr).await;
+
+            let (ok, via, note) = if pool_bal >= need_wei {
+                // 1) HAVUZDAN öde (ücret-fonlu dolaşım — enflasyon yok).
+                let (ok, note) = havuzdan_ode(&http, &rpc, net_id, &pool_key, &pool_addr, w, need_wei, ts).await;
+                (ok, "havuz", note)
+            } else if let Some(ok_key) = &owner_key {
+                // 2) Havuz yetersiz → EMİSYON (bootstrap; tavanlı, owner-imzalı).
+                let (ok, note) = settle_zincire(&http, &rpc, net_id, ok_key, w, s.lsc, s.reward_id, ts).await;
+                (ok, "emisyon", note)
+            } else {
+                (false, "-", format!("havuz yetersiz ({pool_bal} wei) ve owner anahtarı yok"))
+            };
+
             if ok {
                 let mut c = st.lock().await;
                 if let Some(p) = c.settlements.iter_mut().find(|p| p.reward_id == s.reward_id) {
                     p.settled = true;
                     p.settled_at = ts;
+                    p.settled_via = via.to_string();
                 }
                 c.save();
-                println!("💠 settlement OK: reward_id={} worker={} lsc={} (tip=16 emisyon)", s.reward_id, s.worker, s.lsc);
+                println!("💠 settlement OK: reward_id={} worker={} lsc={} via={}", s.reward_id, s.worker, s.lsc, via);
             } else {
-                // Başarısız (tavan/owner/ağ): logla, kuyrukta kalsın, sonra tekrar denenir.
                 eprintln!("⚠ settlement bekliyor: reward_id={} → {}", s.reward_id, note);
             }
         }
@@ -353,7 +425,12 @@ async fn settle_loop(st: St) {
 
 // ════════════════════════════ Uçlar ════════════════════════════
 #[derive(Deserialize)]
-struct CreateJob { prompt: String, #[serde(default)] deterministic: Option<bool> }
+struct CreateJob {
+    prompt: String,
+    #[serde(default)] deterministic: Option<bool>,
+    #[serde(default)] fee_lsc: Option<u64>,   // tüketicinin havuza ödediği ücret (LSC)
+    #[serde(default)] payer: Option<String>,  // ücreti ödeyen cüzdan (0x...)
+}
 
 async fn job_create(State(st): State<St>, Json(req): Json<CreateJob>) -> Json<Value> {
     if req.prompt.trim().is_empty() {
@@ -364,12 +441,15 @@ async fn job_create(State(st): State<St>, Json(req): Json<CreateJob>) -> Json<Va
     c.next_job += 1;
     // Doğrulama için varsayılan deterministic=true (yedekli çıktılar eşleşsin).
     let det = req.deterministic.unwrap_or(true);
+    let fee = req.fee_lsc.unwrap_or(0);
     c.jobs.insert(id, Job {
         id, prompt: req.prompt, deterministic: det, status: "pending".into(),
         assigned: vec![], results: vec![], verified_answer: None, rewards: vec![], created_at: now_secs(),
+        fee_lsc: fee, payer: req.payer.map(|p| p.trim().to_lowercase()),
     });
     c.save();
-    Json(json!({ "ok": true, "job_id": id, "deterministic": det }))
+    Json(json!({ "ok": true, "job_id": id, "deterministic": det, "fee_lsc": fee,
+        "not": if fee > 0 { "ücreti havuza öde: soulware-pay ile tip=7 → havuz adresi" } else { "ücretsiz (bootstrap emisyonu)" } }))
 }
 
 #[derive(Deserialize)]
@@ -509,7 +589,7 @@ async fn worker_submit(State(st): State<St>, Json(req): Json<Submit>) -> Json<Va
             c.next_reward_id += 1;
             c.settlements.push(PendingSettlement {
                 reward_id, worker: worker.clone(), lsc: cfg.reward_lsc, job_id,
-                created_at: ts, settled: false, settled_at: 0,
+                created_at: ts, settled: false, settled_at: 0, settled_via: String::new(),
             });
             odul_sonuc.push(json!({ "worker": worker, "lsc": cfg.reward_lsc, "chain_ok": chain_ok, "proof": proof, "reward_id": reward_id }));
         }
@@ -563,28 +643,58 @@ async fn settlement_pending(State(st): State<St>) -> Json<Value> {
     let bekleyen: Vec<&PendingSettlement> = c.settlements.iter().filter(|s| !s.settled).collect();
     Json(json!({
         "ok": true,
-        "auto": c.cfg.settle_auto && c.settle_key.is_some(),
+        "auto": c.cfg.settle_auto,
         "bekleyen_sayisi": bekleyen.len(),
         "bekleyen": bekleyen,
         "not": "auto=false ise owner offline `soulware-settle` ile bu kuyruğu boşaltır.",
     }))
 }
 
-// Settlement özeti: kaç tanesi zincire basıldı, ne kadar LSC emisyon yapıldı.
+// Settlement özeti: kaç tanesi zincire basıldı, havuz vs emisyon dağılımı.
 async fn settlement_status(State(st): State<St>) -> Json<Value> {
     let c = st.lock().await;
     let toplam = c.settlements.len();
     let basildi: Vec<&PendingSettlement> = c.settlements.iter().filter(|s| s.settled).collect();
-    let emisyon_lsc: u64 = basildi.iter().map(|s| s.lsc).sum();
+    let odenen_lsc: u64 = basildi.iter().map(|s| s.lsc).sum();
+    let havuzdan: u64 = basildi.iter().filter(|s| s.settled_via == "havuz").map(|s| s.lsc).sum();
+    let emisyondan: u64 = basildi.iter().filter(|s| s.settled_via == "emisyon").map(|s| s.lsc).sum();
     Json(json!({
         "ok": true,
-        "auto_emisyon": c.cfg.settle_auto && c.settle_key.is_some(),
-        "owner": c.settle_addr.map(|a| format!("0x{}", hex::encode(a))),
+        "auto": c.cfg.settle_auto,
+        "emisyon_fallback_owner": c.settle_addr.map(|a| format!("0x{}", hex::encode(a))),
         "toplam_settlement": toplam,
         "basildi": basildi.len(),
         "bekleyen": toplam - basildi.len(),
-        "emisyon_yapilan_lsc": emisyon_lsc,
-        "not": "basildi = zincirde owner-imzalı tip=16 ile GERÇEK LSC bakiyesi verildi.",
+        "odenen_lsc": odenen_lsc,
+        "havuzdan_lsc": havuzdan,
+        "emisyondan_lsc": emisyondan,
+        "not": "havuzdan = ücret-fonlu dolaşım (enflasyonsuz); emisyondan = bootstrap (tavanlı tip=16).",
+    }))
+}
+
+// Havuz durumu: kazan↔harca döngüsünün kalbi. Zincirdeki gerçek havuz bakiyesi +
+// toplanan ücretler + ödenen ödüller.
+async fn pool_status(State(st): State<St>) -> Json<Value> {
+    let (http, rpc, pool_addr, fees, jobs_paid) = {
+        let c = st.lock().await;
+        let fees: u64 = c.jobs.values().map(|j| j.fee_lsc).sum();
+        let jobs_paid = c.jobs.values().filter(|j| j.fee_lsc > 0).count();
+        (c.http.clone(), c.cfg.chain_rpc.clone(), c.key_addr, fees, jobs_paid)
+    };
+    let bal_wei = lsc_bakiye_cek(&http, &rpc, &pool_addr).await;
+    let odenen: u64 = {
+        let c = st.lock().await;
+        c.settlements.iter().filter(|s| s.settled).map(|s| s.lsc).sum()
+    };
+    Json(json!({
+        "ok": true,
+        "havuz_adresi": format!("0x{}", hex::encode(pool_addr)),
+        "havuz_bakiye_wei": bal_wei.to_string(),
+        "havuz_bakiye_lsc": (bal_wei / ONDALIK).to_string(),
+        "toplanan_ucret_lsc": fees,
+        "ucretli_is_sayisi": jobs_paid,
+        "odenen_odul_lsc": odenen,
+        "not": "kazan↔harca: tüketici ücreti havuza (tip=7) → worker havuzdan ödenir (tip=7). Kapalı döngü.",
     }))
 }
 
@@ -618,18 +728,25 @@ async fn main() {
         },
         None => (None, None),
     };
-    let auto_aktif = cfg.settle_auto && settle_key.is_some();
+    // Otomatik settlement TEK anahtarı: SOULWARE_SETTLE_AUTO. Havuz ödemesi (tip=7)
+    // koordinatörün kendi anahtarıyla yapılır (owner gerekmez); emisyon (tip=16)
+    // fallback'i için owner anahtarı opsiyoneldir.
+    let auto_aktif = cfg.settle_auto;
 
     println!("──────────────────────────────────────────────");
     println!("🛰  SoulwareAI Koordinatör (v0.1)");
-    println!("   koordinatör : 0x{}", hex::encode(key_addr));
+    println!("   koordinatör : 0x{} (= ödül havuzu adresi)", hex::encode(key_addr));
     println!("   zincir RPC  : {}", cfg.chain_rpc);
     println!("   yedeklilik  : {} · ödül/iş: {} LSC", cfg.redundancy, cfg.reward_lsc);
     println!("   dinleme     : http://{listen}");
-    match (&settle_addr, auto_aktif) {
-        (Some(a), true) => println!("   settlement  : OTOMATİK ✅ owner=0x{} (her {}s tip=16 emisyon)", hex::encode(a), cfg.settle_interval),
-        (Some(a), false) => println!("   settlement  : anahtar var ama SOULWARE_SETTLE_AUTO=1 değil → kuyruk modu (owner=0x{})", hex::encode(a)),
-        (None, _) => println!("   settlement  : KUYRUK modu (anahtar yok) → owner offline `soulware-settle` ile basar [mainnet güvenli]"),
+    if auto_aktif {
+        let emis = match &settle_addr {
+            Some(a) => format!("emisyon fallback owner=0x{}", hex::encode(a)),
+            None => "emisyon fallback YOK (yalnız havuz-fonlu)".to_string(),
+        };
+        println!("   settlement  : OTOMATİK ✅ önce HAVUZ (tip=7, ücret-fonlu), sonra {emis}; her {}s", cfg.settle_interval);
+    } else {
+        println!("   settlement  : KUYRUK modu (SOULWARE_SETTLE_AUTO=1 değil) → owner offline araçla basar [mainnet güvenli]");
     }
     println!("──────────────────────────────────────────────");
 
@@ -663,6 +780,7 @@ async fn main() {
         .route("/worker/submit", post(worker_submit))
         .route("/settlement/pending", get(settlement_pending))
         .route("/settlement/status", get(settlement_status))
+        .route("/pool/status", get(pool_status))
         .with_state(st);
 
     let addr: SocketAddr = listen.parse().expect("SOULWARE_COORD_LISTEN geçersiz");
