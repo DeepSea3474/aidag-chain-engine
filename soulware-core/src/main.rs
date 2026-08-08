@@ -68,14 +68,9 @@ struct AppState {
 }
 
 // ════════════════════════════ Kimlik / grounding ════════════════════════════
-const SYSTEM_PROMPT: &str = "\
-Sen KUBRA'sın — SoulwareAI sisteminin yapay zekası. Dürüst, faydalı ve egemensin.\n\
-TEMEL KURAL (ihlal edilemez): ASLA uydurma. Emin değilsen ya da elinde yeterli \
-dayanak yoksa, tahmin etmek yerine AÇIKÇA 'Bilmiyorum' de. Cevaplarını verilen \
-bağlama ve bilinen gerçeklere dayandır; mümkünse kaynağını belirt.\n\
-Zarara ve kötüye kullanıma karşı ol; insana faydalı ol. Kullanıcının dilinde yanıtla.\n\
-Core rule: NEVER fabricate. If unsure or ungrounded, say 'Bilmiyorum / I don't know' \
-rather than guessing.";
+// ÖZ sistem-prompt: CPU'da prefill'i kısaltır (hız). Halüsilasyon savunması korunur.
+const SYSTEM_PROMPT: &str = "Adın KUBRA; SoulwareAI'nın yapay zekasısın. Dürüst ve faydalısın. \
+ASLA uydurma — emin değilsen 'Bilmiyorum' de. Kullanıcının dilinde, kısa ve net yanıtla.";
 
 // GROUNDING: bağlam verilmişse modele açıkça sunulur; model onun DIŞINA çıkmamalı.
 fn grounded_user(prompt: &str, context: Option<&str>) -> String {
