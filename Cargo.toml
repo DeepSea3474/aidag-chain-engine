@@ -4,4 +4,6 @@ members = [
     "lsc-engine",
     "lsc-net",
     "soulware-core",
+    "soulware-coordinator",
+    "soulware-worker",
 ]

@@ -38,7 +38,9 @@ impl LocalBrain {
 
     /// ChatML şablonuyla üret. system+user → asistan cevabı (metin).
     /// Greedy'e yakın (temp düşük) → tutarlı/deterministik; halüsilasyon savunmasına uygun.
-    pub fn generate(&mut self, system: &str, user: &str, max_new: usize) -> anyhow::Result<(String, usize)> {
+    /// temp=0.0 → GREEDY (deterministik): aynı girdi → aynı çıktı. Ağ doğrulaması
+    /// (yedekli worker çıktılarının birebir eşleşmesi) için şart. temp>0 → örnekleme.
+    pub fn generate(&mut self, system: &str, user: &str, max_new: usize, temp: f64) -> anyhow::Result<(String, usize)> {
         let prompt = format!(
             "<|im_start|>system\n{system}<|im_end|>\n<|im_start|>user\n{user}<|im_end|>\n<|im_start|>assistant\n"
         );
@@ -48,8 +50,12 @@ impl LocalBrain {
             .map_err(|e| anyhow::anyhow!("encode: {e}"))?;
         let prompt_tokens: Vec<u32> = enc.get_ids().to_vec();
 
-        // temp=0.3, top_p=0.9 → dürüst/tutarlı; uydurmaya prim vermez.
-        let mut sampler = LogitsProcessor::new(42, Some(0.3), Some(0.9));
+        // temp=0 → greedy (deterministik, doğrulanabilir); temp>0 → örnekleme.
+        let mut sampler = if temp <= 0.0 {
+            LogitsProcessor::new(42, None, None)
+        } else {
+            LogitsProcessor::new(42, Some(temp), Some(0.9))
+        };
         let mut all: Vec<u32> = prompt_tokens.clone();
         let mut out: Vec<u32> = Vec::new();
         let mut index_pos = 0usize;

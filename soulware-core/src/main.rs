@@ -253,6 +253,8 @@ struct AskReq {
     context: Option<String>,
     #[serde(default)]
     brain: Option<String>, // "local" | "claude" — istek başına geçersiz kılma
+    #[serde(default)]
+    deterministic: Option<bool>, // true → greedy (ağ doğrulaması için birebir tekrar)
 }
 
 #[derive(Serialize)]
@@ -313,13 +315,15 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
         let st2 = st.clone();
         let uc = user_content.clone();
         let max_tok = st.cfg.max_tokens;
+        // Doğrulanabilirlik için: deterministic → greedy (temp 0), yoksa hafif örnekleme.
+        let temp = if req.deterministic.unwrap_or(false) { 0.0 } else { 0.3 };
         let gen = tokio::task::spawn_blocking(move || {
             // Kilit zehirlenmişse (önceki panik) kurtar — servis çökmez.
             let mut lb = match st2.local.as_ref().unwrap().lock() {
                 Ok(g) => g,
                 Err(p) => p.into_inner(),
             };
-            lb.generate(SYSTEM_PROMPT, &uc, max_tok)
+            lb.generate(SYSTEM_PROMPT, &uc, max_tok, temp)
         })
         .await;
         match gen {
