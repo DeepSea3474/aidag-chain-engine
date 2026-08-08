@@ -52,3 +52,4 @@ soulware-models/
 .soulware.key
 .data/
 soulware-knowledge/kb.json
+.soulware-core.out
