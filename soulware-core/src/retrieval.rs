@@ -74,6 +74,8 @@ pub fn tokenle(s: &str) -> Vec<String> {
 pub struct Depo {
     pub belgeler: Vec<Belge>,
     pub yol: String,
+    /// Belge embeddings'leri (parallel; boş = embed edilmemiş). Semantik retrieval için.
+    pub embeddings: Vec<Vec<f32>>,
 }
 
 impl Depo {
@@ -83,7 +85,61 @@ impl Depo {
             .ok()
             .and_then(|b| serde_json::from_slice::<Vec<Belge>>(&b).ok())
             .unwrap_or_default();
-        Depo { belgeler, yol: yol.to_string() }
+        Depo { belgeler, yol: yol.to_string(), embeddings: vec![] }
+    }
+
+    /// Bir belgenin embedding metnini kur (başlık + metin — başlık anlamı güçlendirir).
+    fn embed_metni(b: &Belge) -> String {
+        format!("{}. {}", b.baslik, b.metin)
+    }
+
+    /// TÜM belgeleri embed et (başlangıçta / korpus değişince). Semantik retrieval'ı açar.
+    pub fn embed_hepsi(&mut self, e: &crate::embed::Embedder) {
+        self.embeddings = self
+            .belgeler
+            .iter()
+            .map(|b| e.embed(&Self::embed_metni(b)).unwrap_or_default())
+            .collect();
+    }
+
+    /// SEMANTİK arama: sorgu vektörü ↔ belge vektörleri kosinüs benzerliği. Keyword
+    /// GÜRÜLTÜSÜNÜ çözer (anlam eşleşmesi). min_bin (x1000) altı elenir → alakasız
+    /// kaynak sunulmaz (abstention). nispi_yuzde: zayıf dolgu pasajı atar.
+    pub fn ara_semantik(&self, qemb: &[f32], k: usize, min_bin: i64, nispi_yuzde: i64) -> Vec<Pasaj> {
+        if self.embeddings.len() != self.belgeler.len() || qemb.is_empty() {
+            return vec![];
+        }
+        let mut skorlu: Vec<Pasaj> = self
+            .belgeler
+            .iter()
+            .zip(self.embeddings.iter())
+            .filter_map(|(b, emb)| {
+                if emb.is_empty() {
+                    return None;
+                }
+                let sim = crate::embed::kosinus(qemb, emb); // -1..1
+                let skor = (sim * 1000.0) as i64;
+                if skor < min_bin {
+                    return None;
+                }
+                Some(Pasaj {
+                    kaynak: "yerel".into(),
+                    baslik: b.baslik.clone(),
+                    metin: b.metin.clone(),
+                    url: b.url.clone(),
+                    skor,
+                })
+            })
+            .collect();
+        skorlu.sort_by(|a, b| b.skor.cmp(&a.skor));
+        skorlu.truncate(k);
+        if nispi_yuzde > 0 {
+            if let Some(top) = skorlu.first().map(|p| p.skor) {
+                let esik = top.saturating_mul(nispi_yuzde) / 100;
+                skorlu.retain(|p| p.skor >= esik);
+            }
+        }
+        skorlu
     }
 
     /// Atomik kaydet (.tmp + rename).
@@ -108,6 +164,27 @@ impl Depo {
             mevcut.url = b.url;
         } else {
             self.belgeler.push(b);
+        }
+        self.kaydet();
+    }
+
+    /// Belge ekle + embedding'i SENKRON tut (embedder varsa). Semantik retrieval için.
+    pub fn ekle_embed(&mut self, b: Belge, e: Option<&crate::embed::Embedder>) {
+        while self.embeddings.len() < self.belgeler.len() {
+            self.embeddings.push(vec![]);
+        }
+        let idx = if let Some(pos) = self.belgeler.iter().position(|x| x.baslik.eq_ignore_ascii_case(&b.baslik)) {
+            self.belgeler[pos].metin = b.metin.clone();
+            self.belgeler[pos].url = b.url.clone();
+            pos
+        } else {
+            self.belgeler.push(b);
+            self.embeddings.push(vec![]);
+            self.belgeler.len() - 1
+        };
+        if let Some(emb) = e {
+            let text = Self::embed_metni(&self.belgeler[idx]);
+            self.embeddings[idx] = emb.embed(&text).unwrap_or_default();
         }
         self.kaydet();
     }
@@ -238,6 +315,7 @@ mod tests {
                 Belge { baslik: "İstanbul".into(), metin: "İstanbul Türkiye'nin en kalabalık şehridir; başkenti değildir.".into(), url: None },
                 Belge { baslik: "Fransa".into(), metin: "Fransa bir ülkedir. Başkenti Paris'tir.".into(), url: None },
             ],
+            embeddings: vec![],
         }
     }
 

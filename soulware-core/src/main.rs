@@ -14,6 +14,7 @@
 
 mod local_brain; // egemen yerel beyin (candle) = KUBRA
 mod retrieval;   // grounding kaynak katmanı (yerel egemen depo + canlı wiki)
+mod embed;       // semantik gömme (embedding) — anlam-bazlı retrieval
 
 use axum::{extract::State, routing::{get, post}, Json, Router};
 use ed25519_dalek::SigningKey;
@@ -48,6 +49,8 @@ struct Config {
     ground_snippet: usize,   // pasaj başına maks karakter
     ground_min: i64,         // min IDF skoru (altı = alakasız, grounding YOK)
     ground_ratio: i64,       // 2.+ pasaj en iyinin bu %'sinden azsa elenir (dolgu önler)
+    embed_dir: String,       // semantik embedding modeli dizini (config+tokenizer+safetensors)
+    embed_min: i64,          // min kosinüs benzerlik ×1000 (altı = alakasız, abstain)
     model_registry: String,  // kullanılabilir açık modeller kaydı (JSON)
 }
 
@@ -73,6 +76,8 @@ impl Config {
             ground_snippet: ev("SOULWARE_GROUND_SNIPPET", "600").parse().unwrap_or(600),
             ground_min: ev("SOULWARE_GROUND_MIN", "150").parse().unwrap_or(150),
             ground_ratio: ev("SOULWARE_GROUND_RATIO", "40").parse().unwrap_or(40),
+            embed_dir: ev("SOULWARE_EMBED_DIR", "/root/aidag-lsc/soulware-models/embed-minilm"),
+            embed_min: ev("SOULWARE_EMBED_MIN", "600").parse().unwrap_or(600),
             model_registry: ev("SOULWARE_MODEL_REGISTRY", "/root/aidag-lsc/soulware-models/registry.json"),
         }
     }
@@ -86,6 +91,7 @@ struct AppState {
     local: Option<Mutex<local_brain::LocalBrain>>,
     local_name: Option<String>,
     depo: Mutex<retrieval::Depo>, // egemen yerel bilgi deposu (grounding)
+    embedder: Option<embed::Embedder>, // semantik retrieval (yoksa keyword'e düşer)
 }
 
 // ════════════════════════════ Kimlik / grounding ════════════════════════════
@@ -342,6 +348,46 @@ async fn models(State(st): State<Arc<AppState>>) -> Json<Value> {
     }))
 }
 
+// /retrieve — HIZLI retrieval testi (üretim YOK): bir sorgu için getirilen kaynakları
+// + skorları döndürür. Retrieval kalitesini generate beklemeden ölçmek için.
+#[derive(Deserialize)]
+struct RetrieveReq { prompt: String }
+
+async fn retrieve(State(st): State<Arc<AppState>>, Json(req): Json<RetrieveReq>) -> Json<Value> {
+    let qemb = st.embedder.as_ref().and_then(|e| e.embed(&req.prompt).ok());
+    let depo = match st.depo.lock() { Ok(g) => g, Err(p) => p.into_inner() };
+    let (mod_, pasajlar) = match qemb {
+        Some(qv) => ("semantik", depo.ara_semantik(&qv, st.cfg.ground_k, st.cfg.embed_min, st.cfg.ground_ratio)),
+        None => ("keyword", depo.ara(&req.prompt, st.cfg.ground_k, st.cfg.ground_min, st.cfg.ground_ratio)),
+    };
+    Json(json!({
+        "ok": true, "mod": mod_, "sorgu": req.prompt,
+        "pasajlar": pasajlar.iter().map(|p| json!({ "baslik": p.baslik, "skor": p.skor })).collect::<Vec<_>>(),
+    }))
+}
+
+// GEÇİCİ: semantik embedding doğrulama — anlam ayrımı yapıyor mu?
+async fn embed_test(State(st): State<Arc<AppState>>) -> Json<Value> {
+    let e = match &st.embedder { Some(e) => e, None => return Json(json!({ "ok": false, "hata": "embedder yok" })) };
+    let q = "Türkiye'nin başkenti neresidir";
+    let dogru = "Ankara, Türkiye'nin başkenti ve İç Anadolu'da bir şehirdir";
+    let gurultu = "Türkiye'deki siyasi partiler listesi ve tarihçesi";
+    let (qv, dv, gv) = match (e.embed(q), e.embed(dogru), e.embed(gurultu)) {
+        (Ok(a), Ok(b), Ok(c)) => (a, b, c),
+        _ => return Json(json!({ "ok": false, "hata": "embed başarısız" })),
+    };
+    let s_dogru = embed::kosinus(&qv, &dv);
+    let s_gurultu = embed::kosinus(&qv, &gv);
+    Json(json!({
+        "ok": true, "boyut": e.boyut,
+        "soru": q,
+        "dogru_belge_benzerlik": s_dogru,
+        "gurultu_belge_benzerlik": s_gurultu,
+        "anlam_ayrimi_dogru": s_dogru > s_gurultu,
+        "not": "dogru > gurultu ise semantik retrieval keyword gürültüsünü çözer",
+    }))
+}
+
 async fn health() -> Json<Value> {
     Json(json!({ "ok": true, "servis": "soulware-core", "yapay_zeka": "KUBRA", "surum": "0.1.0" }))
 }
@@ -377,10 +423,14 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
     let etkin_baglam: Option<String> = if acik_baglam {
         req.context.clone()
     } else if ground_iste {
-        // Yerel depo (senkron, kilit await dışında).
+        // Yerel depo. SEMANTİK (embedding) varsa anlam-bazlı; yoksa keyword (IDF).
         let mut pasajlar = {
+            let qemb = st.embedder.as_ref().and_then(|e| e.embed(&req.prompt).ok());
             let depo = match st.depo.lock() { Ok(g) => g, Err(p) => p.into_inner() };
-            depo.ara(&req.prompt, st.cfg.ground_k, st.cfg.ground_min, st.cfg.ground_ratio)
+            match qemb {
+                Some(qv) => depo.ara_semantik(&qv, st.cfg.ground_k, st.cfg.embed_min, st.cfg.ground_ratio),
+                None => depo.ara(&req.prompt, st.cfg.ground_k, st.cfg.ground_min, st.cfg.ground_ratio),
+            }
         };
         // Canlı Wikipedia (opsiyonel; bu sunucuda bloklu → varsayılan kapalı).
         if st.cfg.wiki && pasajlar.len() < st.cfg.ground_k {
@@ -502,7 +552,11 @@ async fn kb_ingest(State(st): State<Arc<AppState>>, Json(req): Json<IngestReq>) 
     }
     let n = {
         let mut depo = match st.depo.lock() { Ok(g) => g, Err(p) => p.into_inner() };
-        depo.ekle(retrieval::Belge { baslik: req.baslik.trim().to_string(), metin: req.metin.trim().to_string(), url: req.url });
+        // ekle_embed: embedder varsa embedding'i SENKRON tut (semantik retrieval güncel kalır).
+        depo.ekle_embed(
+            retrieval::Belge { baslik: req.baslik.trim().to_string(), metin: req.metin.trim().to_string(), url: req.url },
+            st.embedder.as_ref(),
+        );
         depo.belgeler.len()
     };
     Json(json!({ "ok": true, "belge_sayisi": n, "not": "korpus büyüdü; grounding bu belgeyi kullanabilir" }))
@@ -549,11 +603,30 @@ async fn main() {
     let brain_ok = cfg.anthropic_key.is_some();
     let has_local = local.is_some();
     // EGEMEN YEREL BİLGİ DEPOSU (grounding kaynağı) yükle.
-    let depo = retrieval::Depo::yukle(&cfg.knowledge_path);
+    let mut depo = retrieval::Depo::yukle(&cfg.knowledge_path);
     let belge_sayisi = depo.belgeler.len();
     let ground_acik = cfg.ground;
     let wiki_acik = cfg.wiki;
-    let state = Arc::new(AppState { cfg, http, key, key_addr, local, local_name, depo: Mutex::new(depo) });
+    // SEMANTİK EMBEDDING motoru (varsa) — anlam-bazlı retrieval. Yoksa keyword'e düşer.
+    let embedder = if std::path::Path::new(&format!("{}/model.safetensors", cfg.embed_dir)).exists() {
+        println!("⏳ semantik embedding modeli yükleniyor: {} ...", cfg.embed_dir);
+        match embed::Embedder::load(&cfg.embed_dir) {
+            Ok(e) => { println!("✅ semantik retrieval AÇIK ({}-boyut)", e.boyut); Some(e) }
+            Err(e) => { eprintln!("⚠ embedding yüklenemedi ({e}) → keyword retrieval'a düşülüyor"); None }
+        }
+    } else {
+        println!("ℹ embedding modeli yok ({}) → keyword retrieval", cfg.embed_dir); None
+    };
+    let embed_acik = embedder.is_some();
+    // Korpusu embed et (semantik retrieval için). 491 belge ~40sn (bir kerelik).
+    if let Some(e) = &embedder {
+        if belge_sayisi > 0 {
+            println!("⏳ {belge_sayisi} belge embed ediliyor (semantik retrieval)...");
+            depo.embed_hepsi(e);
+            println!("✅ korpus embed edildi");
+        }
+    }
+    let state = Arc::new(AppState { cfg, http, key, key_addr, local, local_name, depo: Mutex::new(depo), embedder });
 
     println!("──────────────────────────────────────────────");
     println!("🌀 SoulwareAI çekirdeği · yapay zeka: KUBRA (v0.1)");
@@ -563,6 +636,7 @@ async fn main() {
     println!("   grounding   : {} · yerel depo: {} belge · canlı wiki: {}",
         if ground_acik { "AÇIK ✅" } else { "kapalı" }, belge_sayisi,
         if wiki_acik { "açık" } else { "kapalı (sunucu bloklu)" });
+    println!("   retrieval   : {}", if embed_acik { "SEMANTİK (embedding) ✅" } else { "keyword (IDF)" });
     println!("   zincir RPC  : {}", state.cfg.chain_rpc);
     println!("   imzalayan   : 0x{}", hex::encode(state.key_addr));
     println!("   dinleme     : http://{listen}");
@@ -575,6 +649,8 @@ async fn main() {
         .route("/kb/ingest", post(kb_ingest))
         .route("/kb/stats", get(kb_stats))
         .route("/models", get(models))
+        .route("/embed-test", get(embed_test))
+        .route("/retrieve", post(retrieve))
         .with_state(state);
 
     let addr: SocketAddr = listen.parse().expect("SOULWARE_LISTEN geçersiz");

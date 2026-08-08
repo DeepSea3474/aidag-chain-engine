@@ -24,5 +24,6 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # Egemen yerel beyin (candle, saf Rust) — CPU'da acik model calistirir. Ucretsiz.
 candle-core = "0.8"
 candle-transformers = "0.8"
+candle-nn = "0.8"
 tokenizers = "0.20"
 anyhow = "1"
