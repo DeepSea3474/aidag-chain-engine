@@ -79,6 +79,43 @@ async fn main() {
         Err(e) => { eprintln!("koordinatöre ulaşılamadı: {e}"); return; }
     }
 
+    // ── ÖZ-KIYASLAMA: seviye (tier) belirle → iş yeteneğe göre dağıtılsın ──
+    // Worker altın soruları kendi beyniyle (KUBRA) yanıtlar; koordinatör puanlar.
+    // Büyük-GPU worker yüksek tier alır → zor işleri o alır (küçük model zayıf halka olmaz).
+    if ev("SOULWARE_BENCHMARK", "yes") != "no" {
+        if let Ok(r) = http.get(format!("{coord}/worker/benchmark/{wallet}")).send().await {
+            if let Ok(v) = r.json::<Value>().await {
+                if let Some(sorular) = v.get("sorular").and_then(|s| s.as_array()) {
+                    println!("🎓 öz-kıyaslama: {} altın soru yanıtlanıyor...", sorular.len());
+                    let mut cevaplar = Vec::new();
+                    for q in sorular {
+                        let (Some(id), Some(soru)) = (q.get("id").and_then(|x| x.as_u64()), q.get("soru").and_then(|x| x.as_str())) else { continue };
+                        let t0 = std::time::Instant::now();
+                        let cevap = match http.post(format!("{brain}/v1/ask"))
+                            .json(&json!({ "prompt": soru, "deterministic": true, "brain": "local" }))
+                            .send().await {
+                            Ok(r) => r.json::<Value>().await.ok()
+                                .and_then(|v| v.get("answer").and_then(|a| a.as_str()).map(|s| s.to_string()))
+                                .unwrap_or_default(),
+                            Err(_) => String::new(),
+                        };
+                        cevaplar.push(json!({ "id": id, "cevap": cevap, "ms": t0.elapsed().as_millis() as u64 }));
+                    }
+                    if let Ok(r) = http.post(format!("{coord}/worker/benchmark"))
+                        .json(&json!({ "wallet": wallet, "cevaplar": cevaplar })).send().await {
+                        if let Ok(v) = r.json::<Value>().await {
+                            println!("🎓 seviye belirlendi: tier={} (doğru {}/{} · {}ms ort.)",
+                                v.get("tier").and_then(|x| x.as_u64()).unwrap_or(0),
+                                v.get("dogru").and_then(|x| x.as_u64()).unwrap_or(0),
+                                v.get("toplam").and_then(|x| x.as_u64()).unwrap_or(0),
+                                v.get("ort_gecikme_ms").and_then(|x| x.as_f64()).unwrap_or(0.0) as u64);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Ana döngü: iş çek → KUBRA çalıştır → gönder.
     loop {
         let is: Option<Value> = match http.get(format!("{coord}/worker/poll/{wallet}")).send().await {

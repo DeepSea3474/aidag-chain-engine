@@ -56,6 +56,7 @@ struct Config {
     // Ücretsiz-tier emisyon bütçesi: ücretsiz işler yalnız emisyonla fonlanır
     // (ücretli havuzu yemez) ve bu tavana kadar. Bootstrap enflasyonunu sınırlar.
     free_budget_lsc: u64,            // SOULWARE_FREE_BUDGET_LSC (0 = ücretsiz tier kapalı)
+    gold_path: Option<String>,       // SOULWARE_GOLD_PATH (öz-kıyaslama altın-testleri; yoksa gömülü)
 }
 impl Config {
     fn from_env() -> Self {
@@ -73,8 +74,56 @@ impl Config {
             settle_auto: ev("SOULWARE_SETTLE_AUTO", "0") == "1",
             settle_interval: ev("SOULWARE_SETTLE_INTERVAL", "15").parse().unwrap_or(15),
             free_budget_lsc: ev("SOULWARE_FREE_BUDGET_LSC", "1000").parse().unwrap_or(1000),
+            gold_path: std::env::var("SOULWARE_GOLD_PATH").ok().filter(|s| !s.trim().is_empty()),
         }
     }
+}
+
+// ════════════════════════════ Öz-kıyaslama (gold benchmark) ════════════════════════════
+/// Bilinen-cevaplı altın soru. Worker'ın beyni (KUBRA) yanıtlar; koordinatör
+/// doğruluğu ölçer → seviye (tier) atar. Böylece iş, yeteneğine uygun worker'a gider.
+#[derive(Clone, Serialize, Deserialize)]
+struct GoldQ {
+    id: u64,
+    soru: String,
+    cevap: String, // beklenen cevap (normalize edilip 'içeriyor mu' ile eşlenir)
+}
+
+/// Gömülü varsayılan altın-test seti (deterministik, olgusal + aritmetik). Dosya
+/// ile (SOULWARE_GOLD_PATH) genişletilebilir/değiştirilebilir.
+fn gold_seti(cfg: &Config) -> Vec<GoldQ> {
+    if let Some(p) = &cfg.gold_path {
+        if let Ok(data) = std::fs::read(p) {
+            if let Ok(v) = serde_json::from_slice::<Vec<GoldQ>>(&data) {
+                if !v.is_empty() {
+                    return v;
+                }
+            }
+        }
+    }
+    vec![
+        GoldQ { id: 1, soru: "2 + 2 kaçtır? Sadece rakam yaz.".into(), cevap: "4".into() },
+        GoldQ { id: 2, soru: "5 çarpı 3 kaçtır? Sadece rakam yaz.".into(), cevap: "15".into() },
+        GoldQ { id: 3, soru: "Türkiye'nin başkenti neresidir? Tek kelime yaz.".into(), cevap: "ankara".into() },
+        GoldQ { id: 4, soru: "Fransa'nın başkenti neresidir? Tek kelime yaz.".into(), cevap: "paris".into() },
+    ]
+}
+
+/// Metni eşleştirme için normalize et: küçük harf + Türkçe→ascii + yalnız alfanümerik.
+fn normalize(s: &str) -> String {
+    s.to_lowercase()
+        .chars()
+        .map(|c| match c { 'ç'=>'c','ğ'=>'g','ı'=>'i','ş'=>'s','ö'=>'o','ü'=>'u', o=>o })
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// gold_score → tier. Yüksek doğruluk = yüksek seviye = zor işlere uygun.
+fn skor_tier(score: f64) -> u8 {
+    if score >= 0.75 { 3 } else if score >= 0.5 { 2 } else if score > 0.0 { 1 } else { 0 }
 }
 
 // ════════════════════════════ Durum modeli ════════════════════════════
@@ -85,6 +134,17 @@ struct Worker {
     earned_lsc: u64,
     jobs_done: u64,
     registered_at: u64,
+    // ── Yetenek profili (öz-kıyaslama ile ölçülür) ──
+    // Büyük/küçük model karışımı zayıflık yaratmasın: iş, seviyesine uygun worker'a
+    // gider. tier 0=ölçülmedi, 1=temel, 2=iyi, 3=güçlü. gold_score=doğruluk (0..1).
+    #[serde(default)]
+    tier: u8,
+    #[serde(default)]
+    gold_score: f64,      // altın-test doğruluk oranı (0..1)
+    #[serde(default)]
+    avg_latency_ms: f64,  // ölçülen ortalama gecikme (yönlendirmede hız için)
+    #[serde(default)]
+    benchmarked_at: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -143,6 +203,10 @@ struct Job {
     // iş (fee=0): oluşturulurken free bütçeden rezerve edilir, doğrudan paid=true.
     #[serde(default)]
     paid: bool,
+    // Gereken minimum worker seviyesi (zorluk). Yüksek doğruluk isteyen iş yalnız
+    // yeterli seviyedeki worker'a dağıtılır → küçük model zayıf halka olmaz.
+    #[serde(default)]
+    min_tier: u8,
 }
 
 struct Coord {
@@ -452,6 +516,7 @@ struct CreateJob {
     #[serde(default)] deterministic: Option<bool>,
     #[serde(default)] fee_lsc: Option<u64>,   // tüketicinin havuza ödediği ücret (LSC)
     #[serde(default)] payer: Option<String>,  // ücreti ödeyen cüzdan (0x...)
+    #[serde(default)] min_tier: Option<u8>,   // gereken min worker seviyesi (zorluk; 0=herkes)
 }
 
 async fn job_create(State(st): State<St>, Json(req): Json<CreateJob>) -> Json<Value> {
@@ -489,13 +554,14 @@ async fn job_create(State(st): State<St>, Json(req): Json<CreateJob>) -> Json<Va
 
     let id = c.next_job;
     c.next_job += 1;
+    let min_tier = req.min_tier.unwrap_or(0);
     c.jobs.insert(id, Job {
         id, prompt: req.prompt, deterministic: det, status: "pending".into(),
         assigned: vec![], results: vec![], verified_answer: None, rewards: vec![], created_at: now_secs(),
-        fee_lsc: fee, payer: req.payer.map(|p| p.trim().to_lowercase()), paid,
+        fee_lsc: fee, payer: req.payer.map(|p| p.trim().to_lowercase()), paid, min_tier,
     });
     c.save();
-    Json(json!({ "ok": true, "job_id": id, "deterministic": det, "fee_lsc": fee, "paid": paid,
+    Json(json!({ "ok": true, "job_id": id, "deterministic": det, "fee_lsc": fee, "paid": paid, "min_tier": min_tier,
         "not": if fee > 0 {
             "ÜCRETLİ: havuza öde (soulware-pay tip=7) sonra POST /job/confirm ile doğrula → dağıtılır"
         } else { "ÜCRETSİZ: emisyonla fonlanır (bootstrap), hemen dağıtılır" } }))
@@ -512,9 +578,64 @@ async fn worker_register(State(st): State<St>, Json(req): Json<Reg>) -> Json<Val
     let mut c = st.lock().await;
     c.workers.entry(w.clone()).or_insert_with(|| Worker {
         wallet: w.clone(), reputation: 0, earned_lsc: 0, jobs_done: 0, registered_at: now_secs(),
+        tier: 0, gold_score: 0.0, avg_latency_ms: 0.0, benchmarked_at: 0,
     });
     c.save();
-    Json(json!({ "ok": true, "wallet": w, "rıza": "GPU katkısı yalnızca istemci onayıyla" }))
+    Json(json!({ "ok": true, "wallet": w,
+        "rıza": "GPU katkısı yalnızca istemci onayıyla",
+        "not": "seviye için GET /worker/benchmark/:wallet ile öz-kıyaslamayı yap" }))
+}
+
+// ÖZ-KIYASLAMA 1/2: worker altın soruları alır (beyniyle deterministik yanıtlar).
+async fn worker_benchmark_al(State(st): State<St>, Path(wallet): Path<String>) -> Json<Value> {
+    let w = wallet.trim().to_lowercase();
+    let c = st.lock().await;
+    if !c.workers.contains_key(&w) {
+        return Json(json!({ "ok": false, "hata": "önce kaydol (/worker/register)" }));
+    }
+    let sorular: Vec<Value> = gold_seti(&c.cfg).into_iter()
+        .map(|g| json!({ "id": g.id, "soru": g.soru })).collect();
+    Json(json!({ "ok": true, "sorular": sorular,
+        "not": "her soruyu beyninle (deterministic) yanıtla, POST /worker/benchmark ile gönder" }))
+}
+
+#[derive(Deserialize)]
+struct BenchCevap { id: u64, cevap: String, #[serde(default)] ms: u64 }
+#[derive(Deserialize)]
+struct BenchSubmit { wallet: String, cevaplar: Vec<BenchCevap> }
+
+// ÖZ-KIYASLAMA 2/2: cevapları puanla → gold_score + tier + ortalama gecikme ata.
+async fn worker_benchmark_gonder(State(st): State<St>, Json(req): Json<BenchSubmit>) -> Json<Value> {
+    let w = req.wallet.trim().to_lowercase();
+    let mut c = st.lock().await;
+    if !c.workers.contains_key(&w) {
+        return Json(json!({ "ok": false, "hata": "önce kaydol" }));
+    }
+    let gold = gold_seti(&c.cfg);
+    let toplam = gold.len().max(1);
+    let mut dogru = 0usize;
+    for g in &gold {
+        if let Some(cev) = req.cevaplar.iter().find(|x| x.id == g.id) {
+            if normalize(&cev.cevap).contains(&normalize(&g.cevap)) {
+                dogru += 1;
+            }
+        }
+    }
+    let ort_ms = if req.cevaplar.is_empty() { 0.0 }
+        else { req.cevaplar.iter().map(|x| x.ms as f64).sum::<f64>() / req.cevaplar.len() as f64 };
+    let score = dogru as f64 / toplam as f64;
+    let tier = skor_tier(score);
+    let ts = now_secs();
+    if let Some(wk) = c.workers.get_mut(&w) {
+        wk.gold_score = score;
+        wk.tier = tier;
+        wk.avg_latency_ms = ort_ms;
+        wk.benchmarked_at = ts;
+    }
+    c.save();
+    Json(json!({ "ok": true, "wallet": w, "dogru": dogru, "toplam": toplam,
+        "gold_score": score, "tier": tier, "ort_gecikme_ms": ort_ms,
+        "not": "tier ≥ işin min_tier'i ise o iş sana dağıtılır" }))
 }
 
 async fn worker_poll(State(st): State<St>, Path(wallet): Path<String>) -> Json<Value> {
@@ -524,15 +645,22 @@ async fn worker_poll(State(st): State<St>, Path(wallet): Path<String>) -> Json<V
         return Json(json!({ "none": true, "hata": "önce kaydol (/worker/register)" }));
     }
     let max_assign = c.cfg.max_assign;
-    // Bu worker'a atanmamış, hâlâ yayında (pending) ve kapasitesi dolmamış bir iş bul.
+    let w_tier = c.workers.get(&w).map(|x| x.tier).unwrap_or(0);
+    // Bu worker'a atanmamış, hâlâ yayında (pending), kapasitesi dolmamış VE worker'ın
+    // seviyesinin yettiği bir iş bul. Zor iş (min_tier) yalnız yeterli worker'a → küçük
+    // model zayıf halka olmaz. Yüksek min_tier'li işi önce ver (güçlü worker boşa kalmasın).
     let mut secilen: Option<(u64, String, bool)> = None;
     let mut ids: Vec<u64> = c.jobs.keys().copied().collect();
-    ids.sort();
+    // min_tier azalan, sonra id artan: güçlü worker önce zor işi alsın.
+    ids.sort_by(|a, b| {
+        let ta = c.jobs.get(a).map(|j| j.min_tier).unwrap_or(0);
+        let tb = c.jobs.get(b).map(|j| j.min_tier).unwrap_or(0);
+        tb.cmp(&ta).then(a.cmp(b))
+    });
     for id in ids {
         if let Some(j) = c.jobs.get(&id) {
-            // Ücretli iş ödeme doğrulanmadan (paid=false) DAĞITILMAZ — worker boşa
-            // çalışmasın, ücretsiz havuz ücretlinin parasını yemesin.
             let dagitilabilir = j.status == "pending" && j.paid
+                && w_tier >= j.min_tier
                 && !j.assigned.contains(&w) && j.assigned.len() < max_assign;
             if dagitilabilir {
                 secilen = Some((id, j.prompt.clone(), j.deterministic));
@@ -883,6 +1011,8 @@ async fn main() {
         .route("/job/create", post(job_create))
         .route("/job/:id", get(job_get))
         .route("/worker/register", post(worker_register))
+        .route("/worker/benchmark/:wallet", get(worker_benchmark_al))
+        .route("/worker/benchmark", post(worker_benchmark_gonder))
         .route("/worker/poll/:wallet", get(worker_poll))
         .route("/worker/submit", post(worker_submit))
         .route("/job/confirm", post(job_confirm))
