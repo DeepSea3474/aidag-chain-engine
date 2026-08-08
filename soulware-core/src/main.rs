@@ -47,6 +47,7 @@ struct Config {
     ground_k: usize,         // en fazla kaç pasaj sunulsun
     ground_snippet: usize,   // pasaj başına maks karakter
     ground_min: i64,         // min IDF skoru (altı = alakasız, grounding YOK)
+    ground_ratio: i64,       // 2.+ pasaj en iyinin bu %'sinden azsa elenir (dolgu önler)
     model_registry: String,  // kullanılabilir açık modeller kaydı (JSON)
 }
 
@@ -71,6 +72,7 @@ impl Config {
             ground_k: ev("SOULWARE_GROUND_K", "3").parse().unwrap_or(3),
             ground_snippet: ev("SOULWARE_GROUND_SNIPPET", "600").parse().unwrap_or(600),
             ground_min: ev("SOULWARE_GROUND_MIN", "150").parse().unwrap_or(150),
+            ground_ratio: ev("SOULWARE_GROUND_RATIO", "40").parse().unwrap_or(40),
             model_registry: ev("SOULWARE_MODEL_REGISTRY", "/root/aidag-lsc/soulware-models/registry.json"),
         }
     }
@@ -378,7 +380,7 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
         // Yerel depo (senkron, kilit await dışında).
         let mut pasajlar = {
             let depo = match st.depo.lock() { Ok(g) => g, Err(p) => p.into_inner() };
-            depo.ara(&req.prompt, st.cfg.ground_k, st.cfg.ground_min)
+            depo.ara(&req.prompt, st.cfg.ground_k, st.cfg.ground_min, st.cfg.ground_ratio)
         };
         // Canlı Wikipedia (opsiyonel; bu sunucuda bloklu → varsayılan kapalı).
         if st.cfg.wiki && pasajlar.len() < st.cfg.ground_k {

@@ -134,7 +134,9 @@ impl Depo {
     /// En iyi k pasajı getir (IDF-ağırlıklı skor). Başlık eşleşmesi ×3.
     /// `min_skor` altındaki belgeler ELENIR — alakasız/yaygın-kelime eşleşmesi
     /// kaynak sayılmaz → model uydurmaya zorlanmaz, sahte cite yapılmaz.
-    pub fn ara(&self, sorgu: &str, k: usize, min_skor: i64) -> Vec<Pasaj> {
+    /// `nispi_yuzde`: 2.+ pasajlar en iyi skorun bu yüzdesinin altındaysa ELENIR
+    /// (zayıf "dolgu" kaynak sunulmaz — grounding temiz kalır). 0 = kapalı.
+    pub fn ara(&self, sorgu: &str, k: usize, min_skor: i64, nispi_yuzde: i64) -> Vec<Pasaj> {
         let q = tokenle(sorgu);
         if q.is_empty() {
             return vec![];
@@ -169,6 +171,13 @@ impl Depo {
             .collect();
         skorlu.sort_by(|a, b| b.skor.cmp(&a.skor));
         skorlu.truncate(k);
+        // NİSPİ EŞİK: en iyiye göre çok zayıf pasajları at (dolgu kaynak sunma).
+        if nispi_yuzde > 0 {
+            if let Some(top) = skorlu.first().map(|p| p.skor) {
+                let esik = top.saturating_mul(nispi_yuzde) / 100;
+                skorlu.retain(|p| p.skor >= esik);
+            }
+        }
         skorlu
     }
 }
@@ -235,7 +244,7 @@ mod tests {
     #[test]
     fn korpustaki_soru_grounded_olur() {
         let d = ornek_depo();
-        let p = d.ara("Türkiye'nin başkenti neresi?", 2, 150);
+        let p = d.ara("Türkiye'nin başkenti neresi?", 2, 150, 40);
         assert!(!p.is_empty(), "Türkiye sorusu kaynak bulmalı");
         // En iyi pasaj Türkiye ya da Ankara olmalı (ikisi de doğru cevabı içerir).
         assert!(matches!(p[0].baslik.as_str(), "Türkiye" | "Ankara"));
@@ -245,7 +254,7 @@ mod tests {
     fn korpusta_olmayan_soru_kaynaksiz() {
         let d = ornek_depo();
         // "Japonya" korpusta yok; yalnız "başkenti" (yaygın) eşleşir → IDF+eşik eler.
-        let p = d.ara("Japonya'nın başkenti neresi?", 2, 150);
+        let p = d.ara("Japonya'nın başkenti neresi?", 2, 150, 40);
         assert!(p.is_empty(), "Japonya kaynaksız olmalı (uydurmaya zorlanmaz), bulunan: {:?}",
             p.iter().map(|x| &x.baslik).collect::<Vec<_>>());
     }
@@ -254,8 +263,21 @@ mod tests {
     fn ascii_turkce_katlama() {
         // Kullanıcı Türkçe harf yazmadan sorsa da eşleşmeli.
         let d = ornek_depo();
-        let p = d.ara("turkiye baskenti", 2, 150);
+        let p = d.ara("turkiye baskenti", 2, 150, 40);
         assert!(!p.is_empty(), "ascii 'baskenti' Türkçe 'başkenti' ile eşleşmeli");
+    }
+
+    #[test]
+    fn nispi_esik_zayif_dolguyu_atar() {
+        // Güçlü bir eşleşme + zayıf bir eşleşme olduğunda, nispi eşik zayıfı atmalı.
+        let d = ornek_depo();
+        // "Ankara başkenti Türkiye" → Ankara/Türkiye güçlü; başka doc zayıf kalır.
+        let p = d.ara("Ankara başkenti", 3, 150, 40);
+        assert!(!p.is_empty());
+        // Dönen tüm pasajlar en iyinin %40'ından iyi olmalı (dolgu yok).
+        let top = p[0].skor;
+        assert!(p.iter().all(|x| x.skor * 100 >= top * 40), "zayıf dolgu pasaj kaldı: {:?}",
+            p.iter().map(|x| (&x.baslik, x.skor)).collect::<Vec<_>>());
     }
 
     #[test]
