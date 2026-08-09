@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="tr">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>KUBRA'ya Katkı Ver — Kurulum YOK</title>
+<title>Contribute to KUBRA — No Install</title>
 <style>
   :root { --bg:#0b0e14; --card:#141a24; --ink:#e8ecf3; --dim:#93a1b3; --acc:#3ddc97; --acc2:#5b8cff; --warn:#ffcc66; --line:#25303f; }
   * { box-sizing:border-box; }
@@ -11,6 +11,10 @@
   .wrap { max-width:720px; margin:0 auto; padding:24px 16px 60px; }
   h1 { font-size:1.6rem; margin:.2em 0; }
   .sub { color:var(--dim); margin-top:0; }
+  .top { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+  .lang { display:flex; gap:4px; background:#0f1620; border:1px solid var(--line); border-radius:999px; padding:3px; }
+  .lang button { border:0; background:transparent; color:var(--dim); padding:5px 12px; border-radius:999px; cursor:pointer; font-weight:600; font-size:.85rem; }
+  .lang button.sel { background:var(--acc2); color:#04102b; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px; margin:16px 0; }
   .badges { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0 0; }
   .badge { background:#0f1620; border:1px solid var(--line); color:var(--acc); border-radius:999px; padding:4px 12px; font-size:.85rem; }
@@ -30,69 +34,132 @@
   .dot.busy { background:var(--acc2); box-shadow:0 0 10px var(--acc2); }
   a { color:var(--acc2); }
   .note { color:var(--dim); font-size:.88rem; }
-  .warn { color:var(--warn); }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>⚡ KUBRA'ya Katkı Ver</h1>
-  <p class="sub">Boştaki bilgisayar gücünle merkeziyetsiz yapay zeka <b>KUBRA</b>'yı geliştir, <b>AIDAG&nbsp;LSC</b> kazan. <b>Kurulum YOK</b> — her şey tarayıcında.</p>
+  <div class="top">
+    <h1>⚡ <span data-i="title">Contribute to KUBRA</span></h1>
+    <div class="lang">
+      <button id="en" class="sel" onclick="setLang('en')">EN</button>
+      <button id="tr" onclick="setLang('tr')">TR</button>
+    </div>
+  </div>
+  <p class="sub" data-i="sub"></p>
 
   <div class="card">
-    <b>🛡️ Neden güvenli?</b>
+    <b data-i="whySafe"></b>
     <div class="badges">
-      <span class="badge">Kurulum yok</span>
-      <span class="badge">Açık kaynak</span>
-      <span class="badge">Dosyalarına dokunmaz</span>
-      <span class="badge">Kazancın senin cüzdanında</span>
-      <span class="badge">İstediğin an dur</span>
+      <span class="badge" data-i="b1"></span>
+      <span class="badge" data-i="b2"></span>
+      <span class="badge" data-i="b3"></span>
+      <span class="badge" data-i="b4"></span>
+      <span class="badge" data-i="b5"></span>
     </div>
-    <p class="note" style="margin-bottom:0">Sayfa yalnız tarayıcının <b>GPU/CPU</b> gücünü, <b>sadece sen izin verince</b> kullanır. Hiçbir şey bilgisayarına kurulmaz; kapatınca durur. Kod açıktır — doğrulayabilirsin.</p>
+    <p class="note" data-i="safeNote" style="margin-bottom:0"></p>
   </div>
 
   <div class="card">
-    <label for="adres">Ödül adresin (AIDAG / MetaMask — kazancın buraya)</label>
+    <label for="adres" data-i="addrLabel"></label>
     <input id="adres" type="text" placeholder="0x..." autocomplete="off" spellcheck="false">
-    <p class="note">Sadece <b>adres</b> — özel anahtar İSTENMEZ. Kazancın doğrudan senin cüzdanına yazılır (non-custodial).</p>
+    <p class="note" data-i="addrNote"></p>
     <div class="row" style="margin-top:8px">
-      <button id="baslat" class="btn btn-go">⚡ Katkı Ver (İzin ver)</button>
-      <button id="durdur" class="btn btn-stop" disabled>⏸ Durdur</button>
-      <span><span id="dot" class="dot"></span> <span id="durum">boşta</span></span>
+      <button id="baslat" class="btn btn-go" data-i="start"></button>
+      <button id="durdur" class="btn btn-stop" disabled data-i="stop"></button>
+      <span><span id="dot" class="dot"></span> <span id="durum"></span></span>
     </div>
   </div>
 
   <div class="card">
     <div class="row">
-      <div class="stat"><div class="n" id="kazanc">0</div><div class="l">Kazanılan LSC</div></div>
-      <div class="stat"><div class="n" id="isler">0</div><div class="l">Yapılan iş</div></div>
-      <div class="stat"><div class="n" id="seviye">—</div><div class="l">Seviye (tier)</div></div>
+      <div class="stat"><div class="n" id="kazanc">0</div><div class="l" data-i="earned"></div></div>
+      <div class="stat"><div class="n" id="isler">0</div><div class="l" data-i="jobs"></div></div>
+      <div class="stat"><div class="n" id="seviye">—</div><div class="l" data-i="tier"></div></div>
     </div>
   </div>
 
   <div class="card">
-    <b>📡 Canlı — şu an ne yapıyor (şeffaflık)</b>
-    <div id="log" class="live" style="margin-top:8px">Hazır. "Katkı Ver"e basınca başlar.\n</div>
+    <b data-i="liveTitle"></b>
+    <div id="log" class="live" style="margin-top:8px"></div>
   </div>
 
-  <p class="note">Nasıl çalışır: tarayıcın küçük bir KUBRA modelini (Qwen2.5) indirir, ağdan iş çeker, cevaplar, gönderir; doğrulanınca <b>LSC</b> kazanırsın. İlk açılışta model indirilir (birkaç yüz MB, bir kez). Güçlü GPU'su olanlar için ileride masaüstü uygulamasıyla <b>büyük model</b> katkısı gelecek.</p>
-  <p class="note">🔓 Açık kaynak: <a href="https://github.com/DeepSea3474" target="_blank">SoulwareAI / KUBRA</a></p>
+  <p class="note" data-i="how"></p>
+  <p class="note">🔓 <span data-i="oss"></span>: <a href="https://github.com/DeepSea3474" target="_blank">SoulwareAI / KUBRA</a></p>
 </div>
 
-<script type="module">
-// ══════════════════════════════════════════════════════════════════
-// KUBRA tarayıcı katkı istemcisi (WebGPU / WebLLM). Sıfır-kurulum.
-// KOORDİNATÖR URL'sini kendi sunucunun public adresine ayarla.
-// ══════════════════════════════════════════════════════════════════
-const COORD = window.KUBRA_COORD || "https://SUNUCU-ADRESIN:8647";  // <- deploy'da ayarla
-const MODEL = "Qwen2.5-1.5B-Instruct-q4f16_1-MLC";  // KUBRA ailesiyle uyumlu (doğrulama)
-const POLL_MS = 4000;
+<script>
+// ══════════════════════════ i18n (EN default, TR toggle — global) ══════════════════════════
+const I18N = {
+  en: {
+    title:"Contribute to KUBRA",
+    sub:"Use your spare computing power to help the decentralized AI <b>KUBRA</b> grow, and earn <b>AIDAG&nbsp;LSC</b>. <b>No install</b> — everything runs in your browser.",
+    whySafe:"🛡️ Why is it safe?",
+    b1:"No install", b2:"Open source", b3:"Never touches your files", b4:"Rewards to your own wallet", b5:"Stop anytime",
+    safeNote:"The page only uses your browser's <b>GPU/CPU</b>, and <b>only when you allow it</b>. Nothing is installed on your computer; it stops when you close it. The code is open — verify it yourself.",
+    addrLabel:"Your reward address (AIDAG / MetaMask — earnings go here)",
+    addrNote:"Address only — your private key is NEVER requested. Rewards are written directly to your wallet (non-custodial).",
+    start:"⚡ Contribute (allow)", stop:"⏸ Stop",
+    earned:"LSC earned", jobs:"Jobs done", tier:"Tier",
+    liveTitle:"📡 Live — what it's doing now (transparency)",
+    how:"How it works: your browser downloads a small KUBRA model (Qwen2.5), pulls jobs from the network, answers, submits; once verified you earn <b>LSC</b>. On first launch the model downloads (a few hundred MB, once). A desktop app for <b>large models</b> (for strong GPUs) is coming next.",
+    oss:"Open source",
+    idle:"idle", ready:'Ready. Press "Contribute" to start.',
+    loading:"loading model", loadingPct:p=>"loading model "+p+"%",
+    modelReady:"✅ model ready (in your browser, sovereign).",
+    registered:w=>"📝 registered: "+w,
+    started:'✅ Permission granted — your spare power is helping the network. Stop anytime.',
+    waiting:"idle (waiting for work)", running:id=>"job #"+id+" running",
+    jobline:(id,p)=>"⚙ job #"+id+": "+p,
+    submitted:(id,s,r)=>"📤 job #"+id+": "+s+(r?" 💰":""),
+    stopped:"⏸ stopped — no resources are being used.",
+    badAddr:"Enter a valid address (0x + 40 hex).",
+    startFail:e=>"⚠ couldn't start: "+e, connErr:"connection error", paused:"paused",
+  },
+  tr: {
+    title:"KUBRA'ya Katkı Ver",
+    sub:"Boştaki bilgisayar gücünle merkeziyetsiz yapay zeka <b>KUBRA</b>'yı geliştir, <b>AIDAG&nbsp;LSC</b> kazan. <b>Kurulum YOK</b> — her şey tarayıcında.",
+    whySafe:"🛡️ Neden güvenli?",
+    b1:"Kurulum yok", b2:"Açık kaynak", b3:"Dosyalarına dokunmaz", b4:"Kazancın senin cüzdanında", b5:"İstediğin an dur",
+    safeNote:"Sayfa yalnız tarayıcının <b>GPU/CPU</b> gücünü, <b>sadece sen izin verince</b> kullanır. Hiçbir şey kurulmaz; kapatınca durur. Kod açıktır — doğrulayabilirsin.",
+    addrLabel:"Ödül adresin (AIDAG / MetaMask — kazancın buraya)",
+    addrNote:"Sadece adres — özel anahtar İSTENMEZ. Kazancın doğrudan senin cüzdanına yazılır (non-custodial).",
+    start:"⚡ Katkı Ver (İzin ver)", stop:"⏸ Durdur",
+    earned:"Kazanılan LSC", jobs:"Yapılan iş", tier:"Seviye",
+    liveTitle:"📡 Canlı — şu an ne yapıyor (şeffaflık)",
+    how:"Nasıl çalışır: tarayıcın küçük bir KUBRA modelini (Qwen2.5) indirir, ağdan iş çeker, cevaplar, gönderir; doğrulanınca <b>LSC</b> kazanırsın. İlk açılışta model indirilir (birkaç yüz MB, bir kez). Güçlü GPU'lar için <b>büyük model</b> masaüstü uygulaması yakında.",
+    oss:"Açık kaynak",
+    idle:"boşta", ready:'Hazır. "Katkı Ver"e basınca başlar.',
+    loading:"model yükleniyor", loadingPct:p=>"model yükleniyor %"+p,
+    modelReady:"✅ model hazır (tarayıcıda, egemen).",
+    registered:w=>"📝 kaydolundu: "+w,
+    started:'✅ İzin verildi — boştaki gücün ağa katkı sağlıyor. İstediğin an durdur.',
+    waiting:"boşta (iş bekleniyor)", running:id=>"iş #"+id+" çalışıyor",
+    jobline:(id,p)=>"⚙ iş #"+id+": "+p,
+    submitted:(id,s,r)=>"📤 iş #"+id+": "+s+(r?" 💰":""),
+    stopped:"⏸ durduruldu — hiçbir kaynak kullanılmıyor.",
+    badAddr:"Geçerli bir adres gir (0x + 40 hex).",
+    startFail:e=>"⚠ başlatılamadı: "+e, connErr:"bağlantı hatası", paused:"duraklatıldı",
+  }
+};
+let L = localStorage.getItem("kubra_lang") || "en";
+function t(k){ return (I18N[L][k] ?? I18N.en[k]); }
+function setLang(lang){
+  L = lang; localStorage.setItem("kubra_lang", lang);
+  document.documentElement.lang = lang;
+  document.getElementById("en").classList.toggle("sel", lang==="en");
+  document.getElementById("tr").classList.toggle("sel", lang==="tr");
+  document.querySelectorAll("[data-i]").forEach(el => { const v=t(el.dataset.i); if(typeof v==="string") el.innerHTML=v; });
+  if (!aktif && $("durum")) $("durum").textContent = t("idle");
+}
 
+// ══════════════════════════ KUBRA browser contribution client (WebGPU) ══════════════════════════
+const COORD = window.KUBRA_COORD || "https://aidag-chain.com/kubra-api";
+const MODEL = "Qwen2.5-1.5B-Instruct-q4f16_1-MLC";
+const POLL_MS = 4000;
 const $ = id => document.getElementById(id);
 const log = m => { const el=$("log"); el.textContent += m+"\n"; el.scrollTop = el.scrollHeight; };
 let aktif = false, engine = null, cuzdan = null, dongu = null;
-
 function durum(txt, cls){ $("durum").textContent = txt; $("dot").className = "dot"+(cls?" "+cls:""); }
-
 async function coordJson(path, opt){ const r = await fetch(COORD+path, opt); return r.json(); }
 
 async function seviyeGuncelle(){
@@ -102,61 +169,55 @@ async function seviyeGuncelle(){
     if (w){ $("kazanc").textContent = w.earned_lsc; $("isler").textContent = w.jobs_done; $("seviye").textContent = "T"+(w.tier??0); }
   } catch(e){}
 }
-
 async function motorYukle(){
-  log("⏳ KUBRA modeli tarayıcıya yükleniyor (ilk sefer birkaç yüz MB)...");
+  log(t("loading")+"...");
   const webllm = await import("https://esm.run/@mlc-ai/web-llm");
-  engine = await webllm.CreateMLCEngine(MODEL, { initProgressCallback: p => durum("model yükleniyor %"+Math.round((p.progress||0)*100)) });
-  log("✅ model hazır (tarayıcıda, egemen).");
+  engine = await webllm.CreateMLCEngine(MODEL, { initProgressCallback: p => durum(t("loadingPct")(Math.round((p.progress||0)*100))) });
+  log(t("modelReady"));
 }
-
 async function cevapla(prompt){
   const r = await engine.chat.completions.create({ messages:[{role:"user", content:prompt}], temperature:0 });
   return (r.choices?.[0]?.message?.content || "").trim();
 }
-
 async function donguAdim(){
   if (!aktif) return;
   try {
     const is = await coordJson("/worker/poll/"+cuzdan);
-    if (is && is.none){ durum("boşta (iş bekleniyor)","on"); return; }
+    if (is && is.none){ durum(t("waiting"),"on"); return; }
     if (is && is.job_id){
-      durum("iş #"+is.job_id+" çalışıyor","busy");
-      log("⚙ iş #"+is.job_id+": "+is.prompt.slice(0,60));
+      durum(t("running")(is.job_id),"busy");
+      log(t("jobline")(is.job_id, is.prompt.slice(0,60)));
       const cevap = await cevapla(is.prompt);
       const res = await coordJson("/worker/submit", { method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({ wallet: cuzdan, job_id: is.job_id, answer: cevap }) });
-      log("📤 iş #"+is.job_id+": "+(res.durum||"?")+(res.oduller?" 💰":""));
+      log(t("submitted")(is.job_id, res.durum||"?", !!res.oduller));
       await seviyeGuncelle();
-      durum("boşta","on");
+      durum(t("waiting"),"on");
     }
-  } catch(e){ log("⚠ "+e.message); durum("bağlantı hatası","" ); }
+  } catch(e){ log("⚠ "+e.message); durum(t("connErr"),""); }
 }
-
 $("baslat").onclick = async () => {
   const a = $("adres").value.trim().toLowerCase();
-  if (!/^0x[0-9a-f]{40}$/.test(a)){ alert("Geçerli bir adres gir (0x + 40 hex)."); return; }
-  cuzdan = a;
-  $("baslat").disabled = true;
+  if (!/^0x[0-9a-f]{40}$/.test(a)){ alert(t("badAddr")); return; }
+  cuzdan = a; $("baslat").disabled = true;
   try {
-    // 1) İZİN alındı → kaydol
     await coordJson("/worker/register", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ wallet: cuzdan }) });
-    log("📝 kaydolundu: "+cuzdan);
-    // 2) Model yükle
+    log(t("registered")(cuzdan));
     if (!engine) await motorYukle();
-    // 3) Aktif et
-    aktif = true; $("durdur").disabled = false; durum("başladı","on");
-    log("✅ İzin verildi — boştaki gücün ağa katkı sağlıyor. İstediğin an durdur.");
-    dongu = setInterval(donguAdim, POLL_MS);
-    seviyeGuncelle();
-  } catch(e){ log("⚠ başlatılamadı: "+e.message); $("baslat").disabled = false; }
+    aktif = true; $("durdur").disabled = false; durum("•","on");
+    log(t("started"));
+    dongu = setInterval(donguAdim, POLL_MS); seviyeGuncelle();
+  } catch(e){ log(t("startFail")(e.message)); $("baslat").disabled = false; }
 };
-
 $("durdur").onclick = () => {
   aktif = false; clearInterval(dongu);
   $("durdur").disabled = true; $("baslat").disabled = false;
-  durum("duraklatıldı"); log("⏸ durduruldu — hiçbir kaynak kullanılmıyor.");
+  durum(t("paused")); log(t("stopped"));
 };
+// init
+setLang(L);
+$("log").textContent = t("ready")+"\n";
+$("durum").textContent = t("idle");
 </script>
 </body>
 </html>
