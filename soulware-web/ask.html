@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ask KUBRA — Free, Sovereign AI</title>
+<style>
+  :root { --bg:#0b0e14; --card:#141a24; --ink:#e8ecf3; --dim:#93a1b3; --acc:#3ddc97; --acc2:#5b8cff; --line:#25303f; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  .wrap { max-width:720px; margin:0 auto; padding:24px 16px 60px; }
+  .top { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+  .brand { display:flex; align-items:center; gap:12px; }
+  .logo { height:44px; width:auto; border-radius:8px; }
+  h1 { font-size:1.5rem; margin:.2em 0; }
+  .sub { color:var(--dim); margin-top:0; }
+  .lang { display:flex; gap:4px; background:#0f1620; border:1px solid var(--line); border-radius:999px; padding:3px; }
+  .lang button { border:0; background:transparent; color:var(--dim); padding:5px 12px; border-radius:999px; cursor:pointer; font-weight:600; font-size:.85rem; }
+  .lang button.sel { background:var(--acc2); color:#04102b; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin:16px 0; }
+  #konusma { display:flex; flex-direction:column; gap:12px; min-height:120px; }
+  .msg { padding:12px 14px; border-radius:12px; max-width:88%; white-space:pre-wrap; }
+  .soru { align-self:flex-end; background:#1c2740; border:1px solid #2b3a5c; }
+  .cevap { align-self:flex-start; background:#0f1620; border:1px solid var(--line); }
+  .cevap .src { color:var(--dim); font-size:.78rem; margin-top:6px; }
+  .think { color:var(--acc); font-size:.9rem; }
+  .inrow { display:flex; gap:10px; margin-top:6px; }
+  input[type=text] { flex:1; padding:13px; border-radius:10px; border:1px solid var(--line); background:#0f1620; color:var(--ink); font-size:1rem; }
+  .btn { border:0; border-radius:12px; padding:13px 22px; font-size:1rem; font-weight:600; cursor:pointer; background:var(--acc); color:#04120b; }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+  a { color:var(--acc2); }
+  .note { color:var(--dim); font-size:.88rem; }
+  .cta { background:linear-gradient(90deg,#0f2033,#122a1f); border:1px solid #26463a; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div class="brand">
+      <img src="/aidag-logo.jpg" alt="AIDAG / KUBRA" class="logo" onerror="this.style.display='none'">
+      <h1>💬 <span data-i="title">Ask KUBRA</span></h1>
+    </div>
+    <div class="lang">
+      <button id="en" class="sel" onclick="setLang('en')">EN</button>
+      <button id="tr" onclick="setLang('tr')">TR</button>
+    </div>
+  </div>
+  <p class="sub" data-i="sub"></p>
+
+  <div class="card">
+    <div id="konusma"></div>
+    <div class="inrow">
+      <input id="soru" type="text" data-i-ph="ph" autocomplete="off">
+      <button id="sor" class="btn" data-i="ask"></button>
+    </div>
+    <p class="note" data-i="speed" style="margin:10px 0 0"></p>
+  </div>
+
+  <div class="card cta">
+    <b data-i="ctaTitle"></b>
+    <p class="note" data-i="ctaText" style="margin:6px 0 10px"></p>
+    <a href="/katil" class="btn" style="text-decoration:none;display:inline-block" data-i="ctaBtn"></a>
+  </div>
+
+  <p class="note" data-i="foot"></p>
+</div>
+
+<script>
+const I18N = {
+  en: {
+    title:"Ask KUBRA", sub:"A free, sovereign, open AI — owned by the people who build it, not a corporation.",
+    ph:"Ask anything…", ask:"Ask",
+    speed:"⚠️ KUBRA runs on donated compute (CPU for now) — answers can take a minute. The more people contribute GPUs, the faster it gets.",
+    ctaTitle:"⚡ Make KUBRA faster & smarter", ctaText:"Contribute your browser's spare power and earn AIDAG LSC. No install.",
+    ctaBtn:"Contribute →",
+    foot:"Every answer is grounded (from sources, no hallucination) and written to a public chain. Open, verifiable, yours.",
+    thinking:"KUBRA is thinking… (verified by the network)", srcs:s=>"sources: "+s,
+    err:"Something went wrong. Please try again.", empty:"Type a question first.",
+    noanswer:"No answer yet — the network may be low on contributors. Try again, or contribute to help.",
+  },
+  tr: {
+    title:"KUBRA'ya Sor", sub:"Ücretsiz, egemen, açık bir yapay zeka — şirketlerin değil, onu inşa edenlerin.",
+    ph:"Ne istersen sor…", ask:"Sor",
+    speed:"⚠️ KUBRA bağışlanan güçte çalışır (şimdilik CPU) — cevaplar bir dakika sürebilir. Ne kadar çok GPU katkısı olursa o kadar hızlanır.",
+    ctaTitle:"⚡ KUBRA'yı hızlandır & güçlendir", ctaText:"Tarayıcının boştaki gücünü ver, AIDAG LSC kazan. Kurulum yok.",
+    ctaBtn:"Katkı Ver →",
+    foot:"Her cevap kaynağa dayanır (uydurma yok) ve halka açık zincire yazılır. Açık, doğrulanabilir, senin.",
+    thinking:"KUBRA düşünüyor… (ağ tarafından doğrulanıyor)", srcs:s=>"kaynaklar: "+s,
+    err:"Bir şeyler ters gitti. Tekrar dene.", empty:"Önce bir soru yaz.",
+    noanswer:"Henüz cevap yok — ağda katkıcı az olabilir. Tekrar dene ya da katkı vererek yardım et.",
+  }
+};
+let L = localStorage.getItem("kubra_lang") || "en";
+const t = k => (I18N[L][k] ?? I18N.en[k]);
+function setLang(lang){
+  L=lang; localStorage.setItem("kubra_lang",lang); document.documentElement.lang=lang;
+  en.classList.toggle("sel",lang==="en"); tr.classList.toggle("sel",lang==="tr");
+  document.querySelectorAll("[data-i]").forEach(el=>{const v=t(el.dataset.i); if(typeof v==="string") el.textContent=v;});
+  document.querySelectorAll("[data-i-ph]").forEach(el=>{const v=t(el.dataset.iPh); if(typeof v==="string") el.placeholder=v;});
+}
+
+const COORD = window.KUBRA_COORD || "https://aidag-chain.com/kubra-api";
+const $ = id => document.getElementById(id);
+const konusma = $("konusma");
+function ekle(cls, txt){ const d=document.createElement("div"); d.className="msg "+cls; d.textContent=txt; konusma.appendChild(d); konusma.scrollTop=konusma.scrollHeight; return d; }
+
+async function j(path, opt){ const r = await fetch(COORD+path, opt); return r.json(); }
+
+async function sor(){
+  const q = $("soru").value.trim();
+  if(!q){ return; }
+  $("soru").value=""; $("sor").disabled=true;
+  ekle("soru", q);
+  const bekle = ekle("cevap", ""); bekle.innerHTML = '<span class="think">'+t("thinking")+'</span>';
+  try {
+    const c = await j("/job/create", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ prompt:q, deterministic:true }) });
+    if(!c.job_id) throw new Error("job");
+    // async yokla: doğrulanmış cevabı bekle (Cloudflare-güvenli, kısa istekler)
+    let tries=0, ans=null;
+    while(tries++ < 120){
+      await new Promise(r=>setTimeout(r,3000));
+      const s = await j("/job/"+c.job_id);
+      if(s.ok && s.job && s.job.status==="verified"){ ans = s.job.verified_answer; break; }
+    }
+    if(ans){ bekle.innerHTML=""; bekle.textContent = ans; }
+    else { bekle.innerHTML='<span class="think">'+t("noanswer")+'</span>'; }
+  } catch(e){ bekle.textContent = t("err"); }
+  $("sor").disabled=false; $("soru").focus();
+}
+$("sor").onclick = sor;
+$("soru").addEventListener("keydown", e=>{ if(e.key==="Enter") sor(); });
+setLang(L);
+</script>
+</body>
+</html>

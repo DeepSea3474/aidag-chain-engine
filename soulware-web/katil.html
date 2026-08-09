@@ -3,39 +3,54 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Contribute to KUBRA — No Install</title>
+<title>KUBRA — Chat & Contribute (No Install)</title>
 <style>
   :root { --bg:#0b0e14; --card:#141a24; --ink:#e8ecf3; --dim:#93a1b3; --acc:#3ddc97; --acc2:#5b8cff; --warn:#ffcc66; --line:#25303f; }
   * { box-sizing:border-box; }
   body { margin:0; font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
   .wrap { max-width:720px; margin:0 auto; padding:24px 16px 60px; }
-  h1 { font-size:1.6rem; margin:.2em 0; }
-  .sub { color:var(--dim); margin-top:0; }
   .top { display:flex; justify-content:space-between; align-items:center; gap:10px; }
   .brand { display:flex; align-items:center; gap:12px; }
   .logo { height:44px; width:auto; border-radius:8px; }
+  h1 { font-size:1.5rem; margin:.2em 0; }
+  .sub { color:var(--dim); margin-top:0; }
   .lang { display:flex; gap:4px; background:#0f1620; border:1px solid var(--line); border-radius:999px; padding:3px; }
   .lang button { border:0; background:transparent; color:var(--dim); padding:5px 12px; border-radius:999px; cursor:pointer; font-weight:600; font-size:.85rem; }
   .lang button.sel { background:var(--acc2); color:#04102b; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px; margin:16px 0; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin:16px 0; }
   .badges { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0 0; }
   .badge { background:#0f1620; border:1px solid var(--line); color:var(--acc); border-radius:999px; padding:4px 12px; font-size:.85rem; }
   label { display:block; color:var(--dim); font-size:.9rem; margin-bottom:6px; }
   input[type=text] { width:100%; padding:12px; border-radius:10px; border:1px solid var(--line); background:#0f1620; color:var(--ink); font-size:1rem; }
-  .btn { display:inline-flex; align-items:center; gap:8px; border:0; border-radius:12px; padding:14px 22px; font-size:1.05rem; font-weight:600; cursor:pointer; }
-  .btn-go { background:var(--acc); color:#04120b; }
+  .btn { display:inline-flex; align-items:center; gap:8px; border:0; border-radius:12px; padding:13px 22px; font-size:1.02rem; font-weight:600; cursor:pointer; background:var(--acc); color:#04120b; }
   .btn-stop { background:#2a3444; color:var(--ink); }
   .btn:disabled { opacity:.5; cursor:not-allowed; }
-  .row { display:flex; gap:14px; flex-wrap:wrap; align-items:center; }
-  .stat { flex:1; min-width:130px; background:#0f1620; border:1px solid var(--line); border-radius:12px; padding:14px; text-align:center; }
-  .stat .n { font-size:1.6rem; font-weight:700; color:var(--acc); }
-  .stat .l { color:var(--dim); font-size:.82rem; }
-  .live { font-family:ui-monospace,Menlo,monospace; font-size:.86rem; color:var(--dim); background:#0f1620; border:1px solid var(--line); border-radius:10px; padding:12px; height:150px; overflow:auto; white-space:pre-wrap; }
-  .dot { width:10px; height:10px; border-radius:50%; display:inline-block; background:#556; }
-  .dot.on { background:var(--acc); box-shadow:0 0 10px var(--acc); }
-  .dot.busy { background:var(--acc2); box-shadow:0 0 10px var(--acc2); }
-  a { color:var(--acc2); }
-  .note { color:var(--dim); font-size:.88rem; }
+  .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+  .stat { flex:1; min-width:120px; background:#0f1620; border:1px solid var(--line); border-radius:12px; padding:12px; text-align:center; }
+  .stat .n { font-size:1.5rem; font-weight:700; color:var(--acc); }
+  .stat .l { color:var(--dim); font-size:.8rem; }
+  .hidden { display:none; }
+  #konusma { display:flex; flex-direction:column; gap:10px; min-height:80px; max-height:340px; overflow:auto; margin-bottom:10px; }
+  .msg { padding:10px 13px; border-radius:12px; max-width:88%; white-space:pre-wrap; }
+  .soru { align-self:flex-end; background:#1c2740; border:1px solid #2b3a5c; }
+  .cevap { align-self:flex-start; background:#0f1620; border:1px solid var(--line); }
+  .inrow { display:flex; gap:10px; }
+  .inrow input { flex:1; }
+  .dot { width:9px; height:9px; border-radius:50%; display:inline-block; background:#556; }
+  .dot.on { background:var(--acc); box-shadow:0 0 8px var(--acc); }
+  .dot.busy { background:var(--acc2); box-shadow:0 0 8px var(--acc2); }
+  .live { font-family:ui-monospace,Menlo,monospace; font-size:.82rem; color:var(--dim); background:#0f1620; border:1px solid var(--line); border-radius:10px; padding:10px; height:110px; overflow:auto; white-space:pre-wrap; }
+  a { color:var(--acc2); } .note { color:var(--dim); font-size:.86rem; }
+  .pill { display:inline-flex; align-items:center; gap:7px; background:#0f1620; border:1px solid var(--line); border-radius:999px; padding:6px 12px; font-size:.85rem; }
+  /* KUBRA düşünme figürü — papatya (yaprakları eksilerek döner, biri sarı) */
+  .papatya { display:inline-flex; align-items:center; gap:8px; color:var(--dim); font-size:.9rem; }
+  .papatya svg { display:block; }
+  .papatya .petals { transform-origin:30px 30px; animation:pspin 4.5s linear infinite; }
+  .papatya .p { fill:#c3cede; transform-origin:30px 30px; animation:pfade 1.5s ease-in-out infinite; }
+  .papatya .p.sari { fill:var(--warn); }
+  .papatya .core { fill:var(--warn); }
+  @keyframes pspin { to { transform:rotate(360deg); } }
+  @keyframes pfade { 0%,100%{opacity:1} 55%{opacity:.1} }
 </style>
 </head>
 <body>
@@ -43,7 +58,7 @@
   <div class="top">
     <div class="brand">
       <img src="/aidag-logo.jpg" alt="AIDAG / KUBRA" class="logo" onerror="this.style.display='none'">
-      <h1>⚡ <span data-i="title">Contribute to KUBRA</span></h1>
+      <h1>⚡ <span data-i="title">Chat with KUBRA & Contribute</span></h1>
     </div>
     <div class="lang">
       <button id="en" class="sel" onclick="setLang('en')">EN</button>
@@ -52,177 +67,176 @@
   </div>
   <p class="sub" data-i="sub"></p>
 
-  <div class="card">
+  <!-- ── BAŞLANGIÇ: adres + izin ── -->
+  <div id="giris" class="card">
     <b data-i="whySafe"></b>
     <div class="badges">
-      <span class="badge" data-i="b1"></span>
-      <span class="badge" data-i="b2"></span>
-      <span class="badge" data-i="b3"></span>
-      <span class="badge" data-i="b4"></span>
-      <span class="badge" data-i="b5"></span>
+      <span class="badge" data-i="b1"></span><span class="badge" data-i="b2"></span>
+      <span class="badge" data-i="b3"></span><span class="badge" data-i="b4"></span><span class="badge" data-i="b5"></span>
     </div>
-    <p class="note" data-i="safeNote" style="margin-bottom:0"></p>
-  </div>
-
-  <div class="card">
-    <label for="adres" data-i="addrLabel"></label>
-    <input id="adres" type="text" placeholder="0x..." autocomplete="off" spellcheck="false">
-    <p class="note" data-i="addrNote"></p>
-    <div class="row" style="margin-top:8px">
-      <button id="baslat" class="btn btn-go" data-i="start"></button>
-      <button id="durdur" class="btn btn-stop" disabled data-i="stop"></button>
-      <span><span id="dot" class="dot"></span> <span id="durum"></span></span>
+    <div style="margin-top:14px">
+      <label for="adres" data-i="addrLabel"></label>
+      <input id="adres" type="text" placeholder="0x..." autocomplete="off" spellcheck="false">
+      <p class="note" data-i="addrNote"></p>
+      <button id="baslat" class="btn" data-i="start"></button>
+      <p class="note" id="yukdurum" data-i="willDownload" style="margin-top:10px"></p>
     </div>
   </div>
 
-  <div class="card">
+  <!-- ── SOHBET (model yüklenince açılır) ── -->
+  <div id="sohbet" class="card hidden">
+    <div class="row" style="justify-content:space-between; margin-bottom:10px">
+      <b data-i="chatTitle"></b>
+      <span class="pill"><span id="dot" class="dot on"></span> <span id="durum"></span></span>
+    </div>
+    <div id="konusma"></div>
+    <div class="inrow">
+      <input id="soru" type="text" data-i-ph="chatPh" autocomplete="off">
+      <button id="gonder" class="btn" data-i="chatSend"></button>
+    </div>
+    <p class="note" data-i="chatNote" style="margin:10px 0 0"></p>
+  </div>
+
+  <!-- ── KATKI DURUMU (arka plan) ── -->
+  <div id="katki" class="card hidden">
+    <div class="row" style="justify-content:space-between; margin-bottom:6px">
+      <b data-i="contribTitle"></b>
+      <button id="durdur" class="btn-stop btn" style="padding:8px 16px;font-size:.9rem" data-i="stop"></button>
+    </div>
     <div class="row">
       <div class="stat"><div class="n" id="kazanc">0</div><div class="l" data-i="earned"></div></div>
       <div class="stat"><div class="n" id="isler">0</div><div class="l" data-i="jobs"></div></div>
       <div class="stat"><div class="n" id="seviye">—</div><div class="l" data-i="tier"></div></div>
     </div>
+    <div id="log" class="live" style="margin-top:10px"></div>
   </div>
 
-  <div class="card">
-    <b data-i="liveTitle"></b>
-    <div id="log" class="live" style="margin-top:8px"></div>
-  </div>
-
-  <p class="note" data-i="how"></p>
+  <p class="note" data-i="foot"></p>
   <p class="note">🔓 <span data-i="oss"></span>: <a href="https://github.com/DeepSea3474" target="_blank">SoulwareAI / KUBRA</a></p>
 </div>
 
 <script>
-// ══════════════════════════ i18n (EN default, TR toggle — global) ══════════════════════════
 const I18N = {
-  en: {
-    title:"Contribute to KUBRA",
-    sub:"Use your spare computing power to help the decentralized AI <b>KUBRA</b> grow, and earn <b>AIDAG&nbsp;LSC</b>. <b>No install</b> — everything runs in your browser.",
-    whySafe:"🛡️ Why is it safe?",
-    b1:"No install", b2:"Open source", b3:"Never touches your files", b4:"Rewards to your own wallet", b5:"Stop anytime",
-    safeNote:"The page only uses your browser's <b>GPU/CPU</b>, and <b>only when you allow it</b>. Nothing is installed on your computer; it stops when you close it. The code is open — verify it yourself.",
-    addrLabel:"Your reward address (AIDAG / MetaMask — earnings go here)",
-    addrNote:"Address only — your private key is NEVER requested. Rewards are written directly to your wallet (non-custodial).",
-    start:"⚡ Contribute (allow)", stop:"⏸ Stop",
-    earned:"LSC earned", jobs:"Jobs done", tier:"Tier",
-    liveTitle:"📡 Live — what it's doing now (transparency)",
-    how:"How it works: your browser downloads a small KUBRA model (Qwen2.5), pulls jobs from the network, answers, submits; once verified you earn <b>LSC</b>. On first launch the model downloads (a few hundred MB, once). A desktop app for <b>large models</b> (for strong GPUs) is coming next.",
-    oss:"Open source",
-    idle:"idle", ready:'Ready. Press "Contribute" to start.',
-    loading:"loading model", loadingPct:p=>"loading model "+p+"%",
-    modelReady:"✅ model ready (in your browser, sovereign).",
-    registered:w=>"📝 registered: "+w,
-    started:'✅ Permission granted — your spare power is helping the network. Stop anytime.',
-    waiting:"idle (waiting for work)", running:id=>"job #"+id+" running",
-    jobline:(id,p)=>"⚙ job #"+id+": "+p,
-    submitted:(id,s,r)=>"📤 job #"+id+": "+s+(r?" 💰":""),
-    stopped:"⏸ stopped — no resources are being used.",
-    badAddr:"Enter a valid address (0x + 40 hex).",
-    startFail:e=>"⚠ couldn't start: "+e, connErr:"connection error", paused:"paused",
-  },
-  tr: {
-    title:"KUBRA'ya Katkı Ver",
-    sub:"Boştaki bilgisayar gücünle merkeziyetsiz yapay zeka <b>KUBRA</b>'yı geliştir, <b>AIDAG&nbsp;LSC</b> kazan. <b>Kurulum YOK</b> — her şey tarayıcında.",
-    whySafe:"🛡️ Neden güvenli?",
-    b1:"Kurulum yok", b2:"Açık kaynak", b3:"Dosyalarına dokunmaz", b4:"Kazancın senin cüzdanında", b5:"İstediğin an dur",
-    safeNote:"Sayfa yalnız tarayıcının <b>GPU/CPU</b> gücünü, <b>sadece sen izin verince</b> kullanır. Hiçbir şey kurulmaz; kapatınca durur. Kod açıktır — doğrulayabilirsin.",
-    addrLabel:"Ödül adresin (AIDAG / MetaMask — kazancın buraya)",
-    addrNote:"Sadece adres — özel anahtar İSTENMEZ. Kazancın doğrudan senin cüzdanına yazılır (non-custodial).",
-    start:"⚡ Katkı Ver (İzin ver)", stop:"⏸ Durdur",
-    earned:"Kazanılan LSC", jobs:"Yapılan iş", tier:"Seviye",
-    liveTitle:"📡 Canlı — şu an ne yapıyor (şeffaflık)",
-    how:"Nasıl çalışır: tarayıcın küçük bir KUBRA modelini (Qwen2.5) indirir, ağdan iş çeker, cevaplar, gönderir; doğrulanınca <b>LSC</b> kazanırsın. İlk açılışta model indirilir (birkaç yüz MB, bir kez). Güçlü GPU'lar için <b>büyük model</b> masaüstü uygulaması yakında.",
-    oss:"Açık kaynak",
-    idle:"boşta", ready:'Hazır. "Katkı Ver"e basınca başlar.',
-    loading:"model yükleniyor", loadingPct:p=>"model yükleniyor %"+p,
-    modelReady:"✅ model hazır (tarayıcıda, egemen).",
-    registered:w=>"📝 kaydolundu: "+w,
-    started:'✅ İzin verildi — boştaki gücün ağa katkı sağlıyor. İstediğin an durdur.',
-    waiting:"boşta (iş bekleniyor)", running:id=>"iş #"+id+" çalışıyor",
-    jobline:(id,p)=>"⚙ iş #"+id+": "+p,
-    submitted:(id,s,r)=>"📤 iş #"+id+": "+s+(r?" 💰":""),
-    stopped:"⏸ durduruldu — hiçbir kaynak kullanılmıyor.",
-    badAddr:"Geçerli bir adres gir (0x + 40 hex).",
-    startFail:e=>"⚠ başlatılamadı: "+e, connErr:"bağlantı hatası", paused:"duraklatıldı",
-  }
+ en: {
+  title:"Chat with KUBRA & Contribute",
+  sub:"Run <b>KUBRA</b> right in your browser: chat with it <b>free & private</b>, and help the network + earn <b>AIDAG&nbsp;LSC</b> in the background. <b>No install.</b>",
+  whySafe:"🛡️ Why safe?", b1:"No install", b2:"Open source", b3:"Never touches your files", b4:"Rewards to your wallet", b5:"Stop anytime",
+  addrLabel:"Your reward address (AIDAG / MetaMask)", addrNote:"Address only — private key never requested. Non-custodial.",
+  start:"⚡ Start (load KUBRA)", willDownload:"On first start, a small KUBRA model downloads to your browser (a few hundred MB, once).",
+  chatTitle:"💬 Chat with KUBRA (in your browser)", chatPh:"Ask anything…", chatSend:"Send",
+  chatNote:"This chat runs 100% in your browser — instant & private. Nothing sent to a server.",
+  contribTitle:"⚡ Contributing (background)", stop:"⏸ Stop", earned:"LSC earned", jobs:"Jobs done", tier:"Tier",
+  foot:"You're both using KUBRA (locally) and helping build it (network). Everything is open & verifiable.",
+  oss:"Open source",
+  loadingPct:p=>"loading KUBRA "+p+"%", ready:"✅ Ready! Chat below. You're also contributing in the background — keep this open.",
+  registered:w=>"registered: "+w, waiting:"contributing — idle", running:id=>"job #"+id, jobline:(id,p)=>"⚙ job #"+id+": "+p,
+  submitted:(id,s,r)=>"📤 job #"+id+": "+s+(r?" 💰":""), stopped:"⏸ stopped", paused:"paused", idle:"idle",
+  badAddr:"Enter a valid address (0x + 40 hex).", thinking:"…", thinking2:"KUBRA is thinking…", startFail:e=>"⚠ "+e, connErr:"connection error",
+ },
+ tr: {
+  title:"KUBRA ile Sohbet Et & Katkı Ver",
+  sub:"<b>KUBRA</b>'yı doğrudan tarayıcında çalıştır: onunla <b>ücretsiz & gizli</b> sohbet et, arka planda ağa katkı verip <b>AIDAG&nbsp;LSC</b> kazan. <b>Kurulum yok.</b>",
+  whySafe:"🛡️ Neden güvenli?", b1:"Kurulum yok", b2:"Açık kaynak", b3:"Dosyalarına dokunmaz", b4:"Kazanç cüzdanında", b5:"İstediğin an dur",
+  addrLabel:"Ödül adresin (AIDAG / MetaMask)", addrNote:"Sadece adres — özel anahtar istenmez. Non-custodial.",
+  start:"⚡ Başla (KUBRA'yı yükle)", willDownload:"İlk başlangıçta küçük bir KUBRA modeli tarayıcına iner (birkaç yüz MB, bir kez).",
+  chatTitle:"💬 KUBRA ile Sohbet (tarayıcında)", chatPh:"Ne istersen sor…", chatSend:"Gönder",
+  chatNote:"Bu sohbet %100 tarayıcında çalışır — anında & gizli. Sunucuya hiçbir şey gönderilmez.",
+  contribTitle:"⚡ Katkı veriyor (arka plan)", stop:"⏸ Durdur", earned:"Kazanılan LSC", jobs:"Yapılan iş", tier:"Seviye",
+  foot:"Hem KUBRA'yı (yerel) kullanıyor hem inşasına (ağ) yardım ediyorsun. Her şey açık & doğrulanabilir.",
+  oss:"Açık kaynak",
+  loadingPct:p=>"KUBRA yükleniyor %"+p, ready:"✅ Hazır! Aşağıdan sohbet et. Arka planda da katkı veriyorsun — açık bırak.",
+  registered:w=>"kaydolundu: "+w, waiting:"katkı — boşta", running:id=>"iş #"+id, jobline:(id,p)=>"⚙ iş #"+id+": "+p,
+  submitted:(id,s,r)=>"📤 iş #"+id+": "+s+(r?" 💰":""), stopped:"⏸ durduruldu", paused:"duraklatıldı", idle:"boşta",
+  badAddr:"Geçerli adres gir (0x + 40 hex).", thinking:"…", thinking2:"KUBRA düşünüyor…", startFail:e=>"⚠ "+e, connErr:"bağlantı hatası",
+ }
 };
 let L = localStorage.getItem("kubra_lang") || "en";
-function t(k){ return (I18N[L][k] ?? I18N.en[k]); }
+const t = k => (I18N[L][k] ?? I18N.en[k]);
 function setLang(lang){
-  L = lang; localStorage.setItem("kubra_lang", lang);
-  document.documentElement.lang = lang;
-  document.getElementById("en").classList.toggle("sel", lang==="en");
-  document.getElementById("tr").classList.toggle("sel", lang==="tr");
-  document.querySelectorAll("[data-i]").forEach(el => { const v=t(el.dataset.i); if(typeof v==="string") el.innerHTML=v; });
-  if (!aktif && $("durum")) $("durum").textContent = t("idle");
+  L=lang; localStorage.setItem("kubra_lang",lang); document.documentElement.lang=lang;
+  en.classList.toggle("sel",lang==="en"); tr.classList.toggle("sel",lang==="tr");
+  document.querySelectorAll("[data-i]").forEach(el=>{const v=t(el.dataset.i); if(typeof v==="string") el.innerHTML=v;});
+  document.querySelectorAll("[data-i-ph]").forEach(el=>{const v=t(el.dataset.iPh); if(typeof v==="string") el.placeholder=v;});
 }
 
-// ══════════════════════════ KUBRA browser contribution client (WebGPU) ══════════════════════════
 const COORD = window.KUBRA_COORD || "https://aidag-chain.com/kubra-api";
 const MODEL = "Qwen2.5-1.5B-Instruct-q4f16_1-MLC";
 const POLL_MS = 4000;
 const $ = id => document.getElementById(id);
-const log = m => { const el=$("log"); el.textContent += m+"\n"; el.scrollTop = el.scrollHeight; };
-let aktif = false, engine = null, cuzdan = null, dongu = null;
-function durum(txt, cls){ $("durum").textContent = txt; $("dot").className = "dot"+(cls?" "+cls:""); }
-async function coordJson(path, opt){ const r = await fetch(COORD+path, opt); return r.json(); }
+const log = m => { const el=$("log"); el.textContent += m+"\n"; el.scrollTop=el.scrollHeight; };
+let aktif=false, engine=null, cuzdan=null, dongu=null, mesgul=false;
+function durum(txt,cls){ $("durum").textContent=txt; $("dot").className="dot"+(cls?" "+cls:""); }
+async function j(path,opt){ const r=await fetch(COORD+path,opt); return r.json(); }
+const konusma = ()=>$("konusma");
+function ekle(cls,txt){ const d=document.createElement("div"); d.className="msg "+cls; d.textContent=txt; konusma().appendChild(d); konusma().scrollTop=konusma().scrollHeight; return d; }
+// KUBRA düşünme figürü — 12 yapraklı papatya, biri sarı, yaprakları eksilerek döner.
+function papatyaHTML(){
+  let p=""; const N=12;
+  for(let i=0;i<N;i++){ const deg=i*(360/N), sari=i===0?" sari":"", delay=(i*(1.5/N)).toFixed(2);
+    p+=`<ellipse class="p${sari}" cx="30" cy="11" rx="4" ry="9" transform="rotate(${deg} 30 30)" style="animation-delay:${delay}s"/>`; }
+  return `<span class="papatya"><svg viewBox="0 0 60 60" width="30" height="30"><g class="petals">${p}</g><circle class="core" cx="30" cy="30" r="6"/></svg><span>${t("thinking2")}</span></span>`;
+}
 
-async function seviyeGuncelle(){
-  try {
-    const s = await coordJson("/status");
-    const w = (s.workers||[]).find(x => x.wallet.toLowerCase() === cuzdan);
-    if (w){ $("kazanc").textContent = w.earned_lsc; $("isler").textContent = w.jobs_done; $("seviye").textContent = "T"+(w.tier??0); }
-  } catch(e){}
-}
 async function motorYukle(){
-  log(t("loading")+"...");
+  $("yukdurum").textContent = t("loadingPct")(0);
   const webllm = await import("https://esm.run/@mlc-ai/web-llm");
-  engine = await webllm.CreateMLCEngine(MODEL, { initProgressCallback: p => durum(t("loadingPct")(Math.round((p.progress||0)*100))) });
-  log(t("modelReady"));
+  engine = await webllm.CreateMLCEngine(MODEL, { initProgressCallback:p=>{ $("yukdurum").textContent=t("loadingPct")(Math.round((p.progress||0)*100)); } });
 }
-async function cevapla(prompt){
-  const r = await engine.chat.completions.create({ messages:[{role:"user", content:prompt}], temperature:0 });
-  return (r.choices?.[0]?.message?.content || "").trim();
+async function uret(prompt){
+  const r = await engine.chat.completions.create({ messages:[{role:"user",content:prompt}], temperature:0.3 });
+  return (r.choices?.[0]?.message?.content||"").trim();
 }
-async function donguAdim(){
-  if (!aktif) return;
+
+// ── YEREL SOHBET (tarayıcıda, anında) ──
+async function sohbetGonder(){
+  const q = $("soru").value.trim(); if(!q||mesgul) return;
+  $("soru").value=""; mesgul=true; $("gonder").disabled=true;
+  ekle("soru", q);
+  const c = ekle("cevap", ""); c.innerHTML = papatyaHTML();
+  try { c.textContent = await uret(q); } catch(e){ c.textContent = t("connErr"); }
+  mesgul=false; $("gonder").disabled=false; $("soru").focus();
+}
+
+// ── ARKA PLAN KATKI ──
+async function seviyeGuncelle(){
+  try { const s=await j("/status"); const w=(s.workers||[]).find(x=>x.wallet.toLowerCase()===cuzdan);
+    if(w){ $("kazanc").textContent=w.earned_lsc; $("isler").textContent=w.jobs_done; $("seviye").textContent="T"+(w.tier??0); } } catch(e){}
+}
+async function katkiAdim(){
+  if(!aktif||mesgul) return; // sohbet sırasında modeli meşgul etme
   try {
-    const is = await coordJson("/worker/poll/"+cuzdan);
-    if (is && is.none){ durum(t("waiting"),"on"); return; }
-    if (is && is.job_id){
-      durum(t("running")(is.job_id),"busy");
-      log(t("jobline")(is.job_id, is.prompt.slice(0,60)));
-      const cevap = await cevapla(is.prompt);
-      const res = await coordJson("/worker/submit", { method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ wallet: cuzdan, job_id: is.job_id, answer: cevap }) });
-      log(t("submitted")(is.job_id, res.durum||"?", !!res.oduller));
-      await seviyeGuncelle();
-      durum(t("waiting"),"on");
+    const is = await j("/worker/poll/"+cuzdan);
+    if(is&&is.none){ durum(t("waiting"),"on"); return; }
+    if(is&&is.job_id){
+      durum(t("running")(is.job_id),"busy"); log(t("jobline")(is.job_id, (is.prompt||"").slice(0,50)));
+      mesgul=true; const cevap=await uret(is.prompt); mesgul=false;
+      const res=await j("/worker/submit",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet:cuzdan,job_id:is.job_id,answer:cevap})});
+      log(t("submitted")(is.job_id,res.durum||"?",!!res.oduller)); await seviyeGuncelle(); durum(t("waiting"),"on");
     }
-  } catch(e){ log("⚠ "+e.message); durum(t("connErr"),""); }
+  } catch(e){ mesgul=false; durum(t("connErr"),""); }
 }
+
 $("baslat").onclick = async () => {
-  const a = $("adres").value.trim().toLowerCase();
-  if (!/^0x[0-9a-f]{40}$/.test(a)){ alert(t("badAddr")); return; }
-  cuzdan = a; $("baslat").disabled = true;
+  const a=$("adres").value.trim().toLowerCase();
+  if(!/^0x[0-9a-f]{40}$/.test(a)){ alert(t("badAddr")); return; }
+  cuzdan=a; $("baslat").disabled=true;
   try {
-    await coordJson("/worker/register", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ wallet: cuzdan }) });
-    log(t("registered")(cuzdan));
-    if (!engine) await motorYukle();
-    aktif = true; $("durdur").disabled = false; durum("•","on");
-    log(t("started"));
-    dongu = setInterval(donguAdim, POLL_MS); seviyeGuncelle();
-  } catch(e){ log(t("startFail")(e.message)); $("baslat").disabled = false; }
+    await j("/worker/register",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet:cuzdan})});
+    await motorYukle();
+    // model hazır → SOHBET + KATKI aç
+    $("giris").classList.add("hidden");
+    $("sohbet").classList.remove("hidden");
+    $("katki").classList.remove("hidden");
+    durum(t("idle"),"on");
+    ekle("cevap", t("ready"));
+    aktif=true; dongu=setInterval(katkiAdim,POLL_MS); seviyeGuncelle();
+    $("soru").focus();
+  } catch(e){ $("yukdurum").textContent=t("startFail")(e.message); $("baslat").disabled=false; }
 };
-$("durdur").onclick = () => {
-  aktif = false; clearInterval(dongu);
-  $("durdur").disabled = true; $("baslat").disabled = false;
-  durum(t("paused")); log(t("stopped"));
-};
-// init
+$("gonder").onclick = sohbetGonder;
+$("soru")?.addEventListener("keydown", e=>{ if(e.key==="Enter") sohbetGonder(); });
+$("durdur").onclick = () => { aktif=false; clearInterval(dongu); durum(t("paused")); log(t("stopped")); };
 setLang(L);
-$("log").textContent = t("ready")+"\n";
-$("durum").textContent = t("idle");
 </script>
 </body>
 </html>
