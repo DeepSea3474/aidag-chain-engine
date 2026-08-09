@@ -30,12 +30,20 @@
   .stat .n { font-size:1.5rem; font-weight:700; color:var(--acc); }
   .stat .l { color:var(--dim); font-size:.8rem; }
   .hidden { display:none; }
-  #konusma { display:flex; flex-direction:column; gap:10px; min-height:80px; max-height:340px; overflow:auto; margin-bottom:10px; }
-  .msg { padding:10px 13px; border-radius:12px; max-width:88%; white-space:pre-wrap; }
-  .soru { align-self:flex-end; background:#1c2740; border:1px solid #2b3a5c; }
-  .cevap { align-self:flex-start; background:#0f1620; border:1px solid var(--line); }
-  .inrow { display:flex; gap:10px; }
-  .inrow input { flex:1; }
+  /* ── Sohbet: büyük, şık, uygulama gibi ── */
+  #sohbet { padding:0; overflow:hidden; }
+  .chat-head { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:14px 18px; border-bottom:1px solid var(--line); background:linear-gradient(180deg,#182234,#141a24); }
+  .chat-head b { font-size:1.05rem; }
+  #konusma { display:flex; flex-direction:column; gap:16px; height:58vh; min-height:440px; overflow-y:auto; padding:20px 18px; }
+  .msg { padding:13px 17px; border-radius:18px; max-width:80%; white-space:pre-wrap; line-height:1.55; box-shadow:0 2px 10px rgba(0,0,0,.28); font-size:.98rem; animation:pop .2s ease; }
+  @keyframes pop { from{opacity:0; transform:translateY(6px)} to{opacity:1; transform:none} }
+  .soru { align-self:flex-end; background:linear-gradient(135deg,#2c3e66,#1c2740); border:1px solid #38508066; border-bottom-right-radius:5px; color:#eef3ff; }
+  .cevap { align-self:flex-start; background:linear-gradient(135deg,#101a26,#0f1620); border:1px solid var(--line); border-bottom-left-radius:5px; position:relative; }
+  .cevap-wrap { align-self:flex-start; display:flex; gap:10px; align-items:flex-start; max-width:88%; }
+  .kubra-av { flex-shrink:0; width:34px; height:34px; border-radius:50%; background:radial-gradient(circle at 35% 30%,#2a3a5f,#0f1620); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; font-size:1.1rem; margin-top:2px; }
+  .inbar { display:flex; gap:10px; padding:14px 18px; border-top:1px solid var(--line); background:#0f1620; }
+  .inbar input { flex:1; padding:14px 16px; border-radius:14px; font-size:1rem; }
+  .inbar .btn { border-radius:14px; }
   .dot { width:9px; height:9px; border-radius:50%; display:inline-block; background:#556; }
   .dot.on { background:var(--acc); box-shadow:0 0 8px var(--acc); }
   .dot.busy { background:var(--acc2); box-shadow:0 0 8px var(--acc2); }
@@ -83,19 +91,19 @@
     </div>
   </div>
 
-  <!-- ── SOHBET (model yüklenince açılır) ── -->
+  <!-- ── SOHBET (model yüklenince açılır) — büyük dikdörtgen ── -->
   <div id="sohbet" class="card hidden">
-    <div class="row" style="justify-content:space-between; margin-bottom:10px">
-      <b data-i="chatTitle"></b>
+    <div class="chat-head">
+      <b>🌼 <span data-i="chatTitle"></span></b>
       <span class="pill"><span id="dot" class="dot on"></span> <span id="durum"></span></span>
     </div>
     <div id="konusma"></div>
-    <div class="inrow">
+    <div class="inbar">
       <input id="soru" type="text" data-i-ph="chatPh" autocomplete="off">
       <button id="gonder" class="btn" data-i="chatSend"></button>
     </div>
-    <p class="note" data-i="chatNote" style="margin:10px 0 0"></p>
   </div>
+  <p class="note" data-i="chatNote" style="margin:-6px 0 0"></p>
 
   <!-- ── KATKI DURUMU (arka plan) ── -->
   <div id="katki" class="card hidden">
@@ -132,6 +140,7 @@ const I18N = {
   registered:w=>"registered: "+w, waiting:"contributing — idle", running:id=>"job #"+id, jobline:(id,p)=>"⚙ job #"+id+": "+p,
   submitted:(id,s,r)=>"📤 job #"+id+": "+s+(r?" 💰":""), stopped:"⏸ stopped", paused:"paused", idle:"idle",
   badAddr:"Enter a valid address (0x + 40 hex).", thinking:"…", thinking2:"KUBRA is thinking…", startFail:e=>"⚠ "+e, connErr:"connection error",
+  mobTitle:"📱 This device is perfect for USING KUBRA", mobText:"Running the AI locally needs a computer with a GPU (phones are too small — they'd freeze). From your phone, chat with KUBRA over the network instead:", mobAsk:"💬 Chat with KUBRA →", mobPc:"To contribute & earn, open this page on a PC with a GPU.",
  },
  tr: {
   title:"KUBRA ile Sohbet Et & Katkı Ver",
@@ -148,6 +157,7 @@ const I18N = {
   registered:w=>"kaydolundu: "+w, waiting:"katkı — boşta", running:id=>"iş #"+id, jobline:(id,p)=>"⚙ iş #"+id+": "+p,
   submitted:(id,s,r)=>"📤 iş #"+id+": "+s+(r?" 💰":""), stopped:"⏸ durduruldu", paused:"duraklatıldı", idle:"boşta",
   badAddr:"Geçerli adres gir (0x + 40 hex).", thinking:"…", thinking2:"KUBRA düşünüyor…", startFail:e=>"⚠ "+e, connErr:"bağlantı hatası",
+  mobTitle:"📱 Bu cihaz KUBRA'yı KULLANMAK için ideal", mobText:"AI'ı yerel çalıştırmak GPU'lu bir bilgisayar ister (telefonlar çok küçük — donarlar). Telefonundan KUBRA ile ağ üzerinden sohbet et:", mobAsk:"💬 KUBRA ile Sohbet Et →", mobPc:"Katkı verip kazanmak için bu sayfayı GPU'lu bir bilgisayarda aç.",
  }
 };
 let L = localStorage.getItem("kubra_lang") || "en";
@@ -237,6 +247,16 @@ $("gonder").onclick = sohbetGonder;
 $("soru")?.addEventListener("keydown", e=>{ if(e.key==="Enter") sohbetGonder(); });
 $("durdur").onclick = () => { aktif=false; clearInterval(dongu); durum(t("paused")); log(t("stopped")); };
 setLang(L);
+
+// ── CİHAZ KAPISI: model çalıştırmak GPU'lu bilgisayar ister. Telefon/GPU'suz → ağ sohbeti ──
+const mobil = /Android|iPhone|iPad|iPod|Mobile|Silk|Kindle|Opera Mini/i.test(navigator.userAgent);
+if (mobil || !navigator.gpu) {
+  $("giris").innerHTML =
+    '<b data-i="mobTitle">'+t("mobTitle")+'</b>'+
+    '<p class="note" data-i="mobText" style="margin:8px 0 14px">'+t("mobText")+'</p>'+
+    '<a href="/ask" class="btn" data-i="mobAsk" style="text-decoration:none;display:inline-block">'+t("mobAsk")+'</a>'+
+    '<p class="note" data-i="mobPc" style="margin-top:12px">'+t("mobPc")+'</p>';
+}
 </script>
 </body>
 </html>
