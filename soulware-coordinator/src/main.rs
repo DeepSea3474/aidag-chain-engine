@@ -1019,6 +1019,8 @@ async fn main() {
         .route("/settlement/pending", get(settlement_pending))
         .route("/settlement/status", get(settlement_status))
         .route("/pool/status", get(pool_status))
+        // CORS: tarayıcı katkı sayfası (sıfır-kurulum) koordinatöre ulaşabilsin.
+        .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(st);
 
     let addr: SocketAddr = listen.parse().expect("SOULWARE_COORD_LISTEN geçersiz");
