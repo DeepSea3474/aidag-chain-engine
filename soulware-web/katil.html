@@ -12,6 +12,8 @@
   h1 { font-size:1.6rem; margin:.2em 0; }
   .sub { color:var(--dim); margin-top:0; }
   .top { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+  .brand { display:flex; align-items:center; gap:12px; }
+  .logo { height:44px; width:auto; border-radius:8px; }
   .lang { display:flex; gap:4px; background:#0f1620; border:1px solid var(--line); border-radius:999px; padding:3px; }
   .lang button { border:0; background:transparent; color:var(--dim); padding:5px 12px; border-radius:999px; cursor:pointer; font-weight:600; font-size:.85rem; }
   .lang button.sel { background:var(--acc2); color:#04102b; }
@@ -39,7 +41,10 @@
 <body>
 <div class="wrap">
   <div class="top">
-    <h1>⚡ <span data-i="title">Contribute to KUBRA</span></h1>
+    <div class="brand">
+      <img src="/logo.svg" alt="KUBRA / SoulwareAI" class="logo" onerror="this.style.display='none'">
+      <h1>⚡ <span data-i="title">Contribute to KUBRA</span></h1>
+    </div>
     <div class="lang">
       <button id="en" class="sel" onclick="setLang('en')">EN</button>
       <button id="tr" onclick="setLang('tr')">TR</button>
