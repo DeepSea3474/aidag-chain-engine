@@ -91,6 +91,10 @@ pub struct NodeState {
     /// ARTIMLI: en son uygulanan total_order. Yeni sira bunun uzantisiysa
     /// (append) sadece kuyruk islenir; degilse (reorg) tam yeniden hesap.
     son_uygulanan_sira: Vec<VertexId>,
+    /// ARTIMLI total_order onbellegi: `son_uygulanan_sira`'yi ureten secili tip.
+    /// total_order_artimli, yeni tip bunun zincirini uzatiyorsa tam O(n)
+    /// yeniden-siralamayi ATLAR (sadece yeni segment) -> ingest O(n^2) -> O(n).
+    son_secili_tip: Option<VertexId>,
 }
 
 impl NodeState {
@@ -193,6 +197,7 @@ impl NodeState {
             baslangic_stake: Vec::new(),
             baslangic_vesting: Vec::new(),
             son_uygulanan_sira: Vec::new(),
+            son_secili_tip: None,
         }
     }
 
@@ -759,7 +764,16 @@ impl NodeState {
     /// NOT: naif O(n) — her ingest'te tam yeniden hesap. Once DOGRULUK.
     /// Artimli hale getirme (sadece reorg olan kismi yeniden uygula) sonraki adim.
     fn durumu_yeniden_uygula(&mut self) {
-        let yeni_sira = self.ghostdag.total_order(&self.graph);
+        // ARTIMLI: tam O(n) yeniden-siralama yerine, secili tip eski zinciri
+        // uzatiyorsa sadece yeni segmenti hesapla (O(eklenen)). Cikti, tam
+        // total_order ile BIREBIR ozdes; reorg'da otomatik tam yeniden hesaba
+        // duser. Boylece ingest O(n^2) -> O(n).
+        let (yeni_tip, yeni_sira) = self.ghostdag.total_order_artimli(
+            &self.graph,
+            self.son_secili_tip,
+            &self.son_uygulanan_sira,
+        );
+        self.son_secili_tip = yeni_tip;
 
         // APPEND FAST-PATH: yeni sira, son uygulanan siranin uzantisi mi?
         // Oyleyse onceki state gecerli; sadece YENI kuyrugu isle (sifirlama yok).

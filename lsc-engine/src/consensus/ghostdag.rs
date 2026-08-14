@@ -628,6 +628,70 @@ impl Ghostdag {
         }
         order
     }
+
+    /// ARTIMLI `total_order`: `onceki_tip` o an `onceki_sira`'yi ureten secili
+    /// tip olmak uzere, YENI secili tip eski tip'in secili-ebeveyn zincirini
+    /// UZATIYORSA sadece yeni segmenti hesaplar (O(eklenen)); aksi halde (reorg
+    /// / ilk kez) tam `total_order`'a duser. Donen `Vec`, ayni graf durumunda
+    /// `total_order` ile BIREBIR OZDESTIR. Donus: (yeni_secili_tip, yeni_sira).
+    ///
+    /// DOGRULUK: `total_order(tip)` = genesis→tip secili zinciri boyunca her
+    /// blok icin `[mergeset_sirali ++ blok]`. Eski tip `pt` yeni tip'in
+    /// zincirinde bir ATA ise, `genesis→pt` onegi DEGISMEZ — mergeset'ler
+    /// renklendirmede (update_one) sabitlenir ve `past ∩ mergeset` iliskileri
+    /// yeni vertex eklenince degismez — dolayisiyla `onceki_sira` aynen korunur;
+    /// yalnizca pt-sonrasi zincir bloklari eklenir. `pt` yeni zincirde yoksa
+    /// reorg'dur ve tam hesap yapilir (dogruluk once).
+    pub fn total_order_artimli(
+        &self,
+        graph: &Graph,
+        onceki_tip: Option<VertexId>,
+        onceki_sira: &[VertexId],
+    ) -> (Option<VertexId>, Vec<VertexId>) {
+        let Some(tip) = self.selected_tip(graph) else {
+            return (None, Vec::new());
+        };
+        // Onceki durum yok -> tam hesap.
+        let Some(pt) = onceki_tip else {
+            return (Some(tip), self.total_order(graph));
+        };
+        // Secili tip degismedi -> sira ozdes.
+        if tip == pt {
+            return (Some(tip), onceki_sira.to_vec());
+        }
+        // Yeni tip'ten secili-ebeveyn zincirini geri yuru; pt'ye ulasirsak pt
+        // yeni zincirin atasidir -> SAF UZANTI. segment = (pt, tip] zincir
+        // bloklari (once tip'e yakin toplanir, sonra ters cevrilir).
+        let mut segment: Vec<VertexId> = Vec::new();
+        let mut cur = Some(tip);
+        let mut uzanti = false;
+        while let Some(c) = cur {
+            if c == pt {
+                uzanti = true;
+                break;
+            }
+            segment.push(c);
+            cur = self.data.get(&c).and_then(|d| d.selected_parent);
+        }
+        if !uzanti {
+            // pt yeni zincirde degil -> reorg. Tam hesap.
+            return (Some(tip), self.total_order(graph));
+        }
+        // SAF UZANTI: onceki_sira tabanina pt-sonrasi bloklari ekle.
+        segment.reverse(); // genesis yonu: pt'nin cocugu ... tip
+        let mut order: Vec<VertexId> = onceki_sira.to_vec();
+        for c in segment {
+            if let Some(d) = self.data.get(&c) {
+                order.extend(order_mergeset_blue_first(
+                    graph,
+                    &d.mergeset_blues,
+                    &d.mergeset_reds,
+                ));
+            }
+            order.push(c);
+        }
+        (Some(tip), order)
+    }
 }
 
 /// Bir zincir bloğunun mergeset'ini MAVİ-ÖNCELİKLİ ama TOPOLOJİYİ KORUYAN
@@ -2891,6 +2955,80 @@ mod tests {
             assert_eq!(gd1.data(&id), gd2.data(&id));
         }
         assert_eq!(gd1.total_order(&g1), gd2.total_order(&g2));
+    }
+
+    #[test]
+    fn total_order_artimli_esittir_tam() {
+        // ARTIMLI == TAM: her vertex eklendikten sonra onbellekli artimli
+        // total_order, sifirdan hesaplanan tam total_order ile BIREBIR AYNI
+        // olmali. Hem saf-uzanti (lineer) hem reorg (paralel/genislik) yolunu
+        // tetikler. Node'un `durumu_yeniden_uygula` akisini birebir modeller.
+        fn senaryo_dogrula(vs: &[Vertex], etiket: &str) {
+            let mut g = Graph::devnet(NET);
+            let mut gd = Ghostdag::new_incremental(DEFAULT_K);
+            let mut onceki_tip: Option<VertexId> = None;
+            let mut onceki_sira: Vec<VertexId> = Vec::new();
+            for v in vs {
+                let id = *v.id();
+                g.insert_synced(v.clone()).unwrap();
+                gd.update_one(&g, &id);
+                let (yeni_tip, yeni_sira) =
+                    gd.total_order_artimli(&g, onceki_tip, &onceki_sira);
+                let tam = gd.total_order(&g);
+                assert_eq!(
+                    yeni_sira, tam,
+                    "[{etiket}] artimli != tam (vertex {id:?})"
+                );
+                assert_eq!(
+                    yeni_tip,
+                    gd.selected_tip(&g),
+                    "[{etiket}] onbellek tip yanlis"
+                );
+                onceki_tip = yeni_tip;
+                onceki_sira = yeni_sira;
+            }
+        }
+
+        // 1) Lineer zincir (saf-uzanti yolu).
+        {
+            let mut vs = Vec::new();
+            let gen = signed(1, vec![], 1000, b"lin-gen");
+            let mut parent = *gen.id();
+            vs.push(gen);
+            for i in 0..40u64 {
+                let v = signed(1, vec![parent], 1001 + i, format!("lin{i}").as_bytes());
+                parent = *v.id();
+                vs.push(v);
+            }
+            senaryo_dogrula(&vs, "lineer");
+        }
+
+        // 2) Katmanli DAG: her katta W paralel blok, hepsi onceki katin
+        //    tumunu ebeveyn alir -> secili tip degisir (reorg yolu tetiklenir).
+        {
+            let mut vs = Vec::new();
+            let gen = signed(1, vec![], 1000, b"dag-gen");
+            let gid = *gen.id();
+            vs.push(gen);
+            let mut prev: Vec<VertexId> = vec![gid];
+            let mut ts = 1001u64;
+            for kat in 0..8u64 {
+                let mut bu: Vec<VertexId> = Vec::new();
+                for j in 0..3u8 {
+                    let v = signed(
+                        j + 1,
+                        prev.clone(),
+                        ts,
+                        format!("k{kat}n{j}").as_bytes(),
+                    );
+                    ts += 1;
+                    bu.push(*v.id());
+                    vs.push(v);
+                }
+                prev = bu;
+            }
+            senaryo_dogrula(&vs, "katmanli-dag");
+        }
     }
 
     #[test]
