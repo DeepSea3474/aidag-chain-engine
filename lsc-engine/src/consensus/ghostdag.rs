@@ -727,6 +727,17 @@ impl Ghostdag {
 /// bozulur. Böylece saldırgan bir kırmızıyı id-grind ile dürüst bir mavinin
 /// ÖNÜNE sokamaz (naif "tüm maviler → tüm kırmızılar" ise kırmızı-ata/mavi-torun
 /// durumunda topolojiyi bozardı; bu yaklaşım bozmaz).
+///
+// PERF-TODO (dagitik TPS): rank hesabi her mergeset elemani icin `past(x)` (tum
+// ata BFS, O(n)) cagiriyor -> genis/dagitik DAG'da total_order O(n^2), reorg
+// basina -> O(n^3). Olcum: W=8 n=497'de 11 TPS (linear = 5822). Cozum: rank =
+// |past(x) ∩ mergeset|; mergeset KUCUK -> mavi-boncuk erisimiyle O(1)/O(log)
+// atalik. AMA torba SUPERKUME (yanlis-pozitif tolere) -> dogrudan kullanilamaz;
+// VERIFY-katmani gerek: torba=false kesin-red, torba=true adaylari
+// is_ancestor_bridged (bit-bit past-ozdes test edilmis) ile teyit. Ayni sorun
+// `topo_order_subset` (renklendirme yolu) icin de gecerli. Detay+plan: hafiza
+// notu "torba-completeness-bug". (torba yanlis-negatif bug'i 221a52d'de kapandi;
+// bu optimizasyon onun uzerine kurulur.)
 fn order_mergeset_blue_first(
     graph: &Graph,
     blues: &[VertexId],
@@ -1608,6 +1619,9 @@ fn blue_set_in_view(
 /// içindeki ata sayısı, VertexId). x, y'nin atası ve ikisi de alt-kümedeyse
 /// `|past(x) ∩ S| < |past(y) ∩ S|` (kesin) → ata daima önce; beraberlik id
 /// ile bozulur. (Adım 3a `topological_order`'ın alt-küme muadili.)
+// PERF-TODO (dagitik TPS): `past(x)` O(n) BFS -> renklendirme (update_one) genis
+// DAG'da O(n^2). Cozum = mavi-boncuk erisimi + verify-katmani. Bkz.
+// order_mergeset_blue_first ustundeki not + hafiza "torba-completeness-bug".
 fn topo_order_subset(graph: &Graph, subset: &BTreeSet<VertexId>) -> Vec<VertexId> {
     let mut v: Vec<VertexId> = subset.iter().copied().collect();
     v.sort_by_cached_key(|x| {
