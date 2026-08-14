@@ -411,6 +411,9 @@ impl Ghostdag {
                     self.iv = sp_tree_intervals_gapped(&self.data);
                     self.iv_next = self.iv.iter().map(|(k, &(s, _))| (*k, s)).collect();
                 }
+                // REBUILD oldu -> mevcut iv.start'lar degisti -> torba (start,id)
+                // ciftleri eskidi -> tazele (yoksa is_ancestor_torba yanlis-negatif).
+                self.torba_yeniden_kur(graph);
             }
             // INKREMENTAL TORBA: v'nin torbasi = sp-atasinin torbasi (miras) +
             // v'nin sp-olmayan parent'lari (kopruleri), sonra sikistir. iv hazir
@@ -458,9 +461,13 @@ impl Ghostdag {
             std::sync::atomic::Ordering::Relaxed,
         );
         let _ti = std::time::Instant::now();
-        if !self.assign_interval_incremental(&id, sp) && !self.lokal_rebuild_dene(&id, sp) {
-            self.iv = sp_tree_intervals_gapped(&self.data);
-            self.iv_next = self.iv.iter().map(|(k, &(s, _))| (*k, s)).collect();
+        if !self.assign_interval_incremental(&id, sp) {
+            if !self.lokal_rebuild_dene(&id, sp) {
+                self.iv = sp_tree_intervals_gapped(&self.data);
+                self.iv_next = self.iv.iter().map(|(k, &(s, _))| (*k, s)).collect();
+            }
+            // REBUILD oldu -> torba (start,id) start'lari eskidi -> tazele.
+            self.torba_yeniden_kur(graph);
         }
         U_IV.fetch_add(
             _ti.elapsed().as_nanos() as u64,
@@ -478,6 +485,20 @@ impl Ghostdag {
             _tu.elapsed().as_nanos() as u64,
             std::sync::atomic::Ordering::Relaxed,
         );
+    }
+
+    /// TORBA YENIDEN KUR: interval REBUILD (lokal veya tam) mevcut vertex'lerin
+    /// iv.start'larini DEGISTIRIR. Torba `(start,id)` ciftlerini saklar VE sikistirma
+    /// kararlari o anki iv'ye baglidir; bir rebuild hem start'lari ESKITIR hem de
+    /// eski iv ile alinmis drop kararlarini GECERSIZ kilar (dusuk marker geri
+    /// gelmez) -> `is_ancestor_torba` yanlis-negatif (genislik>=5 bug). Sadece
+    /// start tazelemek YETMEZ (icerik de bozulur). Bu yuzden rebuild olan HER
+    /// adimda torbayi STATIK dogru kurucuyla (torba_hesapla) GUNCEL iv uzerinden
+    /// bastan kurar -> incremental torba == static torba == past. Rebuild NADIR
+    /// (bosluk dolunca) -> amortize O(n) maliyet dusuk.
+    fn torba_yeniden_kur(&mut self, graph: &Graph) {
+        let topo = topological_order(graph);
+        self.torba = torba_hesapla(graph, &self.data, &topo, &self.iv);
     }
 
     fn torba_guncelle_tek(&mut self, graph: &Graph, v: &VertexId, sp: Option<VertexId>) {
@@ -2596,6 +2617,59 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn artimli_torba_past_ile_birebir_genis() {
+        // REGRESYON (torba completeness bug): artimli (update_one) torba, GENIS
+        // DAG'da (W=2..10) rebuild tetikleyecek kadar derin, past ile BIREBIR mi?
+        // Bug oncesi W>=5'te is_ancestor_torba yanlis-negatif veriyordu (rebuild
+        // torba'yi eskitiyordu -> torba_yeniden_kur ile duzeltildi).
+        for w in 2u8..=8 {
+            let mut g = Graph::devnet(NET);
+            let mut gd = Ghostdag::new_incremental(DEFAULT_K);
+            let gen = signed(1, vec![], 1000, b"gen");
+            let gid = *gen.id();
+            g.insert_synced(gen).unwrap();
+            gd.update_one(&g, &gid);
+            let mut prev = vec![gid];
+            let mut ts = 1001u64;
+            for _k in 0..6 {
+                let mut parents = prev.clone();
+                parents.sort_unstable();
+                let mut bu = Vec::new();
+                for j in 0..w {
+                    let v = signed(j + 1, parents.clone(), ts, b"x");
+                    ts += 1;
+                    let id = *v.id();
+                    g.insert_synced(v).unwrap();
+                    gd.update_one(&g, &id);
+                    bu.push(id);
+                }
+                prev = bu;
+            }
+            let ri = ReachIndex {
+                iv: &gd.iv,
+                bridges: None,
+                torba: Some(&gd.torba),
+            };
+            let ids: Vec<VertexId> = gd.data.keys().copied().collect();
+            // TORBA SOZLESMESI: SUPERKUME. Gercek atalik (past) DAIMA torba'da
+            // gorulmeli (yanlis-NEGATIF = bug). Yanlis-POZITIF tasarim geregi
+            // TOLERE edilir (tuketiciler saf-dogrulanmis atalikla teyit eder).
+            // Bug oncesi W>=5'te YANLIS-NEGATIF vardi (rebuild torba'yi eskitti).
+            let mut yanlis_neg = 0;
+            for a in &ids {
+                for b in &ids {
+                    let torba = ri.is_ancestor_torba(a, b);
+                    let gercek = super::past(&g, b).contains(a) && a != b;
+                    if gercek && !torba {
+                        yanlis_neg += 1;
+                    }
+                }
+            }
+            assert_eq!(yanlis_neg, 0, "W={w}: torba SUPERKUME ihlali (yanlis-negatif={yanlis_neg}) — gercek atalik torbada YOK");
         }
     }
 
