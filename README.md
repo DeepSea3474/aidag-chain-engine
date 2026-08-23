@@ -12,7 +12,7 @@
 
  
 
-![Tests](https://img.shields.io/badge/tests-330%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-354%20passing-brightgreen)
 
  
 
@@ -24,13 +24,14 @@
 
 AIDAG-Chain is a DAG-based Layer-1 blockchain. Blocks are vertices in a directed acyclic graph, ordered by **GHOSTDAG** consensus for parallel, high-throughput block production without a single-chain bottleneck. The execution layer is **EVM-compatible** (built on `revm`), so MetaMask, ethers.js, and Solidity contracts work against it out of the box.
 
-It is not a whitepaper — it runs. A live testnet where MetaMask sends real AIDAG transfers that settle on-chain, backed by **330 passing tests** across consensus, execution, and state.
+It is not a whitepaper — it runs. A live testnet where MetaMask sends real AIDAG transfers that settle on-chain, backed by **354 passing tests** across consensus, execution, and state.
 
 ## Verified, today
 
 - **Live testnet** — public JSON-RPC, faucet, and block explorer at [aidag-chain.com](https://aidag-chain.com).
+- **Live mainnet** — network_id 3474, pinned genesis, real allocations recorded on-chain. Independent security audit: pending.
 - **Real wallet transfers** — MetaMask sends value on AIDAG-Chain; balances update on-chain and are visible in the explorer.
-- **330 tests, green** — consensus, EVM execution, gas accounting, and registries — enforced through `fmt` / `clippy -D warnings` / `test` gates.
+- **354 tests, green** — consensus, EVM execution, gas accounting, and registries — enforced through `fmt` / `clippy -D warnings` / `test` gates.
 - **Consensus determinism, proven** — state is derived deterministically from GHOSTDAG total-order (not ingest order), so nodes converge to identical state regardless of the order they receive vertices. Verified by multi-node convergence, sync, and restart tests plus a randomized invariant that checks incremental state == full recompute.
 
 ## Core
@@ -42,7 +43,7 @@ It is not a whitepaper — it runs. A live testnet where MetaMask sends real AID
 
 ## Where it's going
 
-AIDAG-Chain is built as infrastructure for **verifiable digital records**: document authentication and institutional identity anchored on a public ledger, with a programmable EVM layer on top. The path runs from testnet to a multi-node network, an independent security audit, and mainnet — at which point the on-chain registries become production verification rails for institutions.
+AIDAG-Chain is built as infrastructure for **verifiable digital records**: document authentication and institutional identity anchored on a public ledger, with a programmable EVM layer on top. Mainnet is live with pinned genesis and real on-chain allocations; an independent security audit is the next milestone, after which the on-chain registries become production verification rails for institutions.
 
 ## Try it
 
@@ -64,7 +65,7 @@ Rust · `revm` · GHOSTDAG · ed25519 / secp256k1 · Next.js / TypeScript / Reac
 
 ## Status
 
-Testnet — mainnet follows an independent security audit.
+Testnet and mainnet both live (network_id 3474, pinned genesis). Independent security audit: pending.
 
 ## Links
 
