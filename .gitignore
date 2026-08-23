@@ -1,56 +1,46 @@
 
+!avm-sozlesmeler/BelgeDamgasi_sol_BelgeDamgasi.bin
+!avm-sozlesmeler/Kasa.bin
+!avm-sozlesmeler/Kasa.sol
+!avm-sozlesmeler/Token.bin
+!avm-sozlesmeler/Token.sol
+# AVM testlerine include_str! ile gomulu bytecode'lar: temiz CI checkout'unda da
+# ERC-20 uyumluluk testi icin gerekli (include_str! ile teste gomulu)
 # Editor/OS
+# Is/strateji belgeleri (repo disi)
+# Owner/faucet anahtari
 # Rust derleme ciktisi
 # Yerel ortam / secret dosyalari (asla commit edilmez)
+# derlenebilmesi icin izlenmeli (aksi halde .bin uretilmeden cargo test derlenmez).
 **/target
+*.GUVENLI-YEDEK
+*.YEDEK*
 *.env
 *.key
 *.log
 *.pem
+*.pyc
 *.swp
+*.yedek*
+*_On_Satis_*.md
+*anahtar*
 .DS_Store
 .env
+.on-satis-son-blok.json
 /target
 /tmp/
+ON_SATIS_PLANI.md
+__pycache__/
+aidag-data-*.GUVENLI-YEDEK
 aidag-data-*.log
+aidag-data-*.log.BOZUK*
+aidag-key-*
 aidag-key-*.bin
+aidag_inspect.txt
+avm-sozlesmeler/*.bin
+avm-sozlesmeler/token-cikti/
+faucet_anahtar.txt
 nodeA.log
 nodeB.log
 secrets/
 wallets/
-__pycache__/
-*.pyc
-aidag_inspect.txt
-*.YEDEK*
-aidag-data-*.GUVENLI-YEDEK
-*.GUVENLI-YEDEK
-aidag-key-*
-aidag-data-*.log
-aidag-data-*.log.BOZUK*
-
-# Is/strateji belgeleri (repo disi)
-ON_SATIS_PLANI.md
-*_On_Satis_*.md
-avm-sozlesmeler/*.bin
-
-# ERC-20 uyumluluk testi icin gerekli (include_str! ile teste gomulu)
-!avm-sozlesmeler/Token.bin
-!avm-sozlesmeler/Token.sol
-avm-sozlesmeler/token-cikti/
-
-# AVM testlerine include_str! ile gomulu bytecode'lar: temiz CI checkout'unda da
-# derlenebilmesi icin izlenmeli (aksi halde .bin uretilmeden cargo test derlenmez).
-!avm-sozlesmeler/BelgeDamgasi_sol_BelgeDamgasi.bin
-!avm-sozlesmeler/Kasa.sol
-!avm-sozlesmeler/Kasa.bin
-
-# Owner/faucet anahtari
-*anahtar*
-faucet_anahtar.txt
-*.yedek*
-soulware-models/
-.soulware.key
-.data/
-soulware-knowledge/kb.json
-.soulware-core.out
-soulware-knowledge/*.emb.json
