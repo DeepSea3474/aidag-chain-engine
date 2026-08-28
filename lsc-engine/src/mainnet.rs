@@ -40,7 +40,7 @@ pub const MAINNET_GENESIS_PAYLOAD: &[u8] = b"AIDAG-MAINNET-GENESIS-v1";
 /// bakiye/transfer gecerliligi ayrisir (konsensus bolunmesi). Bu yuzden koda
 /// pinli. Referans: 2026-08-26 00:00:00 UTC (on-satis penceresinden ~1 ay sonra;
 /// bkz. ON_SATIS_BASLANGIC). GERCEK LAUNCH'ta bu deger guncellenip yeniden derlenir.
-pub const MAINNET_VESTING_BASLANGIC: u64 = 1_787_702_400;
+pub const MAINNET_VESTING_BASLANGIC: u64 = 1_790_467_200;
 
 // === Asagidaki degerler `uret_mainnet_genesis` ciktisiyla doldurulur ===
 
