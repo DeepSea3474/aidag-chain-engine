@@ -1392,7 +1392,7 @@ mod tests {
     #[test]
     fn node_gercek_token_kabul_eder() {
         let mut node = NodeState::new_devnet(1);
-        let usdc = TokenKaydi::new([0xAA; 20], sym("USDC"));
+        let usdc = TokenKaydi::new([0xAA; 20], sym("TCOIN"));
         assert_eq!(node.token_kaydet(usdc), KayitSonucu::Kabul);
         assert_eq!(node.token_sayisi(), 1);
     }
@@ -1401,9 +1401,9 @@ mod tests {
     fn node_sahte_token_protokol_seviyesinde_reddeder() {
         let mut node = NodeState::new_devnet(1);
         // Gercek USDC kaydedilir
-        node.token_kaydet(TokenKaydi::new([0xAA; 20], sym("USDC")));
+        node.token_kaydet(TokenKaydi::new([0xAA; 20], sym("TCOIN")));
         // Sahte USDC: ayni sembol, farkli adres -> REDDEDILMELI
-        let sahte = TokenKaydi::new([0xBB; 20], sym("USDC"));
+        let sahte = TokenKaydi::new([0xBB; 20], sym("TCOIN"));
         assert!(matches!(
             node.token_kaydet(sahte),
             KayitSonucu::TaklitReddedildi { .. }
@@ -1415,10 +1415,10 @@ mod tests {
     #[test]
     fn node_taklit_sorgusu_calisir() {
         let mut node = NodeState::new_devnet(1);
-        node.token_kaydet(TokenKaydi::new([0xAA; 20], sym("USDC")));
-        let sahte = TokenKaydi::new([0xBB; 20], sym("USDC"));
+        node.token_kaydet(TokenKaydi::new([0xAA; 20], sym("TCOIN")));
+        let sahte = TokenKaydi::new([0xBB; 20], sym("TCOIN"));
         assert_eq!(node.token_taklit_mi(&sahte), Some([0xAA; 20]));
-        let temiz = TokenKaydi::new([0xCC; 20], sym("DAI"));
+        let temiz = TokenKaydi::new([0xCC; 20], sym("TDAI"));
         assert_eq!(node.token_taklit_mi(&temiz), None);
     }
 
@@ -1442,7 +1442,7 @@ mod tests {
         node.stake_ekle(StakeKaydi::new(kaydeden_adres, 1000));
 
         // tip=2 token vertex'i sk2 ile imzalanir -> kaydeden_adres ile eslesir
-        let payload = TokenKaydi::new([0xAA; 20], sym("USDC")).encode();
+        let payload = TokenKaydi::new([0xAA; 20], sym("TCOIN")).encode();
         let v = Vertex::new_signed(NET, vec![gid], payload, now, &sk2).expect("token vertex");
         assert!(matches!(
             node.ingest_networked(&wire::encode(&v), now),
@@ -1463,7 +1463,7 @@ mod tests {
 
         // sk3 STAKE ETMEDEN token kaydetmeye calisir
         let sk3 = SigningKey::from_bytes(&[3u8; 32]);
-        let payload = TokenKaydi::new([0xAA; 20], sym("USDC")).encode();
+        let payload = TokenKaydi::new([0xAA; 20], sym("TCOIN")).encode();
         let v = Vertex::new_signed(NET, vec![gid], payload, now, &sk3).expect("token vertex");
         node.ingest_networked(&wire::encode(&v), now);
 
@@ -1484,7 +1484,7 @@ mod tests {
         let sk_a = SigningKey::from_bytes(&[10u8; 32]);
         let adr_a = public_key_to_adres(&sk_a.verifying_key().to_bytes());
         node.stake_ekle(StakeKaydi::new(adr_a, 1000));
-        let p1 = TokenKaydi::new([0xAA; 20], sym("USDC")).encode();
+        let p1 = TokenKaydi::new([0xAA; 20], sym("TCOIN")).encode();
         let v1 = Vertex::new_signed(NET, vec![gid], p1, now, &sk_a).expect("v1");
         node.ingest_networked(&wire::encode(&v1), now);
         assert_eq!(node.token_sayisi(), 1);
@@ -1493,14 +1493,14 @@ mod tests {
         let sk_b = SigningKey::from_bytes(&[11u8; 32]);
         let adr_b = public_key_to_adres(&sk_b.verifying_key().to_bytes());
         node.stake_ekle(StakeKaydi::new(adr_b, 1000));
-        let p2 = TokenKaydi::new([0xBB; 20], sym("USDC")).encode();
+        let p2 = TokenKaydi::new([0xBB; 20], sym("TCOIN")).encode();
         let v2 = Vertex::new_signed(NET, vec![*v1.id()], p2, now + 1, &sk_b).expect("v2");
         node.ingest_networked(&wire::encode(&v2), now + 1);
 
         // KANIT: stake'li olsa bile TAKLIT reddedilir (sahte deftere girmez)
         assert_eq!(node.token_sayisi(), 1);
         assert_eq!(
-            node.token_taklit_mi(&TokenKaydi::new([0xBB; 20], sym("USDC"))),
+            node.token_taklit_mi(&TokenKaydi::new([0xBB; 20], sym("TCOIN"))),
             Some([0xAA; 20])
         );
     }
@@ -1532,7 +1532,7 @@ mod tests {
             "adr_a stake DAG'dan geldi"
         );
 
-        let p1 = TokenKaydi::new([0xAA; 20], sym("USDC")).encode();
+        let p1 = TokenKaydi::new([0xAA; 20], sym("TCOIN")).encode();
         let v1 = Vertex::new_signed(NET, vec![*vs_a.id()], p1, now + 1, &sk_a).expect("v1");
         node.ingest_networked(&wire::encode(&v1), now + 1);
         assert_eq!(node.token_sayisi(), 1);
@@ -1545,7 +1545,7 @@ mod tests {
         node.ingest_networked(&wire::encode(&vs_b), now + 2);
         assert_eq!(node.stake_miktari(&adr_b), 5000); // stake'i var
 
-        let p2 = TokenKaydi::new([0xBB; 20], sym("USDC")).encode(); // ayni sembol farkli adres = TAKLIT
+        let p2 = TokenKaydi::new([0xBB; 20], sym("TCOIN")).encode(); // ayni sembol farkli adres = TAKLIT
         let v2 = Vertex::new_signed(NET, vec![*vs_b.id()], p2, now + 3, &sk_b).expect("v2");
         node.ingest_networked(&wire::encode(&v2), now + 3);
 
