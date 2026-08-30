@@ -53,6 +53,10 @@ pub struct NodeState {
     eslestirme_registry: crate::registry::EslestirmeRegistry,
     /// On satis dagitim defteri: odeme_ref -> kayit (cifte dagitim engeli, seffaflik).
     on_satis_registry: crate::registry::OnSatisRegistry,
+    /// GUNLUK CAP takibi (owner custody): (gun_no, o_gunku_toplam_aidag).
+    /// gun_no = vertex zaman damgasi / 86400 -> deterministik, tum dugumlerde ayni.
+    /// tip=10 on-satis dagitimlari bu gun icinde ON_SATIS_GUNLUK_CAP'i asamaz.
+    on_satis_gunluk: (u64, u128),
     /// ON-SATIS TGE (Unix sn). Owner tip=15 ile ZINCIRDEN ayarlar; None ise pinli
     /// sabit (MAINNET_VESTING_BASLANGIC) kullanilir. DAG total_order'dan turer ->
     /// tum dugumler ayni; node yeniden baslatma gerekmez.
@@ -186,6 +190,7 @@ impl NodeState {
             kurum_registry: crate::registry::KurumRegistry::yeni(),
             eslestirme_registry: crate::registry::EslestirmeRegistry::yeni(),
             on_satis_registry: crate::registry::OnSatisRegistry::yeni(),
+            on_satis_gunluk: (0, 0),
             on_satis_tge: None,
             faucet_owner: None,
             faucet_verildi: std::collections::HashSet::new(),
@@ -1141,12 +1146,23 @@ impl NodeState {
                             .toplam_aidag()
                             .saturating_add(d.aidag)
                             <= crate::mainnet::ON_SATIS_FAZ1_TAVAN;
+                        // GUNLUK CAP: vertex zamanindan gun turet (deterministik).
+                        // Gun degistiyse sayac sifirdan; ayni gunse mevcut toplam.
+                        let bugun = zaman / 86400;
+                        let gunluk_mevcut = if self.on_satis_gunluk.0 == bugun {
+                            self.on_satis_gunluk.1
+                        } else {
+                            0
+                        };
+                        let gunluk_ok = gunluk_mevcut.saturating_add(d.aidag)
+                            <= crate::mainnet::ON_SATIS_GUNLUK_CAP;
                         // CIFTE DAGITIM ENGELI: bu odeme_ref daha once kullanildiysa HICBIR SEY YAPMA.
                         // (Owner yanlislikla ayni odemeyi iki kez gonderse bile cifte AIDAG gitmez.)
                         if !self.on_satis_registry.kullanilmis(d.odeme_ref)
                             && zaman_ok
                             && islem_ok
                             && tavan_ok
+                            && gunluk_ok
                         {
                             // YENI MODEL (tahsis kaydi): SATIS aninda AIDAG TRANSFER EDILMEZ.
                             // Token owner'da bekler; alici TGE sonrasi CLAIM (tip=11) ile ceker.
@@ -1163,6 +1179,8 @@ impl NodeState {
                                 d.lsc_hediye,
                                 zaman,
                             );
+                            // GUNLUK CAP sayacini guncelle (kayit basariliysa).
+                            self.on_satis_gunluk = (bugun, gunluk_mevcut.saturating_add(d.aidag));
                         }
                     }
                 }
@@ -2932,6 +2950,60 @@ mod tests {
     // istenen (buyuk) tutari DEGIL. "Gonderildi" yalani zincire yazilmaz.
     #[test]
 #[test]
+    fn gunluk_cap_asilinca_reddedilir() {
+        use crate::registry::public_key_to_adres;
+        use crate::tx::OnSatisDagitim;
+        let satis = crate::mainnet::ON_SATIS_BASLANGIC;
+        let gun = 86400u64;
+        let od = crate::genesis::ONDALIK;
+        let cap = crate::mainnet::ON_SATIS_GUNLUK_CAP; // 100_000 * od
+        let islem = crate::mainnet::ON_SATIS_ISLEM_UST_SINIR; // 50_000 * od
+
+        let mut node = NodeState::new_devnet(NET);
+        let (gen, gid) = genesis_bytes(1, satis);
+        node.ingest_networked(&gen, satis);
+
+        let osk = SigningKey::from_bytes(&[0x91u8; 32]);
+        let owner = public_key_to_adres(&osk.verifying_key().to_bytes());
+        node.faucet_owner_ayarla(owner);
+        node.test_bakiye_ekle(owner, 1_000_000 * od);
+        node.lsc_test_bakiye_ekle(owner, 1_000_000 * od);
+
+        let alici = [0x44u8; 20];
+        let mut son = gid;
+
+        // AYNI GUN: iki adet 50k dagitim -> toplam 100k = cap (ikisi de gecer)
+        let d1 = OnSatisDagitim::new(alici, alici, islem, 0, 601).encode();
+        let v1 = Vertex::new_signed(NET, vec![son], d1, satis, &osk).expect("d1");
+        node.ingest_networked(&wire::encode(&v1), satis);
+        son = *v1.id();
+        assert_eq!(node.on_satis_toplam_aidag(), islem, "1. dagitim gecti (50k)");
+
+        let d2 = OnSatisDagitim::new(alici, alici, islem, 0, 602).encode();
+        let v2 = Vertex::new_signed(NET, vec![son], d2, satis, &osk).expect("d2");
+        node.ingest_networked(&wire::encode(&v2), satis);
+        son = *v2.id();
+        assert_eq!(node.on_satis_toplam_aidag(), 2 * islem, "2. dagitim gecti (toplam 100k = cap)");
+
+        // 3. dagitim AYNI GUN -> gunluk cap asilir (150k > 100k), REDDEDILMELI
+        let d3 = OnSatisDagitim::new(alici, alici, islem, 0, 603).encode();
+        let v3 = Vertex::new_signed(NET, vec![son], d3, satis, &osk).expect("d3");
+        node.ingest_networked(&wire::encode(&v3), satis);
+        son = *v3.id();
+        assert_eq!(node.on_satis_toplam_aidag(), 2 * islem,
+            "3. dagitim gunluk cap'i asti -> REDDEDILMELI (toplam hala 100k)");
+        assert!(node.on_satis_sorgula(603).is_none(), "cap asan tahsis kaydedilmemeli");
+
+        // ERTESI GUN (zaman + 86400) -> gunluk sayac sifirlanir, tekrar gecer
+        let ertesi = satis + gun;
+        let d4 = OnSatisDagitim::new(alici, alici, islem, 0, 604).encode();
+        let v4 = Vertex::new_signed(NET, vec![son], d4, ertesi, &osk).expect("d4");
+        node.ingest_networked(&wire::encode(&v4), ertesi);
+        assert_eq!(node.on_satis_toplam_aidag(), 3 * islem,
+            "ertesi gun sayac sifirlandi -> 4. dagitim gecti (toplam 150k)");
+    }
+
+    #[test]
     fn on_satis_claim_vesting_ve_guvenlik() {
         use crate::registry::public_key_to_adres;
         use crate::tx::{ClaimTalebi, OnSatisDagitim};
@@ -3105,25 +3177,31 @@ mod tests {
         let mut ref_no = 100u64;
         for i in 0..13u8 {
             let alici = [0x30u8 + i; 20];
+            // GUNLUK CAP (100k) nedeniyle her dagitim AYRI GUNDE yapilir; boylece
+            // kumulatif tavan (630k) test edilirken gunluk sinira takilmaz.
+            let t = t0 + (i as u64) * 86400;
             let p = OnSatisDagitim::new(alici, alici, 48_000 * od, 0, ref_no).encode();
-            let v = Vertex::new_signed(NET, vec![parent], p, t0, &sk).expect("v");
-            node.ingest_networked(&wire::encode(&v), t0);
+            let v = Vertex::new_signed(NET, vec![parent], p, t, &sk).expect("v");
+            node.ingest_networked(&wire::encode(&v), t);
             parent = *v.id();
             ref_no += 1;
         }
         assert_eq!(node.on_satis_toplam_aidag(), 624_000 * od, "624k gecti");
         let alici_son = [0xAAu8; 20];
+        let t_son = t0 + 13 * 86400;
         let p = OnSatisDagitim::new(alici_son, alici_son, 7_000 * od, 0, ref_no).encode();
-        let v = Vertex::new_signed(NET, vec![parent], p, t0, &sk).expect("v");
-        node.ingest_networked(&wire::encode(&v), t0);
+        let v = Vertex::new_signed(NET, vec![parent], p, t_son, &sk).expect("v");
+        node.ingest_networked(&wire::encode(&v), t_son);
         // satista transfer yok; RED = tahsis kaydi olusmadi (toplam degismez)
         assert_eq!(node.on_satis_toplam_aidag(), 624_000 * od, "630k ustu RED: toplam degismedi");
         // 6k satisi 7k'nin uzerine ZINCIRLENIR (fork DEGIL). Kardes-uc kurulursa
         // ghostdag total_order tiebreak'ine gore biri beklemede kalabilir; satista
         // ardisik zincir (owner sirayla imzalar) belirlenimci sonucu garanti eder.
+        // 6k'yi 14. gune koy: gunluk cap sifirlanmis + zaman ileri (parent'tan sonra).
+        let t_6k = t0 + 14 * 86400;
         let p2 = OnSatisDagitim::new(alici_son, alici_son, 6_000 * od, 0, ref_no + 1).encode();
-        let v2 = Vertex::new_signed(NET, vec![*v.id()], p2, t0, &sk).expect("v2");
-        node.ingest_networked(&wire::encode(&v2), t0);
+        let v2 = Vertex::new_signed(NET, vec![*v.id()], p2, t_6k, &sk).expect("v2");
+        node.ingest_networked(&wire::encode(&v2), t_6k);
         // sinira kadar KABUL = tahsis kaydi olustu (bakiye degil, tahsis artar)
         assert_eq!(node.on_satis_toplam_aidag(), 630_000 * od, "sinira kadar KABUL: tam 630k tahsis");
     }
@@ -3296,12 +3374,15 @@ mod tests {
         let mut beklenen = 0u128;
         for i in 0..8u64 {
             let alici = [0x40u8 + i as u8; 20];
+            // GUNLUK CAP (100k) nedeniyle her satis AYRI GUNDE; bu test kayit/zincir
+            // olusumunu dogrular (gunluk cap'i degil), gune yaymak amaci bozmaz.
+            let t = t0 + i * 86400;
             // GERCEK YOL: parent = TUM uclar (faucet rpc.rs:528 ile ayni desen).
             let mut parents = node.tips();
             parents.sort();
             let p = OnSatisDagitim::new(alici, alici, 40_000 * od, 0, 200 + i).encode();
-            let v = Vertex::new_signed(NET, parents, p, t0, &sk).expect("satis");
-            node.ingest_networked(&wire::encode(&v), t0);
+            let v = Vertex::new_signed(NET, parents, p, t, &sk).expect("satis");
+            node.ingest_networked(&wire::encode(&v), t);
             beklenen += 40_000 * od;
 
             // (a) Her satis tum uclari merge etti -> TEK uc (zincir, fork degil).

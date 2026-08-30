@@ -301,3 +301,17 @@ pub const ON_SATIS_LSC_HAVUZ: u128 = 500_000 * crate::genesis::ONDALIK;
 /// 2.1B; bu dilim compute-ekonomisi için ayrılmış üst sınırdır (dağıtım tablosuyla
 /// uyumlanacak — ON_SATIS_LSC_HAVUZ gibi ikinci kez yaratılmamalı).
 pub const COMPUTE_REWARD_EMISYON_TAVAN: u128 = 210_000_000 * crate::genesis::ONDALIK;
+
+/// GUNLUK CAP (owner custody korumasi): 24 saatlik pencerede owner'in tip=10
+/// (on-satis) yoluyla dagitabilecegi TOPLAM AIDAG ust siniri. Islem-basi sinir
+/// (ON_SATIS_ISLEM_UST_SINIR) tek hamleyi sinirlar; bu ise gun icinde COK SAYIDA
+/// islemle tavana kadar bosaltmayi yavaslatir. Owner anahtari ele gecse bile bir
+/// gunde en fazla bu kadar AIDAG hareket eder -> fark etme/mudahale zamani kazandirir.
+/// Deterministik: pencere = vertex zaman damgasi / 86400 (tum dugumler ayni).
+pub const ON_SATIS_GUNLUK_CAP: u128 = 100_000 * crate::genesis::ONDALIK;
+
+// TGE geçmise-ayar korumasi (tip=15): owner TGE'yi ayarlarken, ayarlanan TGE
+// zamani MEVCUT zamandan (vertex damgasi) daha ERKEN olamaz. Ele gecen anahtar
+// "TGE dun oldu" deyip herkesin vesting kilidini erkenden acamaz. Kesin TGE
+// tarihi hala serbestce (ileriye) ayarlanabilir — bu sadece gecmise ayari engeller.
+// (Sabit degil, kural node.rs tip=15 yolunda uygulanir; burada yalnizca dokumante.)
