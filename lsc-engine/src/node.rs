@@ -1222,7 +1222,12 @@ impl NodeState {
             Some(&crate::tx::TX_TYPE_TGE_AYARLA) => {
                 if let Ok(t) = crate::tx::TgeAyarla::decode(payload) {
                     let cagiran = crate::registry::public_key_to_adres(signer);
-                    if self.faucet_owner == Some(cagiran) {
+                    // GECMISE-AYAR KORUMASI (custody): ayarlanan TGE, islemin geldigi
+                    // andan (vertex zamani) daha ERKEN olamaz. Ele gecen anahtar
+                    // "TGE dun oldu" deyip herkesin vesting kilidini erkenden acamaz.
+                    // Kesin TGE tarihi hala ILERIYE serbestce ayarlanabilir.
+                    // Deterministik: karsilastirma vertex zaman damgasiyla (tum dugumler ayni).
+                    if self.faucet_owner == Some(cagiran) && t.tge >= zaman {
                         self.on_satis_tge = Some(t.tge);
                     }
                 }
@@ -4087,6 +4092,44 @@ mod tests {
 
     // tip=15: ON-SATIS TGE owner tarafindan ZINCIRDEN ayarlanir; claim yeni TGE'yi
     // kullanir; owner-disi ayarlayamaz.
+    #[test]
+    fn tge_gecmise_ayarlanamaz() {
+        use crate::registry::public_key_to_adres;
+        use crate::tx::TgeAyarla;
+        let satis = crate::mainnet::ON_SATIS_BASLANGIC;
+
+        let mut node = NodeState::new_devnet(NET);
+        let (gen, gid) = genesis_bytes(1, satis);
+        node.ingest_networked(&gen, satis);
+
+        let osk = SigningKey::from_bytes(&[0x91u8; 32]);
+        let owner = public_key_to_adres(&osk.verifying_key().to_bytes());
+        node.faucet_owner_ayarla(owner);
+
+        // 1) OWNER ILERIYE ayarlar (satis + 30 gun) -> KABUL
+        let ileri = satis + 30 * 86400;
+        let v1 = Vertex::new_signed(NET, vec![gid], TgeAyarla::new(ileri).encode(), satis, &osk)
+            .expect("v1");
+        node.ingest_networked(&wire::encode(&v1), satis);
+        assert_eq!(node.on_satis_tge(), ileri, "owner TGE'yi ileriye ayarlayabilir");
+
+        // 2) OWNER GECMISE ayarlamaya calisir (satis - 10) -> RED (deger DEGISMEZ)
+        //    Ele gecen anahtar "TGE dun oldu" deyip kilitleri erkenden acamaz.
+        let gecmis = satis - 10;
+        let v2 = Vertex::new_signed(NET, vec![*v1.id()], TgeAyarla::new(gecmis).encode(), satis, &osk)
+            .expect("v2");
+        node.ingest_networked(&wire::encode(&v2), satis);
+        assert_eq!(node.on_satis_tge(), ileri,
+            "gecmise-ayar REDDEDILDI: TGE hala ileri degerde, degismedi");
+
+        // 3) BUGUNE (tam vertex zamani) ayar -> KABUL (>= zaman, sinirda gecerli)
+        let bugun = satis;
+        let v3 = Vertex::new_signed(NET, vec![*v2.id()], TgeAyarla::new(bugun).encode(), satis, &osk)
+            .expect("v3");
+        node.ingest_networked(&wire::encode(&v3), satis);
+        assert_eq!(node.on_satis_tge(), bugun, "tam bugune (>=zaman) ayar kabul");
+    }
+
     #[test]
     fn on_satis_tge_owner_ayarlar_claim_kullanir() {
         use crate::registry::public_key_to_adres;
