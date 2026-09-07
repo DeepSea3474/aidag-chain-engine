@@ -15,7 +15,11 @@
 import json, subprocess, urllib.request, os, time
 
 # --- Ayarlar (env ile override edilir) ---
-KURUCU   = os.environ.get("KURUCU", "0x57241fb83E0Ee8624399A9Ad0f4ccf2B1dE4e716").lower()
+# ODEME ADRESI: alicilarin USDT/BNB gonderdigi proje cuzdani. TEK KAYNAK:
+# /var/www/aidag-chain/public/on-satis.html icindeki ODEME_ADRESI ile AYNI olmali.
+# Farkli olursa odeme gelir ama izleyici gormez -> tahsis YAZILMAZ (2026-08-07'de
+# tam bu oldu: sayfa 0x0ffe4..., izleyici 0x5724... dinliyordu).
+KURUCU   = os.environ.get("KURUCU", "0x0ffe438e047dfb08c0c79aac9a63ea32d49a272c").lower()
 NODE_RPC = os.environ.get("NODE_RPC", "http://127.0.0.1:8645")
 NET      = os.environ.get("NET", "1")                 # 1=devnet, 3474=mainnet
 KEY      = os.environ.get("KEY", "/root/aidag-lsc/aidag-kurucu.key")
@@ -238,8 +242,11 @@ def tahsis_kaydet(alici, aidag, ref):
         return True  # zaten var (cifte-tahsis / yeniden calisma guvenli)
     tips = ",".join(http_json(f"{NODE_RPC}/tips").get("tips", [])) or "-"
     now = str(int(time.time()))
+    # ARAC IMZASI: <key> <net> <alici> <odeme_adresi> <aidag> <lsc> <ref> <ts> <tips>
+    # odeme_adresi = odemeyi YAPAN BSC adresi. Otomatik akista bu, tahsisin
+    # yazildigi adresle AYNI (odeyen = alici) -> ikisine de 'alici' verilir.
     hexo = subprocess.check_output(
-        [BIN, KEY, NET, alici, str(aidag), str(LSC_GIFT), str(ref), now, tips]
+        [BIN, KEY, NET, alici, alici, str(aidag), str(LSC_GIFT), str(ref), now, tips]
     ).decode().strip()
     http_json(f"{NODE_RPC}/submit",
               data=json.dumps({"hex": hexo}).encode(),

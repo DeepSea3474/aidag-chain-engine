@@ -56,6 +56,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::dag::graph::Graph;
 use crate::dag::vertex::VertexId;
+use crate::mainnet;
 
 use super::{past, topological_order, topological_order_eksik_hizli};
 
@@ -144,6 +145,14 @@ impl Weigher for CommitteeWeight {
         }
         weigher_fingerprint(b"committee", &state)
     }
+}
+
+/// Mainnet PoA komitesi: yalnizca kurucu pubkey yetkili uretici. blue-work
+/// sisirme saldirisini engeller (komite disi vertex agirlik 0). Ileride PoS
+/// (stake tabanli) genisletilir; su an tek uyeli (kurucu) baslangic komitesi.
+pub fn mainnet_komite() -> CommitteeWeight {
+    let members: BTreeSet<[u8; 32]> = mainnet::komite_uyeleri().into_iter().collect();
+    CommitteeWeight { members }
 }
 
 /// Bir vertex'in GHOSTDAG renklendirme verisi. `mergeset_blues`/`reds`

@@ -88,6 +88,7 @@
       <p class="note" data-i="addrNote"></p>
       <button id="baslat" class="btn" data-i="start"></button>
       <p class="note" id="yukdurum" data-i="willDownload" style="margin-top:10px"></p>
+      <div id="hata" class="hidden" style="margin-top:12px;padding:12px 14px;border-radius:10px;background:#2a1620;border:1px solid #5a2a3a;color:#ffb4b4;font-size:.9rem;line-height:1.5"></div>
     </div>
   </div>
 
@@ -141,6 +142,11 @@ const I18N = {
   submitted:(id,s,r)=>"📤 job #"+id+": "+s+(r?" 💰":""), stopped:"⏸ stopped", paused:"paused", idle:"idle",
   badAddr:"Enter a valid address (0x + 40 hex).", thinking:"…", thinking2:"KUBRA is thinking…", startFail:e=>"⚠ "+e, connErr:"connection error",
   mobTitle:"📱 This device is perfect for USING KUBRA", mobText:"Running the AI locally needs a computer with a GPU (phones are too small — they'd freeze). From your phone, chat with KUBRA over the network instead:", mobAsk:"💬 Chat with KUBRA →", mobPc:"To contribute & earn, open this page on a PC with a GPU.",
+  gpuTitle:"🧩 Turn on WebGPU to run KUBRA", gpuText:"Your computer likely has a GPU — but your browser isn't exposing <b>WebGPU</b> (needed to run KUBRA locally). Use the latest <b>Google Chrome</b> or <b>Microsoft Edge</b> and reopen this page. Tip: open <code>chrome://gpu</code> — it should say “WebGPU: Hardware accelerated”. Meanwhile, chat with KUBRA over the network:",
+  cdnFail:"Couldn't load the KUBRA engine — a CDN may be blocked (ad-blocker, firewall, or network). Try again, disable your ad-blocker for this page, or switch network.",
+  startTips:"Tips: use Chrome/Edge · disable ad-blocker for this page · keep the tab open while the model downloads (first time only).",
+  earnHint:"💡 You're chatting locally (free & private). To also EARN LSC, reload and paste your AIDAG/MetaMask address before Start.",
+  welcomeBack:"✅ Welcome back — this computer is remembered (same wallet). Click Start to resume earning.",
  },
  tr: {
   title:"KUBRA ile Sohbet Et & Katkı Ver",
@@ -158,6 +164,11 @@ const I18N = {
   submitted:(id,s,r)=>"📤 iş #"+id+": "+s+(r?" 💰":""), stopped:"⏸ durduruldu", paused:"duraklatıldı", idle:"boşta",
   badAddr:"Geçerli adres gir (0x + 40 hex).", thinking:"…", thinking2:"KUBRA düşünüyor…", startFail:e=>"⚠ "+e, connErr:"bağlantı hatası",
   mobTitle:"📱 Bu cihaz KUBRA'yı KULLANMAK için ideal", mobText:"AI'ı yerel çalıştırmak GPU'lu bir bilgisayar ister (telefonlar çok küçük — donarlar). Telefonundan KUBRA ile ağ üzerinden sohbet et:", mobAsk:"💬 KUBRA ile Sohbet Et →", mobPc:"Katkı verip kazanmak için bu sayfayı GPU'lu bir bilgisayarda aç.",
+  gpuTitle:"🧩 KUBRA'yı çalıştırmak için WebGPU'yu aç", gpuText:"Bilgisayarında büyük ihtimalle GPU var — ama tarayıcın <b>WebGPU</b>'yu açmıyor (KUBRA'yı yerel çalıştırmak için gerekli). Güncel <b>Google Chrome</b> ya da <b>Microsoft Edge</b> kullan ve sayfayı yeniden aç. İpucu: <code>chrome://gpu</code> adresini aç — “WebGPU: Hardware accelerated” yazmalı. Bu arada KUBRA ile ağ üzerinden sohbet edebilirsin:",
+  cdnFail:"KUBRA motoru yüklenemedi — bir CDN engellenmiş olabilir (reklam-engelleyici, güvenlik duvarı ya da ağ). Tekrar dene, bu sayfa için reklam-engelleyiciyi kapat ya da ağını değiştir.",
+  startTips:"İpuçları: Chrome/Edge kullan · bu sayfa için reklam-engelleyiciyi kapat · model inerken sekmeyi açık tut (sadece ilk sefer).",
+  earnHint:"💡 Yerel sohbet ediyorsun (ücretsiz & gizli). Ayrıca LSC KAZANMAK için sayfayı yenile ve Başla'dan önce AIDAG/MetaMask adresini yapıştır.",
+  welcomeBack:"✅ Tekrar hoş geldin — bu bilgisayar hatırlandı (aynı cüzdan). Kazanmayı sürdürmek için Başla'ya bas.",
  }
 };
 let L = localStorage.getItem("kubra_lang") || "en";
@@ -170,6 +181,7 @@ function setLang(lang){
 }
 
 const COORD = window.KUBRA_COORD || "https://aidag-chain.com/kubra-api";
+const BRAIN = window.KUBRA_BRAIN || "https://aidag-chain.com/kubra-brain";  // grounding (kaynak) ucu
 const MODEL = "Qwen2.5-1.5B-Instruct-q4f16_1-MLC";
 const POLL_MS = 4000;
 const $ = id => document.getElementById(id);
@@ -189,12 +201,47 @@ function papatyaHTML(){
 
 async function motorYukle(){
   $("yukdurum").textContent = t("loadingPct")(0);
-  const webllm = await import("https://esm.run/@mlc-ai/web-llm");
+  // CDN yedekli import — biri engelliyse (reklam-engelleyici/ağ/ülke) diğerini dener.
+  const CDN = [
+    "https://esm.run/@mlc-ai/web-llm",
+    "https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm/+esm",
+    "https://unpkg.com/@mlc-ai/web-llm?module"
+  ];
+  let webllm=null;
+  for(const url of CDN){ try { webllm = await import(url); if(webllm) break; } catch(e){ /* sonraki CDN'i dene */ } }
+  if(!webllm) throw new Error(t("cdnFail"));
   engine = await webllm.CreateMLCEngine(MODEL, { initProgressCallback:p=>{ $("yukdurum").textContent=t("loadingPct")(Math.round((p.progress||0)*100)); } });
 }
+let gecmis = [];  // sohbet hafızası: {role, content}
+// Sunucudan ilgili kaynağı çek (grounding) — küçük modelin uydurmasını engeller.
+async function kaynakCek(prompt){
+  try {
+    const r = await fetch(BRAIN+"/retrieve",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompt})});
+    const d = await r.json();
+    if(d&&d.pasajlar&&d.pasajlar.length) return d.pasajlar.map(p=>"• "+p.baslik+(p.metin?(": "+p.metin):"")).join("\n");
+  } catch(e){ /* kaynak yoksa yine de dene */ }
+  return "";
+}
+function sistemMetni(baglam){
+  return baglam
+    ? "Türkçe, kısa ve net cevap ver. Öncelikle aşağıdaki KAYNAKLARA dayan. Kaynakta olmayan bir olguyu UYDURMA; emin değilsen 'bundan emin değilim' de.\n\nKAYNAKLAR:\n"+baglam
+    : "Türkçe, kısa ve net cevap ver. Emin olmadığın olguları uydurma; bilmiyorsan bilmediğini açıkça söyle.";
+}
+// KATKI/iş cevabı — durumsuz (geçmiş yok), grounded.
 async function uret(prompt){
-  const r = await engine.chat.completions.create({ messages:[{role:"user",content:prompt}], temperature:0.3 });
+  const baglam = await kaynakCek(prompt);
+  const r = await engine.chat.completions.create({ messages:[{role:"system",content:sistemMetni(baglam)},{role:"user",content:prompt}], temperature:0.2 });
   return (r.choices?.[0]?.message?.content||"").trim();
+}
+// SOHBET cevabı — geçmişi hatırlar, grounded.
+async function uretSohbet(prompt){
+  const baglam = await kaynakCek(prompt);
+  const messages = [{role:"system",content:sistemMetni(baglam)}, ...gecmis.slice(-6), {role:"user",content:prompt}];
+  const r = await engine.chat.completions.create({ messages, temperature:0.2 });
+  const cevap = (r.choices?.[0]?.message?.content||"").trim();
+  gecmis.push({role:"user",content:prompt},{role:"assistant",content:cevap});
+  if(gecmis.length>12) gecmis = gecmis.slice(-12);   // son ~6 turu tut
+  return cevap;
 }
 
 // ── YEREL SOHBET (tarayıcıda, anında) ──
@@ -203,7 +250,7 @@ async function sohbetGonder(){
   $("soru").value=""; mesgul=true; $("gonder").disabled=true;
   ekle("soru", q);
   const c = ekle("cevap", ""); c.innerHTML = papatyaHTML();
-  try { c.textContent = await uret(q); } catch(e){ c.textContent = t("connErr"); }
+  try { c.textContent = await uretSohbet(q); } catch(e){ c.textContent = t("connErr"); }
   mesgul=false; $("gonder").disabled=false; $("soru").focus();
 }
 
@@ -226,37 +273,59 @@ async function katkiAdim(){
   } catch(e){ mesgul=false; durum(t("connErr"),""); }
 }
 
+function hataGoster(m){ const h=$("hata"); h.innerHTML=m; h.classList.remove("hidden"); }
+function hataGizle(){ $("hata").classList.add("hidden"); }
 $("baslat").onclick = async () => {
+  hataGizle();
   const a=$("adres").value.trim().toLowerCase();
-  if(!/^0x[0-9a-f]{40}$/.test(a)){ alert(t("badAddr")); return; }
-  cuzdan=a; $("baslat").disabled=true;
+  const gecerli=/^0x[0-9a-f]{40}$/.test(a);
+  if(a && !gecerli){ hataGoster(t("badAddr")); return; }   // adres GİRİLDİYSE geçerli olmalı
+  cuzdan = gecerli ? a : null;                             // adres YOKSA: sohbet-only (buton yine çalışır)
+  if(cuzdan) localStorage.setItem("kubra_adres", cuzdan);  // BU BİLGİSAYARI HATIRLA → sonraki açılışta otomatik tanınır
+  $("baslat").disabled=true;
   try {
-    await j("/worker/register",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet:cuzdan})});
-    await motorYukle();
-    // model hazır → SOHBET + KATKI aç
+    if(cuzdan){ try{ await j("/worker/register",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet:cuzdan})}); }catch(e){} }
+    await motorYukle();                                    // asıl kritik adım — modeli yükle
     $("giris").classList.add("hidden");
     $("sohbet").classList.remove("hidden");
-    $("katki").classList.remove("hidden");
     durum(t("idle"),"on");
     ekle("cevap", t("ready"));
-    aktif=true; dongu=setInterval(katkiAdim,POLL_MS); seviyeGuncelle();
+    if(cuzdan){                                            // adres var → arka plan katkı + kazanç aç
+      $("katki").classList.remove("hidden");
+      aktif=true; dongu=setInterval(katkiAdim,POLL_MS); seviyeGuncelle();
+    } else {                                               // adres yok → sadece yerel sohbet + kazanç ipucu
+      ekle("cevap", t("earnHint"));
+    }
     $("soru").focus();
-  } catch(e){ $("yukdurum").textContent=t("startFail")(e.message); $("baslat").disabled=false; }
+  } catch(e){
+    $("yukdurum").textContent="";
+    hataGoster(t("startFail")(e.message)+"<br><span style='color:#93a1b3'>"+t("startTips")+"</span>");
+    $("baslat").disabled=false;
+  }
 };
 $("gonder").onclick = sohbetGonder;
 $("soru")?.addEventListener("keydown", e=>{ if(e.key==="Enter") sohbetGonder(); });
 $("durdur").onclick = () => { aktif=false; clearInterval(dongu); durum(t("paused")); log(t("stopped")); };
 setLang(L);
 
-// ── CİHAZ KAPISI: model çalıştırmak GPU'lu bilgisayar ister. Telefon/GPU'suz → ağ sohbeti ──
+// ── CİHAZ KONTROLÜ: WebGPU (Chrome/Edge) gerekli. "GPU yok" demek YANLIŞ — asıl sebep tarayıcı. ──
 const mobil = /Android|iPhone|iPad|iPod|Mobile|Silk|Kindle|Opera Mini/i.test(navigator.userAgent);
-if (mobil || !navigator.gpu) {
-  $("giris").innerHTML =
-    '<b data-i="mobTitle">'+t("mobTitle")+'</b>'+
-    '<p class="note" data-i="mobText" style="margin:8px 0 14px">'+t("mobText")+'</p>'+
-    '<a href="/ask" class="btn" data-i="mobAsk" style="text-decoration:none;display:inline-block">'+t("mobAsk")+'</a>'+
-    '<p class="note" data-i="mobPc" style="margin-top:12px">'+t("mobPc")+'</p>';
+async function webgpuHazir(){
+  if(!navigator.gpu) return false;
+  try { return !!(await navigator.gpu.requestAdapter()); } catch(e){ return false; }
 }
+function yardimKart(baslik, metin){
+  return '<b>'+baslik+'</b>'+
+    '<p class="note" style="margin:8px 0 14px">'+metin+'</p>'+
+    '<a href="/ask" class="btn" style="text-decoration:none;display:inline-block">'+t("mobAsk")+'</a>';
+}
+(async ()=>{
+  if (mobil){ $("giris").innerHTML = yardimKart(t("mobTitle"), t("mobText")) + '<p class="note" style="margin-top:12px">'+t("mobPc")+'</p>'; return; }
+  if (!(await webgpuHazir())){ $("giris").innerHTML = yardimKart(t("gpuTitle"), t("gpuText")); return; }
+  // WebGPU hazır → giriş kartı kalır. Kayıtlı adresi doldur (bu bilgisayarı hatırla → otomatik tanınır).
+  const kayitliAdres = localStorage.getItem("kubra_adres");
+  if (kayitliAdres && $("adres")){ $("adres").value = kayitliAdres; $("yukdurum").textContent = t("welcomeBack"); }
+})();
 </script>
 </body>
 </html>

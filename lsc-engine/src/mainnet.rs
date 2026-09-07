@@ -48,6 +48,16 @@ pub const MAINNET_VESTING_BASLANGIC: u64 = 1_790_467_200;
 pub const MAINNET_KURUCU_PUBKEY_HEX: &str =
     "cece417af631d437df7adfe7afca45b4745b9958ee446df3062c1c008c2e1c73";
 
+/// PoA komite uyesi node pubkey'leri (kurucu altyapisi). Bu anahtarlar canli
+/// mainnet zincirine blok uretmis YETKILI ureticilerdir. Komite disi (dis
+/// saldirgan) blok agirligi 0 kalir -> blue-work sisirme engellenir.
+/// 40001 node (462a78): canli zincire ~8 blok uretti.
+/// 40011 node (9329e6): rölay/dinleme (henuz uretmedi, ama yetkili altyapi).
+pub const MAINNET_KOMITE_NODE40001_HEX: &str =
+    "462a7884e6d630069ca767ee8dbf849d4e2ba5740046855868f716e37a0e7427";
+pub const MAINNET_KOMITE_NODE40011_HEX: &str =
+    "9329e607f8794c49446a02b86ad87cbadc7365293bec3c49fa720816f5c18416";
+
 /// Kurucu kanonik adresi — 20 bayt hex (blake3(pubkey)[..20]).
 pub const MAINNET_KURUCU_ADRES_HEX: &str = "11c1906e07508e0b83ef4afa042879281e196b9f";
 
@@ -83,6 +93,34 @@ pub fn kurucu_adres() -> [u8; 20] {
     let mut a = [0u8; 20];
     a.copy_from_slice(&b);
     a
+}
+
+/// Kurucu ed25519 public key — [u8;32]. Sabit hex'ten cozer (panic yok:
+/// derleme-zamani sabit; gecersizse acikca DUR). PoA komite uyeligi icin.
+pub fn kurucu_pubkey() -> [u8; 32] {
+    let b = hex_decode(MAINNET_KURUCU_PUBKEY_HEX).expect("MAINNET_KURUCU_PUBKEY_HEX gecersiz hex");
+    let mut a = [0u8; 32];
+    a.copy_from_slice(&b);
+    a
+}
+
+/// PoA komite uyelerinin pubkey listesi: kurucu + yetkili altyapi node'lari.
+/// Canli zincire blok uretmis TUM yetkili anahtarlar burada olmali (yoksa o
+/// bloklar work=0 alir, total_order kayar). Dis saldirgan bu listede olmadigi
+/// icin blue-work sisiremez. Ileride PoS'a genisletilir (stake tabanli uyelik).
+pub fn komite_uyeleri() -> Vec<[u8; 32]> {
+    let mut out = Vec::new();
+    for h in [
+        MAINNET_KURUCU_PUBKEY_HEX,
+        MAINNET_KOMITE_NODE40001_HEX,
+        MAINNET_KOMITE_NODE40011_HEX,
+    ] {
+        let b = hex_decode(h).expect("komite pubkey gecersiz hex");
+        let mut a = [0u8; 32];
+        a.copy_from_slice(&b);
+        out.push(a);
+    }
+    out
 }
 
 /// PINLI mainnet dagitim adresleri — [u8;20] dizisi (genesis::planla sirasi).

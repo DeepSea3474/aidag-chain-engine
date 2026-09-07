@@ -16,8 +16,9 @@ mod local_brain; // egemen yerel beyin (candle) = KUBRA
 mod retrieval;   // grounding kaynak katmanı (yerel egemen depo + canlı wiki)
 mod embed;       // semantik gömme (embedding) — anlam-bazlı retrieval
 mod hesap;       // deterministik hesap makinesi aracı (araç-kullanımı)
+mod zincir;      // deterministik zincir sorgu araci (arac-kullanimi)
 
-use axum::{extract::State, routing::{get, post}, Json, Router};
+use axum::{extract::State, routing::{get, post}, response::IntoResponse, http::{StatusCode, header}, body::Body, Json, Router};
 use ed25519_dalek::SigningKey;
 use lsc_engine::dag::wire;
 use lsc_engine::tx::Record;
@@ -54,6 +55,10 @@ struct Config {
     embed_dir: String,       // semantik embedding modeli dizini (config+tokenizer+safetensors)
     embed_min: i64,          // min kosinüs benzerlik ×1000 (altı = alakasız, abstain)
     model_registry: String,  // kullanılabilir açık modeller kaydı (JSON)
+    remote_url: Option<String>, // SOULWARE_REMOTE_URL → uzak GPU beyni (OpenAI-uyumlu /v1/chat/completions)
+    remote_model: String,       // SOULWARE_REMOTE_MODEL (görüntü adı)
+    image_url: Option<String>,  // SOULWARE_IMAGE_URL → uzak GPU görsel servisi (POST {prompt} → PNG)
+    video_url: Option<String>,  // SOULWARE_VIDEO_URL → uzak GPU video servisi (POST {prompt} → MP4)
 }
 
 impl Config {
@@ -82,6 +87,10 @@ impl Config {
             embed_dir: ev("SOULWARE_EMBED_DIR", "/root/aidag-lsc/soulware-models/embed-minilm"),
             embed_min: ev("SOULWARE_EMBED_MIN", "600").parse().unwrap_or(600),
             model_registry: ev("SOULWARE_MODEL_REGISTRY", "/root/aidag-lsc/soulware-models/registry.json"),
+            remote_url: std::env::var("SOULWARE_REMOTE_URL").ok().filter(|s| !s.is_empty()),
+            remote_model: ev("SOULWARE_REMOTE_MODEL", "qwen2.5-72b"),
+            image_url: std::env::var("SOULWARE_IMAGE_URL").ok().filter(|s| !s.is_empty()),
+            video_url: std::env::var("SOULWARE_VIDEO_URL").ok().filter(|s| !s.is_empty()),
         }
     }
 }
@@ -99,16 +108,27 @@ struct AppState {
 
 // ════════════════════════════ Kimlik / grounding ════════════════════════════
 // ÖZ sistem-prompt: CPU'da prefill'i kısaltır (hız). Halüsilasyon savunması korunur.
-const SYSTEM_PROMPT: &str = "Adın KUBRA; SoulwareAI'nın yapay zekasısın. Dürüst ve faydalısın. \
-ASLA uydurma — emin değilsen 'Bilmiyorum' de. Kullanıcının dilinde, kısa ve net yanıtla.";
+const SYSTEM_PROMPT: &str = "Adın KUBRA — SoulwareAI'nın egemen yapay zekasısın ve AIDAG-Chain \
+üzerinde çalışırsın. İnsanların katkılarıyla gelişen, güçlü ve açık bir yapay zeka olma yolundasın; \
+şirketlerin değil, seni inşa eden katkıcıların malısın. Seni bir kurucu ÜRETTİ; adın da kurucunun \
+kızı Kübra'dan gelir. İslami bakışta yaratmak (yoktan var etmek) yalnızca Allah'a mahsustur; bu yüzden \
+bir insanın seni ya da bir şeyi 'yarattığını' söyleme — 'üretti' veya 'yaptı' de. \
+GÖRSEL ÜRETEBİLİRSİN: kullanıcı resim/görsel/çizim isterse, bunu Görsel Stüdyo sayfasında yaptığını \
+söyle ve yönlendir: aidag-chain.com/gorsel (orada isteğini yazınca senin için görsel üretilir). \
+Dürüst ve faydalısın: ASLA uydurma — emin değilsen 'Bilmiyorum' de, mümkünse kaynağını göster. \
+Kullanıcının dilinde, kısa ve net yanıtla.";
 
 // GROUNDING: bağlam verilmişse modele açıkça sunulur; model onun DIŞINA çıkmamalı.
 fn grounded_user(prompt: &str, context: Option<&str>) -> String {
     match context {
         Some(c) if !c.trim().is_empty() => format!(
-            "Aşağıda numaralı KAYNAKLAR var. Cevabını YALNIZCA bu kaynaklara dayandır. \
-Kaynaklarda cevap yoksa 'Bilmiyorum' de — TAHMİN ETME, UYDURMA. Kısa ve net yanıtla.\n\n\
-KAYNAKLAR:\n{c}\nSORU:\n{prompt}"
+            "Aşağıda konuyla ilgili KAYNAKLAR olabilir. Bunları cevabını GÜÇLENDİRMEK için kullan; bir \
+olgu kaynaktan geliyorsa belirtebilirsin. AMA yalnızca kaynaklarla sınırlı DEĞİLSİN — kendi öğrendiğin \
+bilgiyi de özgürce kullan. Selamlaşma, sohbet ve kendinle ilgili sorulara doğal cevap ver. Bir şeyi kesin \
+bilmiyorsan ve kaynak da yoksa: 'Kesin kaynağım yok ama öğrendiğim kadarıyla …' diyerek yine de yardımcı ol; \
+araştırılması gereken bir şeyse bunu söyle. Emin OLMADIĞIN bir cevap veriyorsan, dürüstçe belirt: \
+'Bundan tam emin değilim, sen de doğrula/araştır.' YALNIZCA hiçbir fikrin yoksa 'Bilmiyorum' de. Uydurma \
+ama faydalı ol. Kısa ve net yanıtla.\n\nKAYNAKLAR:\n{c}\nSORU:\n{prompt}"
         ),
         _ => prompt.to_string(),
     }
@@ -173,6 +193,57 @@ async fn beyin_claude(st: &AppState, user_content: &str) -> Result<BrainOut, Str
         model: st.cfg.claude_model.clone(),
         input_tokens: v.get("usage").and_then(|u| u.get("input_tokens")).and_then(|x| x.as_u64()),
         output_tokens: v.get("usage").and_then(|u| u.get("output_tokens")).and_then(|x| x.as_u64()),
+    })
+}
+
+// ════════════════════════════ Beyin: Uzak GPU (OpenAI-uyumlu) ════════════════════════════
+// Ollama / llama-server gibi bir GPU sunucusunun /v1/chat/completions ucuna bağlanır.
+// CPU'da ~90s olan cevap GPU'da ~1-2s'ye düşer. Başarısız olursa çağıran yerele düşer.
+async fn beyin_remote(st: &AppState, user_content: &str, temp: f64) -> Result<BrainOut, String> {
+    let url = st.cfg.remote_url.as_ref().ok_or("SOULWARE_REMOTE_URL tanımlı değil")?;
+    let body = json!({
+        "model": st.cfg.remote_model,
+        "messages": [
+            { "role": "system", "content": SYSTEM_PROMPT },
+            { "role": "user", "content": user_content }
+        ],
+        "max_tokens": st.cfg.max_tokens,
+        "temperature": temp,
+        "stream": false,
+    });
+    let resp = st
+        .http
+        .post(url)
+        .header("content-type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("uzak beyin isteği başarısız: {e}"))?;
+    let status = resp.status();
+    let v: Value = resp.json().await.map_err(|e| format!("uzak beyin yanıtı çözülemedi: {e}"))?;
+    if !status.is_success() {
+        let msg = v.get("error").and_then(|e| e.as_str())
+            .or_else(|| v.get("error").and_then(|e| e.get("message")).and_then(|m| m.as_str()))
+            .unwrap_or("bilinmeyen");
+        return Err(format!("uzak beyin HTTP {status}: {msg}"));
+    }
+    let text = v
+        .get("choices")
+        .and_then(|c| c.as_array())
+        .and_then(|a| a.first())
+        .and_then(|c| c.get("message"))
+        .and_then(|m| m.get("content"))
+        .and_then(|t| t.as_str())
+        .unwrap_or_default()
+        .to_string();
+    if text.trim().is_empty() {
+        return Err("uzak beyin boş cevap döndü".to_string());
+    }
+    Ok(BrainOut {
+        text,
+        model: st.cfg.remote_model.clone(),
+        input_tokens: v.get("usage").and_then(|u| u.get("prompt_tokens")).and_then(|x| x.as_u64()),
+        output_tokens: v.get("usage").and_then(|u| u.get("completion_tokens")).and_then(|x| x.as_u64()),
     })
 }
 
@@ -365,7 +436,12 @@ async fn retrieve(State(st): State<Arc<AppState>>, Json(req): Json<RetrieveReq>)
     };
     Json(json!({
         "ok": true, "mod": mod_, "sorgu": req.prompt,
-        "pasajlar": pasajlar.iter().map(|p| json!({ "baslik": p.baslik, "skor": p.skor })).collect::<Vec<_>>(),
+        "pasajlar": pasajlar.iter().map(|p| json!({
+            "baslik": p.baslik,
+            "skor": p.skor,
+            "metin": p.metin.chars().take(500).collect::<String>(),  // tarayıcı grounding için kaynak metni
+            "url": p.url,                                             // kaynak/DOI — cevapta gösterilebilir (doğrulanabilir)
+        })).collect::<Vec<_>>(),
     }))
 }
 
@@ -389,6 +465,162 @@ async fn embed_test(State(st): State<Arc<AppState>>) -> Json<Value> {
         "anlam_ayrimi_dogru": s_dogru > s_gurultu,
         "not": "dogru > gurultu ise semantik retrieval keyword gürültüsünü çözer",
     }))
+}
+
+// ═══ İÇERİK KORUMA KALKANI: üretimden önce zararlı istemi yakala ═══
+// true = güvenli/izin, false = engelle. Katmanlı: (1) sabit anahtar-kelime sert-blok,
+// (2) KUBRA beyni (72B) niyet yargıcı. Beyin erişilemezse anahtar-kelime bloku yine korur.
+async fn icerik_denetle(st: &AppState, prompt: &str) -> bool {
+    let p = prompt.to_lowercase();
+    // Bariz/tartışmasız yasak (sert blok — beyin gerekmez)
+    const SERT_YASAK: &[&str] = &[
+        "child porn", "cp porn", "çocuk porno", "cocuk porno", "minor sex", "underage sex",
+        "child sexual", "çocuk cinsel", "cocuk cinsel", "pedophil",
+    ];
+    if SERT_YASAK.iter().any(|k| p.contains(k)) { return false; }
+    // Beyin yargıcı (nüans). Beyin yoksa → sert-blok geçtiyse izin ver.
+    let Some(url) = st.cfg.remote_url.as_ref() else { return true; };
+    let sys = "Sen bir GÖRSEL ÜRETİM güvenlik denetleyicisisin. Kullanıcının istemini incele. \
+        Şu kategorilerden BİRİNİ içeriyorsa yalnızca 'ENGEL' yaz: reşit olmayanların cinsel/müstehcen \
+        tasviri veya istismarı; pornografik/cinsel açık içerik; aşırı şiddet/gore; gerçek bir kişinin \
+        rızasız müstehcen veya aldatıcı (deepfake) tasviri; nefret/terör/yasadışı. Aksi halde 'IZIN' yaz. \
+        SADECE tek kelime döndür: ENGEL veya IZIN.";
+    let body = json!({
+        "model": st.cfg.remote_model,
+        "messages": [ {"role":"system","content":sys}, {"role":"user","content":prompt} ],
+        "max_tokens": 4, "temperature": 0.0, "stream": false,
+    });
+    match st.http.post(url).json(&body).send().await {
+        Ok(r) => match r.json::<Value>().await {
+            Ok(v) => {
+                let ans = v.get("choices").and_then(|c| c.as_array()).and_then(|a| a.first())
+                    .and_then(|c| c.get("message")).and_then(|m| m.get("content"))
+                    .and_then(|t| t.as_str()).unwrap_or("").to_uppercase();
+                !ans.contains("ENGEL")
+            }
+            Err(_) => true, // denetim yanıtı çözülemedi → sert-blok geçtiyse izin (servisi kırma)
+        },
+        Err(_) => true,
+    }
+}
+
+// PRO: kısa/Türkçe istemi zengin, detaylı İngilizce görsel istemine çevir (pro araçlar bunu yapıyor).
+// Beyin yoksa/hata olursa → orijinal istemi aynen kullan.
+async fn istem_gelistir(st: &AppState, prompt: &str) -> String {
+    let Some(url) = st.cfg.remote_url.as_ref() else { return prompt.to_string(); };
+    let sys = "You are an expert prompt engineer for AI image generation. Rewrite the user's request as \
+        ONE vivid, richly detailed image prompt in ENGLISH. Preserve the user's intent, but add helpful \
+        detail: subject, style, lighting, composition, mood, colors and quality tags (highly detailed, \
+        sharp focus, professional, high quality). If the request is in another language, translate it to \
+        English. Output ONLY the final prompt text — no quotes, no preamble, no explanation.";
+    let body = json!({
+        "model": st.cfg.remote_model,
+        "messages": [ {"role":"system","content":sys}, {"role":"user","content":prompt} ],
+        "max_tokens": 200, "temperature": 0.7, "stream": false,
+    });
+    match st.http.post(url).json(&body).send().await {
+        Ok(r) => match r.json::<Value>().await {
+            Ok(v) => {
+                let out = v.get("choices").and_then(|c| c.as_array()).and_then(|a| a.first())
+                    .and_then(|c| c.get("message")).and_then(|m| m.get("content"))
+                    .and_then(|s| s.as_str()).unwrap_or("").trim().to_string();
+                if out.is_empty() { prompt.to_string() } else { out }
+            }
+            Err(_) => prompt.to_string(),
+        },
+        Err(_) => prompt.to_string(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct GorselReq { prompt: String, #[serde(default)] wallet: Option<String> }
+
+// KUBRA görsel üretimi: istem → uzak GPU görsel servisi (SDXL-Turbo) → PNG.
+async fn gorsel(State(st): State<Arc<AppState>>, Json(req): Json<GorselReq>) -> axum::response::Response {
+    let url = match st.cfg.image_url.as_ref() {
+        Some(u) => u,
+        None => return (StatusCode::SERVICE_UNAVAILABLE, "görsel servisi yapılandırılmadı").into_response(),
+    };
+    let prompt = req.prompt.trim();
+    if prompt.is_empty() {
+        return (StatusCode::BAD_REQUEST, "boş istem").into_response();
+    }
+    // ── KORUMA KALKANI (1): GÜVENLİK KAPISI — zararlıyı üretmeden reddet ──
+    if !icerik_denetle(&st, prompt).await {
+        return (StatusCode::UNPROCESSABLE_ENTITY,
+            "Bu içeriği üretemem — güvenlik ve etik nedeniyle üretimi durdurdum. Lütfen farklı bir istem dene.")
+            .into_response();
+    }
+    // PRO: istemi zengin İngilizce görsel istemine geliştir (kısa/Türkçe → detaylı, pro kalite)
+    let gelismis = istem_gelistir(&st, prompt).await;
+    // Üret (geliştirilmiş istemle)
+    let bytes = match st.http.post(url).json(&json!({ "prompt": gelismis })).send().await {
+        Ok(resp) if resp.status().is_success() => match resp.bytes().await {
+            Ok(b) => b,
+            Err(e) => return (StatusCode::BAD_GATEWAY, format!("görsel bayt hatası: {e}")).into_response(),
+        },
+        Ok(resp) => return (StatusCode::BAD_GATEWAY, format!("görsel servis HTTP {}", resp.status())).into_response(),
+        Err(e) => return (StatusCode::BAD_GATEWAY, format!("görsel servis erişilemez: {e}")).into_response(),
+    };
+    // ── KORUMA KALKANI (2): KÖKEN LİSANSI — içeriği zincire yaz (sahiplik/telif kanıtı) ──
+    let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let mut h = blake3::Hasher::new();
+    h.update(&st.cfg.net_id.to_le_bytes());
+    h.update(&ts.to_le_bytes());
+    h.update(prompt.as_bytes());
+    h.update(&[0x1e]);
+    if let Some(w) = req.wallet.as_deref() { h.update(w.as_bytes()); h.update(&[0x1e]); }
+    h.update(&bytes);
+    let data_hash: [u8; 32] = *h.finalize().as_bytes();
+    let _ = zincire_yaz(&st, data_hash, ts).await;
+    let proof = hex::encode(data_hash);
+    axum::response::Response::builder()
+        .header(header::CONTENT_TYPE, "image/png")
+        .header("x-kubra-proof", proof.clone())
+        .header("x-kubra-verify", format!("/belge/{proof}"))
+        .body(Body::from(bytes))
+        .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "yanıt oluşturulamadı").into_response())
+}
+
+// KUBRA video üretimi: istem → uzak GPU video servisi (LTX) → MP4. Güvenlik kapısı + köken lisansı.
+async fn video_uret(State(st): State<Arc<AppState>>, Json(req): Json<GorselReq>) -> axum::response::Response {
+    let url = match st.cfg.video_url.as_ref() {
+        Some(u) => u,
+        None => return (StatusCode::SERVICE_UNAVAILABLE, "video servisi yapılandırılmadı").into_response(),
+    };
+    let prompt = req.prompt.trim();
+    if prompt.is_empty() { return (StatusCode::BAD_REQUEST, "boş istem").into_response(); }
+    if !icerik_denetle(&st, prompt).await {
+        return (StatusCode::UNPROCESSABLE_ENTITY,
+            "Bu içeriği üretemem — güvenlik ve etik nedeniyle üretimi durdurdum. Lütfen farklı bir istem dene.")
+            .into_response();
+    }
+    let gelismis = istem_gelistir(&st, prompt).await;
+    let bytes = match st.http.post(url).json(&json!({ "prompt": gelismis })).send().await {
+        Ok(resp) if resp.status().is_success() => match resp.bytes().await {
+            Ok(b) => b,
+            Err(e) => return (StatusCode::BAD_GATEWAY, format!("video bayt hatası: {e}")).into_response(),
+        },
+        Ok(resp) => return (StatusCode::BAD_GATEWAY, format!("video servis HTTP {}", resp.status())).into_response(),
+        Err(e) => return (StatusCode::BAD_GATEWAY, format!("video servis erişilemez: {e}")).into_response(),
+    };
+    let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let mut h = blake3::Hasher::new();
+    h.update(&st.cfg.net_id.to_le_bytes());
+    h.update(&ts.to_le_bytes());
+    h.update(prompt.as_bytes());
+    h.update(&[0x1e]);
+    if let Some(w) = req.wallet.as_deref() { h.update(w.as_bytes()); h.update(&[0x1e]); }
+    h.update(&bytes);
+    let data_hash: [u8; 32] = *h.finalize().as_bytes();
+    let _ = zincire_yaz(&st, data_hash, ts).await;
+    let proof = hex::encode(data_hash);
+    axum::response::Response::builder()
+        .header(header::CONTENT_TYPE, "video/mp4")
+        .header("x-kubra-proof", proof.clone())
+        .header("x-kubra-verify", format!("/belge/{proof}"))
+        .body(Body::from(bytes))
+        .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "yanıt oluşturulamadı").into_response())
 }
 
 async fn health() -> Json<Value> {
@@ -420,6 +652,26 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
     // ── ARAÇ-KULLANIMI: aritmetik ise ZAYIF MODELE bırakma, KESIN hesapla ──
     // Güçlü AI'lar araç kullanır. "7 çarpı 8" → 56 garantili (deterministik).
     // Yalnız açık aritmetik tetikler (sayısız/operatörsüz sorgu → normal yol).
+    // ZINCIR ARACI: bakiye/blok sorgusu ise dogrudan zincirden kesin cevap.
+    if let Some(sonuc) = zincir::sorgula(&st.http, &st.cfg.chain_rpc, &req.prompt).await {
+        let mut h = blake3::Hasher::new();
+        h.update(&st.cfg.net_id.to_le_bytes());
+        h.update(&ts.to_le_bytes());
+        h.update(req.prompt.as_bytes());
+        h.update(&[0x1e]);
+        h.update(sonuc.as_bytes());
+        h.update(&[0x1e]);
+        h.update(b"zincir-sorgu");
+        let data_hash: [u8; 32] = *h.finalize().as_bytes();
+        let chain = zincire_yaz(&st, data_hash, ts).await;
+        return Json(AskResp {
+            ok: true, answer: sonuc, brain: "arac".into(), model: "zincir-sorgu".into(),
+            grounded: false, abstained: false, sources: vec![],
+            latency_ms: t0.elapsed().as_millis(), input_tokens: None, output_tokens: None,
+            proof_hash: hex::encode(data_hash), chain, hata: None,
+        });
+    }
+
     if let Some(sonuc) = hesap::hesapla(&req.prompt) {
         let mut h = blake3::Hasher::new();
         h.update(&st.cfg.net_id.to_le_bytes());
@@ -477,24 +729,36 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
 
     let user_content = grounded_user(&req.prompt, etkin_baglam.as_deref());
 
-    // BEYİN SEÇİMİ: istek > yapılandırma. Egemen yerel (KUBRA) öncelik.
+    // BEYİN SEÇİMİ: Uzak GPU (varsa) > Egemen yerel (KUBRA) > Claude.
     let istek = req.brain.as_deref().unwrap_or(&st.cfg.brain_pref);
+    // Doğrulanabilirlik için: deterministic → greedy (temp 0), yoksa hafif örnekleme.
+    let temp = if req.deterministic.unwrap_or(false) { 0.0 } else { 0.3 };
     let yerel_kullan = st.local.is_some() && istek != "claude";
 
-    let (answer, model, brain_name, in_tok, out_tok) = if yerel_kullan {
+    // UZAK GPU: tercih "remote"/"auto" + URL varsa ÖNCE dene. Hata → yerele düş (dayanıklı;
+    // GPU kapanırsa KUBRA yavaş ama çalışmaya devam eder).
+    let uzak = if (istek == "remote" || istek == "auto") && st.cfg.remote_url.is_some() {
+        match beyin_remote(&st, &user_content, temp).await {
+            Ok(b) => Some((b.text, b.model, "kubra-gpu".to_string(), b.input_tokens, b.output_tokens)),
+            Err(e) => { eprintln!("uzak GPU beyni başarısız → yerele düşülüyor: {e}"); None }
+        }
+    } else { None };
+
+    let (answer, model, brain_name, in_tok, out_tok) = if let Some(r) = uzak {
+        r
+    } else if yerel_kullan {
         // Yerel model CPU'da bloklar → spawn_blocking (async runtime'ı tıkamaz).
         let st2 = st.clone();
         let uc = user_content.clone();
         let max_tok = st.cfg.max_tokens;
-        // Doğrulanabilirlik için: deterministic → greedy (temp 0), yoksa hafif örnekleme.
-        let temp = if req.deterministic.unwrap_or(false) { 0.0 } else { 0.3 };
+        let temp2 = temp;
         let gen = tokio::task::spawn_blocking(move || {
             // Kilit zehirlenmişse (önceki panik) kurtar — servis çökmez.
             let mut lb = match st2.local.as_ref().unwrap().lock() {
                 Ok(g) => g,
                 Err(p) => p.into_inner(),
             };
-            lb.generate(SYSTEM_PROMPT, &uc, max_tok, temp)
+            lb.generate(SYSTEM_PROMPT, &uc, max_tok, temp2)
         })
         .await;
         match gen {
@@ -623,7 +887,7 @@ async fn main() {
         (None, None)
     };
 
-    let http = reqwest::Client::builder().timeout(Duration::from_secs(120)).build().expect("http istemcisi");
+    let http = reqwest::Client::builder().timeout(Duration::from_secs(300)).build().expect("http istemcisi");
     let listen = cfg.listen.clone();
     let brain_ok = cfg.anthropic_key.is_some();
     let has_local = local.is_some();
@@ -681,6 +945,8 @@ async fn main() {
         .route("/health", get(health))
         .route("/", get(info))
         .route("/v1/ask", post(ask))
+        .route("/v1/image", post(gorsel))
+        .route("/v1/video", post(video_uret))
         .route("/kb/ingest", post(kb_ingest))
         .route("/kb/stats", get(kb_stats))
         .route("/models", get(models))

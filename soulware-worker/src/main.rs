@@ -92,7 +92,7 @@ async fn main() {
                         let (Some(id), Some(soru)) = (q.get("id").and_then(|x| x.as_u64()), q.get("soru").and_then(|x| x.as_str())) else { continue };
                         let t0 = std::time::Instant::now();
                         let cevap = match http.post(format!("{brain}/v1/ask"))
-                            .json(&json!({ "prompt": soru, "deterministic": true, "brain": "local" }))
+                            .json(&json!({ "prompt": soru, "deterministic": true, "brain": "auto" }))
                             .send().await {
                             Ok(r) => r.json::<Value>().await.ok()
                                 .and_then(|v| v.get("answer").and_then(|a| a.as_str()).map(|s| s.to_string()))
@@ -139,7 +139,7 @@ async fn main() {
         println!("⚙  iş #{job_id} alındı → KUBRA çalıştırılıyor...");
         // KUBRA'yı çağır (deterministic → doğrulanabilir birebir çıktı).
         let cevap = match http.post(format!("{brain}/v1/ask"))
-            .json(&json!({ "prompt": prompt, "deterministic": det, "brain": "local" }))
+            .json(&json!({ "prompt": prompt, "deterministic": det, "brain": "auto" }))
             .send().await {
             Ok(r) => match r.json::<Value>().await {
                 Ok(v) if v.get("ok").and_then(|o| o.as_bool()).unwrap_or(false) =>

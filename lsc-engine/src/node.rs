@@ -22,6 +22,10 @@ use crate::dag::wire;
 pub struct NodeState {
     graph: Graph,
     ghostdag: Ghostdag,
+    /// PoA konsensus agirligi: mainnet'te Some(kurucu komite) -> komite
+    /// disi bloklar blue-work'e katkida bulunmaz (sybil/blue-work sisirme
+    /// dirençli). Devnet'te None -> UniformWeight (esnek test). Ileride PoS.
+    weigher: Option<crate::consensus::ghostdag::CommitteeWeight>,
     network_id: u32,
     /// Ebeveyni henuz gelmemis vertex'lerin bekleme havuzu.
     orphans: OrphanPool,
@@ -180,6 +184,11 @@ impl NodeState {
             ghostdag: Ghostdag::new_incremental(DEFAULT_K),
             network_id,
             mainnet,
+            weigher: if mainnet {
+                Some(crate::consensus::ghostdag::mainnet_komite())
+            } else {
+                None
+            },
             orphans: OrphanPool::new(),
             token_registry: crate::registry::TokenRegistry::yeni(),
             stake_registry: crate::registry::StakeRegistry::yeni(),
@@ -747,7 +756,12 @@ impl NodeState {
         } else {
             self.graph.insert(vertex, now).map_err(IngestError::Graph)?;
         }
-        self.ghostdag.update_one(&self.graph, &yeni_id);
+        // PoA: mainnet'te komite-agirlikli guncelle (komite disi blok -> agirlik 0,
+        // blue-work sisirme engellenir). Devnet'te (weigher=None) UniformWeight.
+        match &self.weigher {
+            Some(w) => self.ghostdag.update_one_with_weight(&self.graph, &yeni_id, w),
+            None => self.ghostdag.update_one(&self.graph, &yeni_id),
+        }
 
         // KONSENSUS DUZELTMESI: state ARTIK burada uygulanmiyor.
         // Neden: ingest sirasi = ag gelis sirasi. Iki node ayni vertex'leri

@@ -65,8 +65,21 @@ DURUM: HENUZ YOK. Islemler su an UCRETSIZ. Yakit, AVM asamasinda + nonce ile.
 
 ## ODUL HAVUZU — Testnet/Topluluk Dagitimi
 
-> DURUM: TASLAK karar. Oranlar mainnet oncesi kesinlesir, baglayici degildir.
-> Hesap kodlamasi HENUZ YOK (tasarim). Stake arayuzu kullaniciya HENUZ acik degil.
+> **DURUM (2026-08-19 GUNCELLEME): BU DILIMIN KULLANIMI DEGISTI.**
+> Topluluk dilimi (2.520.000 AIDAG) artik ON SATIS BONUSU + REFERANS icin ayrildi.
+> Asagidaki eski stake/testnet/referans dagilimi ARTIK GECERLI DEGILDIR;
+> tarihsel kayit olarak birakilmistir.
+>
+> **GECERLI DAGILIM:**
+> - Alim bonusu: 2.020.000 AIDAG
+>   - Faz 1 alicisina: 1 AIDAG basina +1,5 bonus
+>   - Rezerv turu alicisina: 1 AIDAG basina +1,0 bonus
+> - Referans havuzu: 500.000 AIDAG (kisi basi tavan ZORUNLU)
+> - **Bonus kilidi: TGE'de %0 + 24 ay** (satin alinan tokenden daha uzun)
+> - Referans odulu sirket kurulmadan baslatilmaz (aracilik/broker riski)
+> - Kodlama HENUZ YAPILMADI.
+>
+> --- ESKI TASARIM (gecersiz, tarihsel) ---
 
 ### Havuz
 Kaynak: Genesis "Topluluk & Dagitim" = AIDAG arzinin %12'si = **2.520.000 AIDAG** (sabit).

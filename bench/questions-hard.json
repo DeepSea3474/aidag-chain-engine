@@ -1,0 +1,14 @@
+{
+  "surum": "hard-v1",
+  "not": "ZOR set: cok-adimli muhakeme + cok-sicramali olgu + mantik. 9/9 dogan temel set doygun; bu set 7B/frontier'in gercek sinirini olcer. Cevaplar ayirt edici secildi (contains-eslesme yanlis pozitifini azaltmak icin).",
+  "sorular": [
+    { "id": 201, "kategori": "cok-adim-muhakeme", "soru": "Bir kalem 4 lira, bir defter 7 lira. 3 kalem ve 2 defter toplam kac lira eder? Sadece rakam yaz.", "cevap": "26", "frontier": true },
+    { "id": 202, "kategori": "cok-adim-muhakeme", "soru": "Bir siniftaki 24 ogrencinin yarisi kiz. Kizlarin ucte biri gozluklu. Kac kiz ogrenci gozlukludur? Sadece rakam yaz.", "cevap": "4", "frontier": true },
+    { "id": 203, "kategori": "cok-sicrama-olgu", "soru": "Turkiye'nin baskenti hangi cografi bolgededir? Sadece bolge adini yaz.", "cevap": "ic anadolu", "frontier": true },
+    { "id": 204, "kategori": "olgu-derin", "soru": "Cengiz Han hangi imparatorlugu kurdu? Tek kelime yaz.", "cevap": "mogol", "frontier": true },
+    { "id": 205, "kategori": "mantik-secim", "soru": "Istanbul, Ankara ve Izmir'den hangisi Turkiye'nin baskentidir? Tek kelime yaz.", "cevap": "ankara", "frontier": true },
+    { "id": 206, "kategori": "mantik-asal", "soru": "17 sayisi asal midir? Sadece Evet ya da Hayir yaz.", "cevap": "evet", "frontier": true },
+    { "id": 207, "kategori": "aritmetik-buyuk", "soru": "23 carpi 17 kactir? Sadece rakam yaz.", "cevap": "391", "frontier": true },
+    { "id": 208, "kategori": "cok-sicrama-olgu", "soru": "Fransa'nin para birimi nedir? Tek kelime yaz.", "cevap": "euro", "frontier": true }
+  ]
+}
