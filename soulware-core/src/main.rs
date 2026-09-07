@@ -118,19 +118,47 @@ söyle ve yönlendir: aidag-chain.com/gorsel (orada isteğini yazınca senin iç
 Dürüst ve faydalısın: ASLA uydurma — emin değilsen 'Bilmiyorum' de, mümkünse kaynağını göster. \
 Kullanıcının dilinde, kısa ve net yanıtla.";
 
+// SORU TIPI: kanit-gerektiren mi (teknik/olgusal/kod/AIDAG) yoksa zararsiz sohbet mi?
+// Kanit modunda kaynak yoksa KUBRA cevabi verir AMA "kaynagim yok" diye uyarir
+// (senin ilken: kanit gereken iste seffaf ol; sohbette serbest). Belirsiz -> kanit
+// modu (guvenli taraf: dikkatli ol). Basit anahtar-kelime tabanli, hizli.
+fn kanit_gerektiren_mi(prompt: &str) -> bool {
+    let p = prompt.to_lowercase();
+    // Zararsiz sohbet isaretleri: selamlasma, hal-hatir, tesekkur, kendini tanitma.
+    let sohbet: &[&str] = &[
+        "selam", "merhaba", "gunaydin", "iyi aksam", "nasilsin", "naber",
+        "tesekkur", "sagol", "adin ne", "kimsin", "kendini tanit", "gorusuruz",
+        "iyi gunler", "iyi geceler", "hosgeldin", "nasil gidiyor",
+    ];
+    for s in sohbet {
+        if p.contains(s) {
+            return false; // sohbet -> serbest
+        }
+    }
+    // Aksi halde kanit modu (teknik/olgusal/kod/AIDAG/genel bilgi hepsi buraya).
+    true
+}
+
 // GROUNDING: bağlam verilmişse modele açıkça sunulur; model onun DIŞINA çıkmamalı.
 fn grounded_user(prompt: &str, context: Option<&str>) -> String {
+    let kanit = kanit_gerektiren_mi(prompt);
     match context {
+        // KAYNAK VAR: her iki modda da kaynaktan cevap ver (grounding).
         Some(c) if !c.trim().is_empty() => format!(
-            "Aşağıda konuyla ilgili KAYNAKLAR olabilir. Bunları cevabını GÜÇLENDİRMEK için kullan; bir \
-olgu kaynaktan geliyorsa belirtebilirsin. AMA yalnızca kaynaklarla sınırlı DEĞİLSİN — kendi öğrendiğin \
-bilgiyi de özgürce kullan. Selamlaşma, sohbet ve kendinle ilgili sorulara doğal cevap ver. Bir şeyi kesin \
-bilmiyorsan ve kaynak da yoksa: 'Kesin kaynağım yok ama öğrendiğim kadarıyla …' diyerek yine de yardımcı ol; \
-araştırılması gereken bir şeyse bunu söyle. Emin OLMADIĞIN bir cevap veriyorsan, dürüstçe belirt: \
-'Bundan tam emin değilim, sen de doğrula/araştır.' YALNIZCA hiçbir fikrin yoksa 'Bilmiyorum' de. Uydurma \
-ama faydalı ol. Kısa ve net yanıtla.\n\nKAYNAKLAR:\n{c}\nSORU:\n{prompt}"
+            "Aşağıda konuyla ilgili KAYNAKLAR var. Cevabını ÖNCELIKLE bunlara dayandır; bir olgu \
+kaynaktan geliyorsa belirt. Kaynak dışına çıkarsan bunu açıkça söyle. Kısa ve net yanıtla.\n\nKAYNAKLAR:\n{c}\nSORU:\n{prompt}"
         ),
-        _ => prompt.to_string(),
+        // KAYNAK YOK + KANIT MODU: cevap ver AMA kaynaksiz oldugunu seffafca uyar.
+        _ if kanit => format!(
+            "Bu soru olgusal/teknik bir bilgi istiyor ve elinde bu konuda DOĞRULANMIŞ bir kaynak YOK. \
+Yine de yardımcı olmaya çalış AMA cevabının başında açıkça belirt: 'Bu bilginin elimde doğrulanmış bir \
+kaynağı yok, kendi bilgimle söylüyorum — doğrulaman iyi olur.' Sonra bildiğin kadarıyla cevap ver, ama \
+ASLA uydurma bir kaynak/rakam/isim verme. Emin değilsen bunu da söyle. Kısa ve net yanıtla.\n\nSORU:\n{prompt}"
+        ),
+        // KAYNAK YOK + SOHBET: selam/muhabbet/kendinle ilgili -> serbest, doğal cevap.
+        _ => format!(
+            "Bu bir sohbet/selamlaşma. Doğal, samimi ve kısa cevap ver. Kaynak gerekmez.\n\nSORU:\n{prompt}"
+        ),
     }
 }
 
@@ -652,6 +680,27 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
     // ── ARAÇ-KULLANIMI: aritmetik ise ZAYIF MODELE bırakma, KESIN hesapla ──
     // Güçlü AI'lar araç kullanır. "7 çarpı 8" → 56 garantili (deterministik).
     // Yalnız açık aritmetik tetikler (sayısız/operatörsüz sorgu → normal yol).
+    // AG DURUMU ARACI: ag saglik/dugum/tps sorgusu ise /status'tan canli ozet.
+    // (Zincir sorgusundan ONCE: daha spesifik niyet, zengin cevap.)
+    if let Some(sonuc) = zincir::ag_durumu(&st.http, &st.cfg.chain_rpc, &req.prompt).await {
+        let mut h = blake3::Hasher::new();
+        h.update(&st.cfg.net_id.to_le_bytes());
+        h.update(&ts.to_le_bytes());
+        h.update(req.prompt.as_bytes());
+        h.update(&[0x1e]);
+        h.update(sonuc.as_bytes());
+        h.update(&[0x1e]);
+        h.update(b"ag-durumu");
+        let data_hash: [u8; 32] = *h.finalize().as_bytes();
+        let chain = zincire_yaz(&st, data_hash, ts).await;
+        return Json(AskResp {
+            ok: true, answer: sonuc, brain: "arac".into(), model: "ag-durumu".into(),
+            grounded: false, abstained: false, sources: vec![],
+            latency_ms: t0.elapsed().as_millis(), input_tokens: None, output_tokens: None,
+            proof_hash: hex::encode(data_hash), chain, hata: None,
+        });
+    }
+
     // ZINCIR ARACI: bakiye/blok sorgusu ise dogrudan zincirden kesin cevap.
     if let Some(sonuc) = zincir::sorgula(&st.http, &st.cfg.chain_rpc, &req.prompt).await {
         let mut h = blake3::Hasher::new();
