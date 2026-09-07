@@ -94,3 +94,66 @@ pub async fn ag_durumu(http: &reqwest::Client, rpc_url: &str, sorgu: &str) -> Op
         net, vertex, tip, orphan, staker, saglik
     ))
 }
+
+// ── BELGE DOGRULAMA ARACI ───────────────────────────────────────────────────
+// Kullanici bir belge hash'i (64 hex = 32 bayt) verip "bu belge gecerli mi /
+// zincirde var mi / degistirilmis mi" diye sorunca, /belge/:hash ucundan
+// dogrular. KURUMSAL DEGER: sahte/degistirilmis belge saniyede yakalanir,
+// cevap tahrif edilemez zincir kaydina dayanir. Dis-sistem adaptor sablonu.
+
+fn belge_niyeti_mi(sorgu: &str) -> bool {
+    let s = sorgu.to_lowercase();
+    let anahtarlar = [
+        "belge", "dogrula", "doğrula", "gecerli mi", "geçerli mi", "sahte mi",
+        "degistirilmis", "değiştirilmiş", "orijinal mi", "zincirde var mi",
+        "zincirde var mı", "hash", "belge sorgu", "document", "verify",
+    ];
+    anahtarlar.iter().any(|a| s.contains(a))
+}
+
+/// Sorgudan 64-hex belge hash'i cikar (0x opsiyonel).
+fn belge_hash_bul(s: &str) -> Option<String> {
+    for kelime in s.split_whitespace() {
+        let k = kelime.trim_start_matches("0x")
+            .trim_end_matches(|c: char| !c.is_ascii_alphanumeric());
+        if k.len() == 64 && k.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Some(k.to_string());
+        }
+    }
+    None
+}
+
+/// Belge dogrulama: hash zincirde kayitli mi? /belge/:hash ucundan.
+pub async fn belge_dogrula(http: &reqwest::Client, rpc_url: &str, sorgu: &str) -> Option<String> {
+    if !belge_niyeti_mi(sorgu) {
+        return None;
+    }
+    let hash = match belge_hash_bul(sorgu) {
+        Some(h) => h,
+        None => {
+            return Some(
+                "Belge dogrulamak icin 64 karakterlik belge hash'ini (blake3) paylas. Ornek: 'su hash gecerli mi: <64 hex>'. Zincire kayitli mi, degistirilmis mi soylerim.".to_string()
+            );
+        }
+    };
+    let url = format!("{}/belge/{}", rpc_url.trim_end_matches('/'), hash);
+    let resp = http.get(&url).send().await.ok()?;
+    let v: serde_json::Value = resp.json().await.ok()?;
+
+    // /belge/:hash yaniti: kayitli mi + (varsa) zaman/blok bilgisi.
+    let kayitli = v.get("kayitli").and_then(|x| x.as_bool())
+        .or_else(|| v.get("var").and_then(|x| x.as_bool()))
+        .unwrap_or(false);
+
+    if kayitli {
+        Some(format!(
+            "Belge DOGRULANDI: bu hash zincirde kayitli ({}). Belge orijinal ve degistirilmemis (zincire islenen kayitla birebir eslesiyor). Denetlenebilir, tahrif edilemez.",
+            &hash[..16]
+        ))
+    } else {
+        Some(format!(
+            "Belge BULUNAMADI: bu hash ({}...) zincirde kayitli DEGIL. Ya hic kaydedilmemis ya da belge degistirilmis (hash tutmuyor). Orijinal belgenin hash'iyle tekrar dene.",
+            &hash[..16]
+        ))
+    }
+}
