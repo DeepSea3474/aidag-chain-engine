@@ -132,7 +132,7 @@ pub async fn belge_dogrula(http: &reqwest::Client, rpc_url: &str, sorgu: &str) -
         Some(h) => h,
         None => {
             return Some(
-                "Belge dogrulamak icin 64 karakterlik belge hash'ini (blake3) paylas. Ornek: 'su hash gecerli mi: <64 hex>'. Zincire kayitli mi, degistirilmis mi soylerim.".to_string()
+                "Belgeni dogrulamak icin Belge Dogrulama sayfasini kullan: https://aidag-chain.com/belge — oraya dosyani (PDF, resim, Word) yukle, sistem saniyede zincirde kayitli mi, orijinal mi yoksa degistirilmis mi soyler. Belgen tarayicindan cikmaz; yalnizca matematiksel ozeti kontrol edilir. Elinde hazir bir belge hash'i (64 hex) varsa bana dogrudan yazabilirsin, hemen dogrularim.".to_string()
             );
         }
     };
