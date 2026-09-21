@@ -54,3 +54,5 @@ soulware-models/
 soulware-knowledge/kb.json
 .soulware-core.out
 soulware-knowledge/*.emb.json
+soulware-knowledge/*.bozuk-*
+data/

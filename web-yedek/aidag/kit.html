@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KUBRA — Announcement Kit</title>
+<style>
+  :root{--bg:#0b0e14;--card:#141a24;--ink:#e8ecf3;--dim:#93a1b3;--acc:#3ddc97;--line:#25303f;}
+  *{box-sizing:border-box}
+  body{margin:0;font:16px/1.6 system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+  .wrap{max-width:720px;margin:0 auto;padding:24px 16px 60px}
+  h1{font-size:1.4rem} h2{font-size:1.05rem;margin:22px 0 8px}
+  .note{color:var(--dim);font-size:.9rem}
+  .box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin:8px 0}
+  textarea{width:100%;min-height:150px;background:#0f1620;color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:12px;font:14px/1.5 ui-monospace,Menlo,monospace;resize:vertical}
+  .btn{border:0;border-radius:10px;padding:10px 18px;font-weight:700;cursor:pointer;background:var(--acc);color:#04120b;margin-top:8px}
+  .ok{color:var(--acc);font-weight:700;margin-left:10px}
+  a{color:#5b8cff}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>📣 KUBRA — Announcement Kit</h1>
+  <p class="note">Her kutunun altındaki <b>Kopyala</b> butonuna bas → metnin <b>tamamı</b> panoya alınır → X / LinkedIn'e yapıştır. Görsel: <a href="/how" target="_blank">aidag-chain.com/how</a> (flywheel — ekran görüntüsü al ya da link ver).</p>
+
+  <h2>🐦 X — single post</h2>
+  <div class="box"><textarea id="x1" readonly></textarea><button class="btn" onclick="kopya('x1',this)">Kopyala</button></div>
+
+  <h2>🧵 X — thread (tümü)</h2>
+  <div class="box"><textarea id="x2" readonly style="min-height:340px"></textarea><button class="btn" onclick="kopya('x2',this)">Kopyala</button></div>
+
+  <h2>💼 LinkedIn</h2>
+  <div class="box"><textarea id="li" readonly style="min-height:300px"></textarea><button class="btn" onclick="kopya('li',this)">Kopyala</button></div>
+</div>
+<script>
+const X1 = `An AI that pays you to build it — and belongs to you.
+
+🖥️ Share your spare compute → help run KUBRA
+💰 Earn $LSC
+🤖 Spend $LSC to use KUBRA
+💧 That spending funds the contributors
+📈 More join → KUBRA gets stronger, for everyone
+
+No datacenters. No subscriptions. Owned by its builders.
+
+👉 aidag-chain.com/how`;
+
+const X2 = `1/ Big AI is owned by a handful of corporations.
+
+We're building the opposite: KUBRA — an AI that funds itself, rewards the people who run it, and belongs to them.
+
+Here's the loop that makes it work 👇
+
+2/ The flywheel
+🖥️ Contribute idle compute → help run KUBRA
+💰 Earn $LSC
+🤖 Spend $LSC to use KUBRA
+💧 That spending pays the contributors
+📈 More contributors → KUBRA gets smarter & faster
+Each turn, bigger. A snowball.
+
+3/ Why it's different
+• No datacenters — it runs on contributed computers
+• No subscriptions — you earn what you use
+• Not owned by a company — owned by its builders
+The network funds itself.
+
+4/ On-chain, not a promise
+$LSC is the gas coin of AIDAG-Chain. Every contribution, reward and use is written to a public blockchain. Open source. You don't have to trust us — you can check.
+
+5/ Honest about where we are
+KUBRA today: small model, no GPUs yet. Good on basics, not frontier-level — and we won't pretend otherwise. It grows stronger with every contributor. That's the point.
+
+6/ Your move
+💬 Use KUBRA free (any device): aidag-chain.com/ask
+⚡ Contribute & earn (PC + GPU): aidag-chain.com/katil
+Own a piece of the AI you help build.`;
+
+const LI = `What if an AI paid you to help build it — and belonged to you, not a corporation?
+
+That's KUBRA. It runs on compute contributed by people, not datacenters. The economics form a self-reinforcing loop:
+
+→ Contribute idle compute, help run KUBRA
+→ Earn LSC
+→ Spend LSC to use KUBRA
+→ That spending funds the contributors
+→ More contributors → a stronger, faster AI → more value for everyone
+
+No datacenters. No subscriptions. The network funds itself, and every contribution, reward and use is recorded on a public blockchain (AIDAG-Chain, where LSC is the gas coin). Open source — verifiable, not a promise.
+
+We're honest about the stage: KUBRA today runs a small model and is early — competitive on basics, not frontier-level yet. Its strength grows with its community. That's the design.
+
+See how it works: aidag-chain.com/how
+Use it free, or contribute and earn: aidag-chain.com`;
+
+document.getElementById("x1").value=X1;
+document.getElementById("x2").value=X2;
+document.getElementById("li").value=LI;
+async function kopya(id,btn){
+  const el=document.getElementById(id);
+  try{ await navigator.clipboard.writeText(el.value); }
+  catch(e){ el.select(); document.execCommand("copy"); }
+  const s=document.createElement("span"); s.className="ok"; s.textContent="✓ kopyalandı"; btn.after(s); setTimeout(()=>s.remove(),1800);
+}
+</script>
+</body>
+</html>

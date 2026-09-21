@@ -9,11 +9,10 @@ fn niyet_cikar(sorgu: &str) -> Option<(&'static str, serde_json::Value, String)>
                 format!("{} adresinin bakiyesi", adr)));
         }
     }
-    if s.contains("blok") || s.contains("block") || s.contains("yukseklik") {
-        if s.contains("kac") || s.contains("son") || s.contains("number") || s.contains("numara") {
+    if (s.contains("blok") || s.contains("block") || s.contains("yukseklik"))
+        && (s.contains("kac") || s.contains("son") || s.contains("number") || s.contains("numara")) {
             return Some(("eth_blockNumber", json!([]), "guncel blok yuksekligi".to_string()));
         }
-    }
     None
 }
 

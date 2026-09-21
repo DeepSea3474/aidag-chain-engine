@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KUBRA Görsel Stüdyo</title>
+<style>
+  :root{
+    --bg:#0E0A07; --card:#1A140E; --card2:#221A12;
+    --border:rgba(255,255,255,.09); --border-hot:rgba(255,140,50,.28);
+    --txt:#F6F1EB; --mut:#A89B8D; --dim:#6E6459;
+    --acc:#FF7A18; --acc-hi:#FFB24D; --grad:linear-gradient(135deg,#FFB14D,#FF6A12);
+    --good:#5DC985; --warn:#FFC24B; --bad:#ff8a6a;
+    --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:var(--sans);line-height:1.55;
+    min-height:100vh;background-image:radial-gradient(120% 55% at 50% -10%,rgba(255,122,24,.14),transparent 60%)}
+  .wrap{max-width:720px;margin:0 auto;padding:22px 20px 60px}
+  header{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+  .mark{width:40px;height:40px;flex:0 0 auto;filter:drop-shadow(0 5px 14px rgba(255,122,24,.35))}
+  .word{font-weight:800;letter-spacing:.14em;font-size:1.15rem}
+  .eyebrow{font-family:var(--mono);font-size:.72rem;letter-spacing:.24em;text-transform:uppercase;color:var(--acc);margin:22px 0 8px}
+  h1{font-size:1.7rem;font-weight:800;margin:0 0 6px;letter-spacing:-.01em}
+  .sub{color:var(--mut);margin:0 0 22px;font-size:.98rem}
+  .box{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:18px}
+  textarea{width:100%;background:var(--card2);color:var(--txt);border:1px solid var(--border);border-radius:12px;
+    padding:13px 14px;font-family:inherit;font-size:1rem;resize:vertical;min-height:72px}
+  textarea:focus{outline:2px solid var(--border-hot);border-color:transparent}
+  .row{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
+  button{background:var(--grad);color:#160C03;border:none;border-radius:12px;padding:13px 22px;font-weight:800;
+    font-size:1rem;cursor:pointer;flex:1;min-width:150px}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .chip{font-size:.82rem;color:var(--acc-hi);background:rgba(255,122,24,.1);border:1px solid var(--border-hot);
+    border-radius:999px;padding:6px 12px;cursor:pointer}
+  .stage{margin-top:20px;background:var(--card);border:1px solid var(--border);border-radius:18px;
+    min-height:220px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:18px;text-align:center;gap:14px}
+  .stage img{width:100%;max-width:512px;border-radius:12px;display:block}
+  .muted{color:var(--dim);font-family:var(--mono);font-size:.85rem}
+  .spin{width:34px;height:34px;border:3px solid rgba(255,140,50,.25);border-top-color:var(--acc);border-radius:50%;animation:s 1s linear infinite}
+  @keyframes s{to{transform:rotate(360deg)}}
+  /* yanıp sönen renkli uyarı */
+  .flash{font-weight:800;font-size:1.02rem;min-height:2.6em;display:flex;align-items:center;justify-content:center;padding:0 8px;animation:blink 1.05s ease-in-out infinite}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
+  .err{color:var(--bad);font-family:var(--mono);font-size:.9rem}
+  /* onay + koruma bloğu */
+  .shield{width:100%;max-width:512px;text-align:left}
+  .warnbox{background:rgba(255,194,75,.08);border:1px solid rgba(255,194,75,.35);border-radius:12px;padding:13px 14px;font-size:.9rem;color:#ffe0a3}
+  .warnbox b{color:var(--warn)}
+  .cert{margin-top:10px;font-family:var(--mono);font-size:.8rem;color:var(--mut)}
+  .cert a{color:var(--acc-hi)}
+  .onay{display:flex;gap:10px;align-items:flex-start;margin-top:14px;font-size:.9rem;color:var(--txt);cursor:pointer;line-height:1.45}
+  .onay input{margin-top:3px;width:18px;height:18px;flex:0 0 auto;accent-color:var(--acc)}
+  .dlbtn{margin-top:14px;width:100%}
+  @media (prefers-reduced-motion:reduce){.spin,.flash{animation:none}}
+  .foot{margin-top:22px;font-family:var(--mono);font-size:.76rem;color:var(--dim);line-height:1.7}
+  a.back{color:var(--mut);text-decoration:none;font-size:.85rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <svg class="mark" viewBox="0 0 100 100" aria-label="KUBRA">
+      <defs><linearGradient id="kg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFB14D"/><stop offset="1" stop-color="#FF6A12"/></linearGradient></defs>
+      <rect x="3" y="3" width="94" height="94" rx="24" fill="#F6F1EB"/>
+      <rect x="27" y="21" width="14" height="58" rx="4" fill="url(#kg)"/>
+      <polygon points="47,45 78,17 88,27 55,55" fill="url(#kg)"/>
+      <polygon points="55,45 88,73 78,83 47,55" fill="url(#kg)"/>
+    </svg>
+    <span class="word">KUBRA</span>
+  </header>
+
+  <p class="eyebrow">Görsel Stüdyo · Korumalı</p>
+  <h1>Hayalini yaz, KUBRA çizsin 🎨</h1>
+  <p class="sub">Ne istediğini anlat — KUBRA senin için üretsin. Her üretim <b style="color:var(--acc-hi)">zincirde kayıt altına alınır</b> (köken/sahiplik kanıtı). Şimdilik ücretsiz.</p>
+
+  <div class="box">
+    <textarea id="istem" placeholder="Örn: güneş gözlüklü komik bir kedi, çizgi roman tarzı"></textarea>
+    <div class="chips" id="ornekler">
+      <span class="chip">güneş gözlüklü komik kedi, çizgi film</span>
+      <span class="chip">gün batımında fütüristik bir şehir</span>
+      <span class="chip">uzayda kahve içen astronot, dijital sanat</span>
+    </div>
+    <div class="row"><button id="uret">Görsel Üret</button></div>
+  </div>
+
+  <div class="stage" id="sahne">
+    <span class="muted">Görselin burada belirecek</span>
+  </div>
+
+  <p class="foot">
+    🛡️ <b style="color:var(--mut)">Koruma:</b> KUBRA istismar/zararlı içerik üretmez; ürettiğin her görsel zincire kaydedilir.<br>
+    💡 İngilizce yazarsan sonuç genelde daha iyi olur. Model: SDXL-Turbo · GPU'da üretilir (başlangıçta ücretsiz).<br>
+    <a class="back" href="/">← Ana sayfa</a> · <a class="back" href="/ask.html">KUBRA'ya Sor</a>
+  </p>
+</div>
+
+<script>
+const BRAIN = window.KUBRA_BRAIN || "https://aidag-chain.com/kubra-brain";
+const istem = document.getElementById("istem");
+const btn = document.getElementById("uret");
+const sahne = document.getElementById("sahne");
+
+const UYARILAR = [
+  "⚠️ Ürettiğin içerik herkese açıktır — kötü niyetli kişilerce kullanılabilir.",
+  "🛡️ KUBRA istismar veya zararlı içerik üretmez.",
+  "📜 Bu üretim zincire kaydediliyor — sahiplik kanıtın olacak.",
+  "🚫 Başkalarını rızasız tasvir etmek yasaktır.",
+];
+let flashTimer = null;
+
+document.getElementById("ornekler").addEventListener("click", e=>{
+  if(e.target.classList.contains("chip")){ istem.value = e.target.textContent; istem.focus(); }
+});
+
+function flashBasla(){
+  let i = 0;
+  sahne.innerHTML = '<div class="spin"></div><div class="flash" id="flash" style="color:var(--warn)"></div>';
+  const el = document.getElementById("flash");
+  const renkler = ["#FFC24B","#FF7A18","#5DC985","#FFB24D"];
+  const tik = ()=>{ el.textContent = UYARILAR[i % UYARILAR.length]; el.style.color = renkler[i % renkler.length]; i++; };
+  tik(); flashTimer = setInterval(tik, 1600);
+}
+function flashDur(){ if(flashTimer){ clearInterval(flashTimer); flashTimer=null; } }
+
+function sonucGoster(blobUrl, verifyPath){
+  const belge = verifyPath ? ('<div class="cert">📜 Köken belgesi: <a href="'+verifyPath+'" target="_blank">zincirde doğrula</a></div>') : '';
+  sahne.innerHTML =
+    '<img src="'+blobUrl+'" alt="üretilen görsel">'+
+    '<div class="shield">'+
+      '<div class="warnbox"><b>Uyarı:</b> Bu içerik AI ile üretildi ve herkese açıktır. Kötü niyetli kişilerce kullanılabileceğini biliyorum. Başkalarını rızasız/istismar amaçlı kullanmayacağım. Sahipliğim zincirde kayıtlıdır.'+belge+'</div>'+
+      '<label class="onay"><input type="checkbox" id="onay"> Yukarıdaki uyarıları <b>okudum ve kabul ediyorum.</b></label>'+
+      '<button class="dlbtn" id="indir" disabled>⬇ Kabul et ve indir</button>'+
+    '</div>';
+  const onay = document.getElementById("onay");
+  const indir = document.getElementById("indir");
+  onay.addEventListener("change", ()=>{ indir.disabled = !onay.checked; });
+  indir.addEventListener("click", ()=>{
+    if(!onay.checked) return;
+    const a = document.createElement("a");
+    a.href = blobUrl; a.download = "kubra-gorsel.png";
+    document.body.appendChild(a); a.click(); a.remove();
+  });
+}
+
+async function uret(){
+  const prompt = istem.value.trim();
+  if(!prompt){ istem.focus(); return; }
+  btn.disabled = true;
+  flashBasla();
+  try{
+    const r = await fetch(BRAIN + "/v1/image", {
+      method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ prompt })
+    });
+    flashDur();
+    if(!r.ok){
+      let msg = "Üretim başarısız (HTTP "+r.status+")";
+      try{ const t = await r.text(); if(t) msg = t; }catch(e){}
+      sahne.innerHTML = '<span class="err">🚫 '+msg+'</span>';
+      btn.disabled = false; return;
+    }
+    const verify = r.headers.get("x-kubra-verify") || "";
+    const blob = await r.blob();
+    sonucGoster(URL.createObjectURL(blob), verify);
+  }catch(e){
+    flashDur();
+    sahne.innerHTML = '<span class="err">Bir hata oluştu — tekrar dene</span>';
+  }
+  btn.disabled = false;
+}
+btn.onclick = uret;
+istem.addEventListener("keydown", e=>{ if(e.key==="Enter" && (e.ctrlKey||e.metaKey)) uret(); });
+</script>
+</body>
+</html>

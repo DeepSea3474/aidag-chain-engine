@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ask KUBRA — Free, Sovereign AI</title>
+<style>
+  :root {
+    --bg:#0a1120; --bg2:#0e1729; --card:#111c30; --ink:#e9eef7; --dim:#8fa2bd;
+    --acc:#d4a24e;
+    --acc2:#3ba7c4;
+    --user:#16233c; --userline:#26436b;
+    --line:#1e2c44; --ok:#3ddc97;
+  }
+  * { box-sizing:border-box; }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  body {
+    margin:0; font:16px/1.65 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    background:radial-gradient(1200px 600px at 50% -10%, #12213c 0%, var(--bg) 60%);
+    color:var(--ink); min-height:100vh;
+    padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .wrap { max-width:760px; margin:0 auto; padding:20px 14px 40px; }
+  .top { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:4px; }
+  .brand { display:flex; align-items:center; gap:12px; }
+  .logo { height:40px; width:40px; border-radius:10px; }
+  h1 { font-size:1.35rem; margin:.1em 0; letter-spacing:-.01em; }
+  .sub { color:var(--dim); margin:.2em 0 0; font-size:.92rem; }
+  .lang { display:flex; gap:3px; background:#0c1526; border:1px solid var(--line); border-radius:999px; padding:3px; }
+  .lang button { border:0; background:transparent; color:var(--dim); padding:5px 13px; border-radius:999px; cursor:pointer; font-weight:600; font-size:.82rem; }
+  .lang button.sel { background:var(--acc2); color:#04121a; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:14px; margin:14px 0; }
+  #konusma { display:flex; flex-direction:column; gap:14px; min-height:120px; }
+  .msg {
+    padding:12px 15px; border-radius:14px; max-width:90%;
+    white-space:pre-wrap;
+    overflow-wrap:anywhere; word-break:break-word;
+  }
+  .soru { align-self:flex-end; background:var(--user); border:1px solid var(--userline); border-bottom-right-radius:4px; }
+  .cevap { align-self:flex-start; background:var(--bg2); border:1px solid var(--line); border-bottom-left-radius:4px; position:relative; }
+  .cevap a { color:var(--acc2); word-break:break-all; }
+  .cevap .src { color:var(--dim); font-size:.76rem; margin-top:8px; padding-top:8px; border-top:1px solid var(--line); }
+  .proof {
+    display:inline-flex; align-items:center; gap:6px; margin-top:10px;
+    font-size:.72rem; color:var(--acc); background:rgba(212,162,78,.08);
+    border:1px solid rgba(212,162,78,.25); border-radius:999px; padding:4px 10px;
+    text-decoration:none;
+  }
+  .proof:hover { background:rgba(212,162,78,.16); }
+  .proof .h { color:var(--dim); font-family:ui-monospace,monospace; }
+  .dusun { display:flex; align-items:center; gap:11px; color:var(--acc2); font-size:.9rem; }
+  .spiral { width:26px; height:26px; flex:none; animation:spin 1.4s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .dusun .dots::after { content:""; animation:dots 1.4s steps(4,end) infinite; }
+  @keyframes dots { 0%{content:"";} 25%{content:"·";} 50%{content:"··";} 75%{content:"···";} }
+  .cursor::after { content:"▋"; color:var(--acc2); animation:blink 1s steps(2) infinite; margin-left:1px; }
+  @keyframes blink { 50% { opacity:0; } }
+  .inrow { display:flex; gap:10px; margin-top:12px; }
+  input[type=text] { flex:1; padding:14px; border-radius:12px; border:1px solid var(--line); background:#0c1526; color:var(--ink); font-size:1rem; }
+  input[type=text]:focus { outline:none; border-color:var(--acc2); }
+  .btn { border:0; border-radius:12px; padding:14px 22px; font-size:1rem; font-weight:700; cursor:pointer; background:var(--acc); color:#1a1204; }
+  .btn:disabled { opacity:.45; cursor:not-allowed; }
+  a { color:var(--acc2); }
+  .note { color:var(--dim); font-size:.86rem; }
+  .cta { background:linear-gradient(100deg,#0f2033,#122a1f); border:1px solid #26463a; }
+  @media (prefers-reduced-motion: reduce) { .spiral,.cursor::after,.dusun .dots::after { animation:none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div class="brand">
+      <img src="/aidag-logo.jpg" alt="AIDAG / KUBRA" class="logo" onerror="this.style.display='none'">
+      <div><h1><span data-i="title">Ask KUBRA</span></h1></div>
+    </div>
+    <div class="lang">
+      <button id="en" class="sel" onclick="setLang('en')">EN</button>
+      <button id="tr" onclick="setLang('tr')">TR</button>
+    </div>
+  </div>
+  <p class="sub" data-i="sub"></p>
+  <div class="card">
+    <div id="konusma"></div>
+    <div class="inrow">
+      <input id="soru" type="text" data-i-ph="ph" autocomplete="off">
+      <button id="sor" class="btn" data-i="ask"></button>
+    </div>
+    <p class="note" data-i="speed" style="margin:10px 0 0"></p>
+  </div>
+  <div class="card cta">
+    <b data-i="ctaTitle"></b>
+    <p class="note" data-i="ctaText" style="margin:6px 0 10px"></p>
+    <a href="/katil" class="btn" style="text-decoration:none;display:inline-block" data-i="ctaBtn"></a>
+  </div>
+  <p class="note" data-i="foot"></p>
+</div>
+<script>
+const I18N = {
+  en: {
+    title:"Ask KUBRA", sub:"A free, sovereign, open AI — owned by the people who build it, not a corporation.",
+    ph:"Ask anything…", ask:"Ask",
+    speed:"⚠️ KUBRA runs on donated compute (CPU for now). It answers live, word by word — every answer is written to a public chain.",
+    ctaTitle:"⚡ Make KUBRA faster & smarter", ctaText:"Contribute your browser's spare power and earn AIDAG LSC. No install.",
+    ctaBtn:"Contribute →",
+    foot:"Every answer is grounded (from sources, no hallucination) and written to a public chain. Open, verifiable, yours.",
+    thinking:"KUBRA is thinking", srcs:"sources",
+    err:"Something went wrong. Please try again.", empty:"Type a question first.",
+    noanswer:"No answer yet — try again.",
+    proof:"written to chain", verify:"verify",
+    genOpen:"Sure — I can create that for you. Type what you want and press Generate:",
+    genPh:"e.g. a funny cat with sunglasses, cartoon", genBtn:"Generate", genThink:"KUBRA is creating…",
+    genWarn:"⚠️ AI-generated & public. It may be misused; I never depict anyone without consent. Ownership is recorded on-chain.",
+    genCert:"📜 Provenance:", genVerify:"verify on-chain", genDl:"Download",
+    genConsent:"I read and accept the warning. Download?",
+    genStudio:"🎨 Open Image Studio →", genOr:"…or generate right here:",
+    genStudio2:"🎨 Create Content →",
+  },
+  tr: {
+    title:"KUBRA'ya Sor", sub:"Ücretsiz, egemen, açık bir yapay zeka — şirketlerin değil, onu inşa edenlerin.",
+    ph:"Ne istersen sor…", ask:"Sor",
+    speed:"⚠️ KUBRA bağışlanan güçte çalışır (şimdilik CPU). Canlı, kelime kelime cevaplar — her cevap halka açık zincire yazılır.",
+    ctaTitle:"⚡ KUBRA'yı hızlandır & güçlendir", ctaText:"Tarayıcının boştaki gücünü ver, AIDAG LSC kazan. Kurulum yok.",
+    ctaBtn:"Katkı Ver →",
+    foot:"Her cevap kaynağa dayanır (uydurma yok) ve halka açık zincire yazılır. Açık, doğrulanabilir, senin.",
+    thinking:"KUBRA düşünüyor", srcs:"kaynaklar",
+    err:"Bir şeyler ters gitti. Tekrar dene.", empty:"Önce bir soru yaz.",
+    noanswer:"Henüz cevap yok — tekrar dene.",
+    proof:"zincire yazıldı", verify:"doğrula",
+    genOpen:"Tabii — senin için üretebilirim. Ne istediğini yaz ve Üret'e bas:",
+    genPh:"örn: güneş gözlüklü komik bir kedi, çizgi film", genBtn:"Üret", genThink:"KUBRA üretiyor…",
+    genWarn:"⚠️ AI üretimi ve herkese açık. Kötüye kullanılabilir; kimseyi rızasız tasvir etmem. Sahiplik zincirde kayıtlı.",
+    genCert:"📜 Köken belgesi:", genVerify:"zincirde doğrula", genDl:"İndir",
+    genConsent:"Uyarıyı okudum ve kabul ediyorum. İndirilsin mi?",
+    genStudio:"🎨 Görsel Stüdyo'yu Aç →", genOr:"…ya da hemen burada üret:",
+    genStudio2:"🎨 İçerik Oluştur →",
+  }
+};
+let L = localStorage.getItem("kubra_lang") || "en";
+const t = k => (I18N[L][k] ?? I18N.en[k]);
+function setLang(lang){
+  L=lang; localStorage.setItem("kubra_lang",lang); document.documentElement.lang=lang;
+  document.getElementById("en").classList.toggle("sel",lang==="en");
+  document.getElementById("tr").classList.toggle("sel",lang==="tr");
+  document.querySelectorAll("[data-i]").forEach(el=>{const v=t(el.dataset.i); if(typeof v==="string") el.textContent=v;});
+  document.querySelectorAll("[data-i-ph]").forEach(el=>{const v=t(el.dataset.iPh); if(typeof v==="string") el.placeholder=v;});
+}
+const BRAIN = window.KUBRA_BRAIN || "https://aidag-chain.com/kubra-brain";
+const $ = id => document.getElementById(id);
+const konusma = $("konusma");
+const SPIRAL = '<svg class="spiral" viewBox="0 0 24 24" fill="none" stroke="var(--acc2)" stroke-width="2" stroke-linecap="round"><path d="M12 3a9 9 0 1 1-9 9"/><path d="M12 7a5 5 0 1 0 5 5" opacity=".6"/></svg>';
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function linkify(txt){
+  let s = esc(txt);
+  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank">$1</a>');
+  s = s.replace(/(^|[^"=\/])((https?:\/\/)[^\s<)]+)/g,'$1<a href="$2" target="_blank">$2</a>');
+  s = s.replace(/(^|[\s(>])((?:www\.)?aidag-chain\.com\/[a-zA-Z]+)/g,'$1<a href="https://$2" target="_blank">$2</a>');
+  return s;
+}
+function ekleSoru(txt){ const d=document.createElement("div"); d.className="msg soru"; d.textContent=txt; konusma.appendChild(d); kaydir(); return d; }
+function kaydir(){ konusma.scrollTop = konusma.scrollHeight; }
+function gorselIstegi(q){
+  const s = q.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g,"").replace(/ı/g,"i");
+  const kelimeler = ["gorsel","resim","resmi","resmin","ciz","cizim","fotograf","foto","image","picture","draw","illustr","logo","afis","poster","tasarla","tasarim","resim yap","gorsel yap","cizer misin","cizebilir","studyo"];
+  return kelimeler.some(k=>s.includes(k));
+}
+async function sor(){
+  const q = $("soru").value.trim();
+  if(!q) return;
+  $("soru").value=""; ekleSoru(q); $("sor").disabled = true;
+  const cevap = document.createElement("div"); cevap.className="msg cevap";
+  const dusun = document.createElement("div"); dusun.className="dusun";
+  dusun.innerHTML = SPIRAL + '<span>'+t("thinking")+'<span class="dots"></span></span>';
+  cevap.appendChild(dusun); konusma.appendChild(cevap); kaydir();
+  if(gorselIstegi(q)){
+    cevap.innerHTML = t("genOpen")+' <a href="/gorsel">'+t("genStudio")+'</a>';
+    $("sor").disabled=false; $("soru").focus(); return;
+  }
+  let metin = "", govde = null, kaynaklar = null;
+  try {
+    const r = await fetch(BRAIN+"/v1/ask-stream", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ prompt:q, deterministic:true })
+    });
+    if(!r.ok || !r.body) throw new Error("stream");
+    const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = "";
+    while(true){
+      const {value, done} = await reader.read();
+      if(done) break;
+      buf += dec.decode(value, {stream:true});
+      let sep;
+      while((sep = buf.indexOf("\n\n")) >= 0){
+        const blok = buf.slice(0, sep); buf = buf.slice(sep+2);
+        let ev="message", data="";
+        for(const line of blok.split("\n")){
+          if(line.startsWith("event:")) ev = line.slice(6).trim();
+          else if(line.startsWith("data:")) data += line.slice(5).replace(/^ /,"");
+        }
+        if(ev==="sources"){ try { kaynaklar = JSON.parse(data); } catch(e){} }
+        else if(ev==="token"){
+          if(!govde){ cevap.innerHTML=""; govde=document.createElement("div"); govde.className="cursor"; cevap.appendChild(govde); }
+          metin += data; govde.innerHTML = linkify(metin); kaydir();
+        }
+        else if(ev==="done"){
+          if(govde) govde.classList.remove("cursor");
+          let proof=null; try { proof=JSON.parse(data); } catch(e){}
+          if(kaynaklar && kaynaklar.length){
+            const src=document.createElement("div"); src.className="src";
+            src.textContent = t("srcs")+": "+kaynaklar.map(k=>k.baslik).join(" · ");
+            cevap.appendChild(src);
+          }
+          if(proof && proof.proof_hash){
+            const p=document.createElement("a"); p.className="proof";
+            const vp = (proof.chain && proof.chain.verify_path) ? proof.chain.verify_path : ("/rpc/belge/"+proof.proof_hash);
+            p.href = vp; p.target="_blank";
+            p.innerHTML = '⛓ '+t("proof")+' · <span class="h">'+proof.proof_hash.slice(0,16)+'…</span>';
+            cevap.appendChild(p);
+          }
+          const nn = metin.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g,"").replace(/ı/g,"i");
+          if(nn.includes("gorsel studyo")||nn.includes("/gorsel")){
+            const b2=document.createElement("a"); b2.href="/gorsel"; b2.className="btn";
+            b2.style.cssText="text-decoration:none;display:block;margin-top:12px;text-align:center;background:var(--acc2);color:#04121a";
+            b2.textContent=t("genStudio2"); cevap.appendChild(b2);
+          }
+          kaydir();
+        }
+        else if(ev==="error"){ cevap.innerHTML = '<span style="color:#ff8a6a">'+esc(data||t("err"))+'</span>'; }
+      }
+    }
+    if(!metin && !govde){ cevap.innerHTML='<span class="note">'+t("noanswer")+'</span>'; }
+  } catch(e){ cevap.innerHTML = '<span style="color:#ff8a6a">'+t("err")+'</span>'; }
+  $("sor").disabled=false; $("soru").focus();
+}
+$("sor").onclick = sor;
+$("soru").addEventListener("keydown", e=>{ if(e.key==="Enter") sor(); });
+setLang(L);
+</script>
+</body>
+</html>

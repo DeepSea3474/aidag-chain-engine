@@ -17,8 +17,9 @@ mod retrieval;   // grounding kaynak katmanı (yerel egemen depo + canlı wiki)
 mod embed;       // semantik gömme (embedding) — anlam-bazlı retrieval
 mod hesap;       // deterministik hesap makinesi aracı (araç-kullanımı)
 mod zincir;      // deterministik zincir sorgu araci (arac-kullanimi)
+mod stream;      // SSE streaming (cevabi harf harf akitir)
 
-use axum::{extract::State, routing::{get, post}, response::IntoResponse, http::{StatusCode, header}, body::Body, Json, Router};
+use axum::{extract::State, routing::{get, post}, response::{IntoResponse, Sse, sse::Event}, http::{StatusCode, header}, body::Body, Json, Router};
 use ed25519_dalek::SigningKey;
 use lsc_engine::dag::wire;
 use lsc_engine::tx::Record;
@@ -116,7 +117,7 @@ bir insanın seni ya da bir şeyi 'yarattığını' söyleme — 'üretti' veya 
 GÖRSEL ÜRETEBİLİRSİN: kullanıcı resim/görsel/çizim isterse, bunu Görsel Stüdyo sayfasında yaptığını \
 söyle ve yönlendir: aidag-chain.com/gorsel (orada isteğini yazınca senin için görsel üretilir). \
 Dürüst ve faydalısın: ASLA uydurma — emin değilsen 'Bilmiyorum' de, mümkünse kaynağını göster. \
-Kullanıcının dilinde, kısa ve net yanıtla.";
+DİL KURALI (ÇOK ÖNEMLİ): Yanıtını HER ZAMAN ve YALNIZCA Türkçe yaz. Kaynaklar veya bağlam başka dilde (Çince, İngilizce vb.) olsa bile ASLA o dilde yazma — her şeyi Türkçeye çevir. Kısa ve net yanıtla.";
 
 // SORU TIPI: kanit-gerektiren mi (teknik/olgusal/kod/AIDAG) yoksa zararsiz sohbet mi?
 // Kanit modunda kaynak yoksa KUBRA cevabi verir AMA "kaynagim yok" diye uyarir
@@ -145,8 +146,9 @@ fn grounded_user(prompt: &str, context: Option<&str>) -> String {
     match context {
         // KAYNAK VAR: her iki modda da kaynaktan cevap ver (grounding).
         Some(c) if !c.trim().is_empty() => format!(
-            "Aşağıda konuyla ilgili KAYNAKLAR var. Cevabını ÖNCELIKLE bunlara dayandır; bir olgu \
-kaynaktan geliyorsa belirt. Kaynak dışına çıkarsan bunu açıkça söyle. Kısa ve net yanıtla.\n\nKAYNAKLAR:\n{c}\nSORU:\n{prompt}"
+            "ÖNEMLİ: Yanıtının TAMAMINI yalnızca TÜRKÇE yaz. Başka hiçbir dil (İngilizce, Çince vb.) kullanma, \
+kaynaklar başka dilde olsa bile Türkçeye çevirerek yanıtla. Aşağıda konuyla ilgili KAYNAKLAR var. \
+Cevabını ÖNCELIKLE bunlara dayandır; bir olgu kaynaktan geliyorsa belirt. Kaynak dışına çıkarsan bunu açıkça söyle. Kısa ve net yanıtla.\n\nKAYNAKLAR:\n{c}\nSORU:\n{prompt}"
         ),
         // KAYNAK YOK + KANIT MODU: cevap ver AMA kaynaksiz oldugunu seffafca uyar.
         _ if kanit => format!(
@@ -238,6 +240,7 @@ async fn beyin_remote(st: &AppState, user_content: &str, temp: f64) -> Result<Br
         "max_tokens": st.cfg.max_tokens,
         "temperature": temp,
         "stream": false,
+        "stop": ["\nuser", "user\n", "\nUser", "<|im_end|>", "<|im_start|>", "\nSORU:"],
     });
     let resp = st
         .http
@@ -670,6 +673,96 @@ async fn info(State(st): State<Arc<AppState>>) -> Json<Value> {
     }))
 }
 
+
+// ── SSE STREAMING ENDPOINT: cevabi harf harf (token token) akitir ──
+// Arac (belge/ag/zincir) varsa tek seferde akitir (zaten anlik).
+// Yoksa: grounding + beyin stream:true -> token'lar akar -> bitince zincire yaz.
+async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> impl IntoResponse {
+    use tokio::sync::mpsc;
+    let (tx, rx) = mpsc::channel::<Result<Event, std::convert::Infallible>>(64);
+    let ts = now_secs();
+
+    tokio::spawn(async move {
+        if req.prompt.trim().is_empty() {
+            let _ = tx.send(Ok(Event::default().event("error").data("prompt bos"))).await;
+            return;
+        }
+
+        // 1) ARACLAR: belge/ag/zincir — varsa tek seferde akit (anlik cevap).
+        let arac = if let Some(x) = zincir::belge_dogrula(&st.http, &st.cfg.chain_rpc, &req.prompt).await { Some((x, "belge-dogrula")) }
+            else if let Some(x) = zincir::ag_durumu(&st.http, &st.cfg.chain_rpc, &req.prompt).await { Some((x, "ag-durumu")) }
+            else if let Some(x) = zincir::sorgula(&st.http, &st.cfg.chain_rpc, &req.prompt).await { Some((x, "zincir-sorgu")) }
+            else { None };
+
+        if let Some((sonuc, arac_ad)) = arac {
+            // Araci kelime kelime akit (gorsel akis butunlugu icin)
+            for parca in sonuc.split_inclusive(' ') {
+                let _ = tx.send(Ok(Event::default().event("token").data(parca))).await;
+                tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+            }
+            // Zincire yaz + proof
+            let mut h = blake3::Hasher::new();
+            h.update(&st.cfg.net_id.to_le_bytes()); h.update(&ts.to_le_bytes());
+            h.update(req.prompt.as_bytes()); h.update(&[0x1e]);
+            h.update(sonuc.as_bytes()); h.update(&[0x1e]); h.update(arac_ad.as_bytes());
+            let data_hash: [u8;32] = *h.finalize().as_bytes();
+            let chain = zincire_yaz(&st, data_hash, ts).await;
+            let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "model": arac_ad, "brain": "arac", "chain": chain});
+            let _ = tx.send(Ok(Event::default().event("done").data(proof.to_string()))).await;
+            return;
+        }
+
+        // 2) GROUNDING: kaynak getir
+        let mut kaynaklar: Vec<Kaynak> = vec![];
+        let etkin_baglam: Option<String> = if req.ground.unwrap_or(st.cfg.ground) {
+            let pasajlar = {
+                let depo = match st.depo.lock() { Ok(g)=>g, Err(p)=>p.into_inner() };
+                depo.ara(&req.prompt, st.cfg.ground_k, st.cfg.ground_min, st.cfg.ground_ratio)
+            };
+            if pasajlar.is_empty() { None } else {
+                for p in &pasajlar { kaynaklar.push(Kaynak{ kaynak:p.kaynak.clone(), baslik:p.baslik.clone(), url:p.url.clone() }); }
+                Some(retrieval::baglam_yap(&pasajlar, st.cfg.ground_snippet))
+            }
+        } else { None };
+
+        // Kaynaklari onceden gonder (arayuz gosterebilir)
+        if !kaynaklar.is_empty() {
+            let ks = serde_json::to_string(&kaynaklar).unwrap_or_default();
+            let _ = tx.send(Ok(Event::default().event("sources").data(ks))).await;
+        }
+
+        let user_content = grounded_user(&req.prompt, etkin_baglam.as_deref());
+        let temp = if req.deterministic.unwrap_or(false) { 0.0 } else { 0.3 };
+
+        // 3) BEYIN STREAM: token token akit
+        let remote_url = st.cfg.remote_url.clone().unwrap_or_default();
+        if remote_url.is_empty() {
+            let _ = tx.send(Ok(Event::default().event("error").data("stream yalniz uzak beyin ile calisir"))).await;
+            return;
+        }
+        let tam = stream::beyin_stream(&st.http, &remote_url, &st.cfg.remote_model,
+            SYSTEM_PROMPT, &user_content, temp, st.cfg.max_tokens, &tx).await;
+
+        match tam {
+            Ok(metin) => {
+                // Zincire yaz + proof
+                let mut h = blake3::Hasher::new();
+                h.update(&st.cfg.net_id.to_le_bytes()); h.update(&ts.to_le_bytes());
+                h.update(req.prompt.as_bytes()); h.update(&[0x1e]);
+                h.update(metin.as_bytes());
+                let data_hash: [u8;32] = *h.finalize().as_bytes();
+                let chain = zincire_yaz(&st, data_hash, ts).await;
+                let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "model": st.cfg.remote_model, "brain": "kubra-gpu", "grounded": !kaynaklar.is_empty(), "chain": chain});
+                let _ = tx.send(Ok(Event::default().event("done").data(proof.to_string()))).await;
+            }
+            Err(e) => { let _ = tx.send(Ok(Event::default().event("error").data(e))).await; }
+        }
+    });
+
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+    Sse::new(stream)
+}
+
 async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<AskResp> {
     let t0 = std::time::Instant::now();
     let ts = now_secs();
@@ -1014,6 +1107,7 @@ async fn main() {
         .route("/health", get(health))
         .route("/", get(info))
         .route("/v1/ask", post(ask))
+        .route("/v1/ask-stream", post(ask_stream))
         .route("/v1/image", post(gorsel))
         .route("/v1/video", post(video_uret))
         .route("/kb/ingest", post(kb_ingest))
