@@ -1,0 +1,11 @@
+AIDAG-Chain Gelistirme Kaydi
+Tarih: 2026-09-21
+Commit: 902fbb6
+Is ozeti:
+- KUBRA gercek SSE streaming (harf harf, token token)
+- Dil duzeltmesi: yalnizca Turkce (Cince sizmasi cozuldu)
+- Modern arayuz: dusunme animasyonu + zincir proof muhru + tasma fix
+- Komutlar sayfasi (sistem sagligi, kopyala butonlu)
+- Sunucu tam onarim: nginx, Cloudflare SSL, belge dogrulama, sohbet
+Zincir: chain_id 3474, canli mainnet
+Imza: DeepSea (Aydin Akyuz)

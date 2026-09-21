@@ -1,0 +1,8 @@
+AIDAG-Chain Zincir Damgasi — 2026-09-21
+Dosya: 2026-09-21-gelistirme.txt
+Hash (blake3): 0dcce43d9a705bcdeb481f5447a0516d319bbb8cc33031f466f828f10a0c544f
+Kaydeden: 0871f3aabc26e4582c508af5c03884e6a96f0989
+Zaman: 1790020674
+Zincir: chain_id 3474, canli mainnet
+Dogrulama: https://aidag-chain.com/belge (bu hash'i sorgula)
+Durum: kayitli=true, degismedi
