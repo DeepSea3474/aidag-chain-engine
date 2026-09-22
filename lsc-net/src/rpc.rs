@@ -495,6 +495,8 @@ async fn on_satis_tahsis(State(st): State<RpcState>, Path(adres_hex): Path<Strin
         "ok": true,
         "adres": adres_hex.trim(),
         "tge": tge,
+        // TGE tarihi acik birakildiysa (TGE_BELIRSIZ) arayuz tarih DEGIL "belirlenmedi" gostermeli.
+        "tge_belirlendi": tge < lsc_engine::mainnet::TGE_BELIRSIZ,
         "simdi": simdi,
         "tge_gecti": simdi >= tge,
         "toplam_tahsis": toplam_tahsis.to_string(),

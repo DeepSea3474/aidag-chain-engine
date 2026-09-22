@@ -348,8 +348,19 @@ pub const COMPUTE_REWARD_EMISYON_TAVAN: u128 = 210_000_000 * crate::genesis::OND
 /// Deterministik: pencere = vertex zaman damgasi / 86400 (tum dugumler ayni).
 pub const ON_SATIS_GUNLUK_CAP: u128 = 100_000 * crate::genesis::ONDALIK;
 
-// TGE geçmise-ayar korumasi (tip=15): owner TGE'yi ayarlarken, ayarlanan TGE
-// zamani MEVCUT zamandan (vertex damgasi) daha ERKEN olamaz. Ele gecen anahtar
-// "TGE dun oldu" deyip herkesin vesting kilidini erkenden acamaz. Kesin TGE
-// tarihi hala serbestce (ileriye) ayarlanabilir — bu sadece gecmise ayari engeller.
-// (Sabit degil, kural node.rs tip=15 yolunda uygulanir; burada yalnizca dokumante.)
+/// TGE ONCEDEN BILDIRIM SURESI (tip=15 custody korumasi): owner'in ayarladigi TGE,
+/// ZINCIR SAATINDEN (total_order'daki en buyuk vertex zamani) en az bu kadar SONRA
+/// olmalidir. Politika (kurucu, 2026-09-22): TGE tarihi ACIK birakilir; on satis
+/// (1.680.000 AIDAG) bitip listeleme/launchpad karari alininca tarih+saat owner
+/// tarafindan belirlenir. Satis aniden bitebilecegi icin bildirim KISA (3 gun)
+/// tutuldu; sifir DEGIL: ele gecen owner anahtari kilidi "hemen"/gecmise acamaz,
+/// her TGE karari en az 3 gun once zincirde herkese gorunur.
+/// Ek kural (node.rs): TGE gunu geldikten sonra TGE KESINLESIR, degistirilemez
+/// (acilmis kilitler geri kilitlenemez). Deterministik: tum dugumler ayni.
+pub const TGE_MIN_BILDIRIM_SURESI: u64 = 3 * 86_400;
+
+/// TGE "BELIRLENMEDI" isareti (2100-01-01 00:00 UTC). Tarih acik birakilirken owner
+/// TGE'yi bu degere ayarlar: vesting acilmaz (hak edilen = 0), RPC/arayuz bunu
+/// tarih olarak DEGIL "belirlenmedi" olarak gosterir. Karar alininca owner gercek
+/// tarihi (>= simdi + bildirim) ayarlar.
+pub const TGE_BELIRSIZ: u64 = 4_102_444_800;

@@ -1270,13 +1270,19 @@ impl NodeState {
             Some(&crate::tx::TX_TYPE_TGE_AYARLA) => {
                 if let Ok(t) = crate::tx::TgeAyarla::decode(payload) {
                     let cagiran = crate::registry::public_key_to_adres(signer);
-                    // GECMISE-AYAR KORUMASI (custody): ayarlanan TGE, ZINCIR SAATINDEN
-                    // (siradaki en buyuk vertex zamani) daha ERKEN olamaz. Vertex zamani
-                    // DEGIL: onu imzalayan secer; ele gecen anahtar eski tarihli vertex'le
-                    // "TGE dun oldu" deyip vesting kilidini erkenden acardi.
-                    // Kesin TGE tarihi hala ILERIYE serbestce ayarlanabilir.
+                    // CUSTODY KORUMASI (bkz. mainnet::TGE_MIN_BILDIRIM_SURESI):
+                    //  (a) ONCEDEN BILDIRIM: yeni TGE >= zincir saati + bildirim suresi. Vertex
+                    //      zamani DEGIL zincir saati: onu imzalayan secemez (eski tarihli
+                    //      vertex'le "TGE dun/simdi" denemesi calismaz).
+                    //  (b) KESINLIK: mevcut TGE'ye ulasildiysa TGE artik degismez
+                    //      (acilmis vesting geri kilitlenemez, alici korunur).
                     // Deterministik: zincir saati total_order'dan turer (tum dugumler ayni).
-                    if self.faucet_owner == Some(cagiran) && t.tge >= self.zincir_saati {
+                    let tge_kesin = self.zincir_saati >= self.on_satis_tge();
+                    let bildirim_ok = t.tge
+                        >= self
+                            .zincir_saati
+                            .saturating_add(crate::mainnet::TGE_MIN_BILDIRIM_SURESI);
+                    if self.faucet_owner == Some(cagiran) && !tge_kesin && bildirim_ok {
                         self.on_satis_tge = Some(t.tge);
                     }
                 }
@@ -4171,12 +4177,48 @@ mod tests {
         assert_eq!(node.on_satis_tge(), ileri,
             "gecmise-ayar REDDEDILDI: TGE hala ileri degerde, degismedi");
 
-        // 3) BUGUNE (tam vertex zamani) ayar -> KABUL (>= zaman, sinirda gecerli)
-        let bugun = satis;
-        let v3 = Vertex::new_signed(NET, vec![*v2.id()], TgeAyarla::new(bugun).encode(), satis, &osk)
+        // 3) BUGUNE ("hemen ac") ayar -> RED: TGE bildirim suresi kadar once ilan edilmeli.
+        let v3 = Vertex::new_signed(NET, vec![*v2.id()], TgeAyarla::new(satis).encode(), satis, &osk)
             .expect("v3");
         node.ingest_networked(&wire::encode(&v3), satis);
-        assert_eq!(node.on_satis_tge(), bugun, "tam bugune (>=zaman) ayar kabul");
+        assert_eq!(node.on_satis_tge(), ileri, "bildirim suresiz (hemen) TGE REDDEDILDI");
+
+        // 4) Tam bildirim suresi sonrasi -> KABUL (sinirda); 1 sn eksik -> RED.
+        let bildirim = crate::mainnet::TGE_MIN_BILDIRIM_SURESI;
+        let v4 = Vertex::new_signed(NET, vec![*v3.id()], TgeAyarla::new(satis + bildirim - 1).encode(), satis, &osk)
+            .expect("v4");
+        node.ingest_networked(&wire::encode(&v4), satis);
+        assert_eq!(node.on_satis_tge(), ileri, "bildirim suresinden kisa REDDEDILDI");
+        let v5 = Vertex::new_signed(NET, vec![*v4.id()], TgeAyarla::new(satis + bildirim).encode(), satis, &osk)
+            .expect("v5");
+        node.ingest_networked(&wire::encode(&v5), satis);
+        assert_eq!(node.on_satis_tge(), satis + bildirim, "tam bildirim suresiyle KABUL");
+    }
+
+    #[test]
+    fn tge_gunu_gelince_kesinlesir() {
+        use crate::registry::public_key_to_adres;
+        use crate::tx::TgeAyarla;
+        let satis = crate::mainnet::ON_SATIS_BASLANGIC;
+        let bildirim = crate::mainnet::TGE_MIN_BILDIRIM_SURESI;
+
+        let mut node = NodeState::new_devnet(NET);
+        let (gen, gid) = genesis_bytes(1, satis);
+        node.ingest_networked(&gen, satis);
+        let osk = SigningKey::from_bytes(&[0x91u8; 32]);
+        node.faucet_owner_ayarla(public_key_to_adres(&osk.verifying_key().to_bytes()));
+
+        let tge = satis + bildirim;
+        let v1 = Vertex::new_signed(NET, vec![gid], TgeAyarla::new(tge).encode(), satis, &osk).unwrap();
+        node.ingest_networked(&wire::encode(&v1), satis);
+        assert_eq!(node.on_satis_tge(), tge);
+
+        // TGE gunu geldi (zincir saati >= TGE). Ertelemek artik MUMKUN DEGIL:
+        // acilmis kilitler geri kilitlenemez.
+        let v2 = Vertex::new_signed(NET, vec![*v1.id()], TgeAyarla::new(tge + 60 * 86400).encode(), tge, &osk)
+            .unwrap();
+        node.ingest_networked(&wire::encode(&v2), tge);
+        assert_eq!(node.on_satis_tge(), tge, "TGE gunu gelince TGE KESINLESIR");
     }
 
     // DENETIM (2026-09-22): vertex zamanini imzalayan secer ve gecmise siniri yok.
