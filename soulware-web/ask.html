@@ -77,6 +77,13 @@ const I18N = {
     thinking:"KUBRA is thinking… (verified by the network)", srcs:s=>"sources: "+s,
     err:"Something went wrong. Please try again.", empty:"Type a question first.",
     noanswer:"No answer yet — the network may be low on contributors. Try again, or contribute to help.",
+    genOpen:"Sure — I can create that for you. Type what you want and press Generate:",
+    genPh:"e.g. a funny cat with sunglasses, cartoon", genBtn:"Generate", genThink:"KUBRA is creating…",
+    genWarn:"⚠️ AI-generated & public. It may be misused; I never depict anyone without consent. Ownership is recorded on-chain.",
+    genCert:"📜 Provenance:", genVerify:"verify on-chain", genDl:"Download",
+    genConsent:"I read and accept the warning. Download?",
+    genStudio:"🎨 Open Image Studio →", genOr:"…or generate right here:",
+    genStudio2:"🎨 Create Content →",
   },
   tr: {
     title:"KUBRA'ya Sor", sub:"Ücretsiz, egemen, açık bir yapay zeka — şirketlerin değil, onu inşa edenlerin.",
@@ -88,6 +95,13 @@ const I18N = {
     thinking:"KUBRA düşünüyor… (ağ tarafından doğrulanıyor)", srcs:s=>"kaynaklar: "+s,
     err:"Bir şeyler ters gitti. Tekrar dene.", empty:"Önce bir soru yaz.",
     noanswer:"Henüz cevap yok — ağda katkıcı az olabilir. Tekrar dene ya da katkı vererek yardım et.",
+    genOpen:"Tabii — senin için üretebilirim. Ne istediğini yaz ve Üret'e bas:",
+    genPh:"örn: güneş gözlüklü komik bir kedi, çizgi film", genBtn:"Üret", genThink:"KUBRA üretiyor…",
+    genWarn:"⚠️ AI üretimi ve herkese açık. Kötüye kullanılabilir; kimseyi rızasız tasvir etmem. Sahiplik zincirde kayıtlı.",
+    genCert:"📜 Köken belgesi:", genVerify:"zincirde doğrula", genDl:"İndir",
+    genConsent:"Uyarıyı okudum ve kabul ediyorum. İndirilsin mi?",
+    genStudio:"🎨 Görsel Stüdyo'yu Aç →", genOr:"…ya da hemen burada üret:",
+    genStudio2:"🎨 İçerik Oluştur →",
   }
 };
 let L = localStorage.getItem("kubra_lang") || "en";
@@ -100,17 +114,75 @@ function setLang(lang){
 }
 
 const COORD = window.KUBRA_COORD || "https://aidag-chain.com/kubra-api";
+const BRAIN = window.KUBRA_BRAIN || "https://aidag-chain.com/kubra-brain";
 const $ = id => document.getElementById(id);
 const konusma = $("konusma");
 function ekle(cls, txt){ const d=document.createElement("div"); d.className="msg "+cls; d.textContent=txt; konusma.appendChild(d); konusma.scrollTop=konusma.scrollHeight; return d; }
+// Cevaptaki URL/yolları tıklanabilir linke çevir (güvenli: önce HTML kaçışı)
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function linkify(txt){
+  let s = esc(txt);
+  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank">$1</a>'); // markdown
+  s = s.replace(/(^|[^"=\/])((https?:\/\/)[^\s<)]+)/g,'$1<a href="$2" target="_blank">$2</a>');   // düz URL
+  s = s.replace(/(^|[\s(>])((?:www\.)?aidag-chain\.com\/[a-zA-Z]+)/g,'$1<a href="https://$2" target="_blank">$2</a>'); // protokolsüz
+  return s;
+}
 
 async function j(path, opt){ const r = await fetch(COORD+path, opt); return r.json(); }
+
+// Görsel/içerik üretim isteği mi?
+function gorselIstegi(q){
+  // Türkçe normalize: İ→i, ü→u, ç→c, ş→s, ğ→g, ö→o, ı→i (aksan/nokta temizle)
+  const s = q.toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g,"").replace(/ı/g,"i");
+  const kelimeler = ["gorsel","resim","resmi","resmin","ciz","cizim","fotograf","foto","image",
+    "picture","draw","illustr","logo","afis","poster","tasarla","tasarim","icerik uret",
+    "icerik olustur","icerik uretici","uretici","uret misin","uretir misin","resim yap","gorsel yap",
+    "cizer misin","cizebilir","bana bir resim","bana bir gorsel","studyo","uretecini","uretici ac"];
+  return kelimeler.some(k=>s.includes(k));
+}
+
+// Sohbette INLINE görsel üretim paneli (link yok, burada üretir)
+function gorselPaneli(prefill){
+  const d = ekle("cevap",""); d.innerHTML="";
+  const p = document.createElement("div"); p.textContent = t("genOpen"); d.appendChild(p);
+  const link = document.createElement("a");
+  link.href="/gorsel"; link.className="btn";
+  link.style.cssText="text-decoration:none;display:inline-block;margin:10px 0 4px;background:var(--acc2);color:#04102b";
+  link.textContent = t("genStudio"); d.appendChild(link);
+  const orp = document.createElement("div"); orp.className="note"; orp.style.margin="6px 0 2px"; orp.textContent = t("genOr"); d.appendChild(orp);
+  const row = document.createElement("div"); row.className="inrow";
+  const inp = document.createElement("input"); inp.type="text"; inp.value = prefill||""; inp.placeholder = t("genPh");
+  const b = document.createElement("button"); b.className="btn"; b.textContent = t("genBtn");
+  row.appendChild(inp); row.appendChild(b); d.appendChild(row);
+  const out = document.createElement("div"); out.style.marginTop="10px"; d.appendChild(out);
+  async function uret(){
+    const prompt = inp.value.trim(); if(!prompt){ inp.focus(); return; }
+    b.disabled=true; out.innerHTML='<span class="think">'+t("genThink")+'</span>';
+    try{
+      const r = await fetch(BRAIN+"/v1/image",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompt})});
+      if(!r.ok){ const m=(await r.text().catch(()=>""))||("HTTP "+r.status); out.innerHTML='<div style="color:#ff8a6a">🚫 '+m+'</div>'; b.disabled=false; return; }
+      const verify = r.headers.get("x-kubra-verify")||"";
+      const url = URL.createObjectURL(await r.blob());
+      out.innerHTML="";
+      const img=new Image(); img.src=url; img.style.maxWidth="100%"; img.style.borderRadius="10px"; img.style.display="block"; out.appendChild(img);
+      const w=document.createElement("div"); w.className="src"; w.style.color="#ffd48a"; w.textContent=t("genWarn"); out.appendChild(w);
+      if(verify){ const c=document.createElement("div"); c.className="src"; c.innerHTML=t("genCert")+' <a href="'+verify+'" target="_blank">'+t("genVerify")+'</a>'; out.appendChild(c); }
+      const dl=document.createElement("button"); dl.className="btn"; dl.style.marginTop="8px"; dl.textContent="⬇ "+t("genDl");
+      dl.onclick=()=>{ if(!confirm(t("genConsent"))) return; const a=document.createElement("a"); a.href=url; a.download="kubra-gorsel.png"; document.body.appendChild(a); a.click(); a.remove(); };
+      out.appendChild(dl);
+    }catch(e){ out.innerHTML='<div style="color:#ff8a6a">'+t("err")+'</div>'; }
+    b.disabled=false; konusma.scrollTop=konusma.scrollHeight;
+  }
+  b.onclick=uret; inp.addEventListener("keydown",e=>{ if(e.key==="Enter") uret(); });
+  konusma.scrollTop=konusma.scrollHeight; inp.focus();
+}
 
 async function sor(){
   const q = $("soru").value.trim();
   if(!q){ return; }
-  $("soru").value=""; $("sor").disabled=true;
-  ekle("soru", q);
+  $("soru").value=""; ekle("soru", q);
+  if(gorselIstegi(q)){ gorselPaneli(q); $("soru").focus(); return; }
+  $("sor").disabled=true;
   const bekle = ekle("cevap", ""); bekle.innerHTML = '<span class="think">'+t("thinking")+'</span>';
   try {
     const c = await j("/job/create", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ prompt:q, deterministic:true }) });
@@ -122,7 +194,16 @@ async function sor(){
       const s = await j("/job/"+c.job_id);
       if(s.ok && s.job && s.job.status==="verified"){ ans = s.job.verified_answer; break; }
     }
-    if(ans){ bekle.innerHTML=""; bekle.textContent = ans; }
+    if(ans){
+      bekle.innerHTML = linkify(ans);
+      // KUBRA görsel/stüdyodan bahsettiyse → tıklanır "İçerik Oluştur →" butonu ekle
+      const nn = ans.toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g,"").replace(/ı/g,"i");
+      if(nn.includes("gorsel")||nn.includes("studyo")||nn.includes("resim uret")||nn.includes("/gorsel")){
+        const b2=document.createElement("a"); b2.href="/gorsel"; b2.className="btn";
+        b2.style.cssText="text-decoration:none;display:block;margin-top:12px;text-align:center;background:var(--acc2);color:#04102b";
+        b2.textContent=t("genStudio2"); bekle.appendChild(b2);
+      }
+    }
     else { bekle.innerHTML='<span class="think">'+t("noanswer")+'</span>'; }
   } catch(e){ bekle.textContent = t("err"); }
   $("sor").disabled=false; $("soru").focus();

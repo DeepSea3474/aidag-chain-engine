@@ -1,0 +1,25 @@
+<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>QR Test - AIDAG-Chain</title>
+<style>body{font-family:system-ui,sans-serif;text-align:center;padding:30px;background:#f7f5f0;color:#1c2530}
+canvas{border:1px solid #d9d4c8;border-radius:8px;margin:16px 0;max-width:90%}
+.alt{font-size:13px;color:#5d6b7a;word-break:break-all;max-width:400px;margin:0 auto}
+h2{color:#0f2747}</style></head><body>
+<h2>QR Test</h2>
+<p class="alt">Bu QR'i telefon kameranla okut. Asagidaki linke gitmeli:</p>
+<canvas id="qr"></canvas>
+<div class="alt" id="link"></div>
+<div class="alt" id="durum" style="margin-top:14px;font-weight:600"></div>
+<script src="/lib/qr.js"></script>
+<script>
+var url="https://aidag-chain.com/belge?hash=8c4a7cfc923572409693ce3ee48897ea41d1a57455ff316ffa031e8ef8fab183";
+document.getElementById("link").textContent=url;
+try{
+  AidagQR.render(document.getElementById("qr"),url,{scale:6});
+  document.getElementById("durum").textContent="QR cizildi ✓ — simdi kamerayla okut";
+  document.getElementById("durum").style.color="#1f7a4d";
+}catch(e){
+  document.getElementById("durum").textContent="HATA: "+e.message;
+  document.getElementById("durum").style.color="#a8341f";
+}
+</script></body></html>

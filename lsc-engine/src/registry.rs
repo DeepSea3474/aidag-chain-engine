@@ -78,6 +78,19 @@ impl TokenRegistry {
     /// - Tam ayni (adres + sembol) varsa -> ZatenKayitli
     /// - Temizse -> deftere ekle, Kabul
     pub fn kaydet(&mut self, gelen: TokenKaydi) -> KayitSonucu {
+        // Gelen sembolu string'e cevir (sondaki \0 dolgusunu at)
+        let gelen_sembol = String::from_utf8_lossy(&gelen.sembol)
+            .trim_end_matches('\0')
+            .to_string();
+        // KALKAN: yasak sembol — hic kimse kaydedemez (dis taklit korumasi)
+        if YASAK_SEMBOLLER.iter().any(|s| *s == gelen_sembol) {
+            return KayitSonucu::TaklitReddedildi { taklit_edilen_adres: [0u8; 20] };
+        }
+        // KALKAN: rezerve sembol — sadece kurucu kanonik adresi kaydedebilir
+        if REZERVE_SEMBOLLER.iter().any(|s| *s == gelen_sembol)
+            && gelen.kanonik_adres != KURUCU_KANONIK_ADRES {
+            return KayitSonucu::TaklitReddedildi { taklit_edilen_adres: [0u8; 20] };
+        }
         for kayitli in &self.kayitlar {
             let ayni_sembol = kayitli.sembol == gelen.sembol;
             let ayni_adres = kayitli.kanonik_adres == gelen.kanonik_adres;
@@ -626,9 +639,30 @@ mod tests {
     }
 
     #[test]
+    fn rezerve_aidag_sahte_adresle_reddedilir() {
+        let mut reg = TokenRegistry::yeni();
+        let sahte = TokenKaydi::new([0xBB; 20], sym("AIDAG"));
+        assert!(matches!(reg.kaydet(sahte), KayitSonucu::TaklitReddedildi { .. }));
+    }
+
+    #[test]
+    fn rezerve_aidag_kurucu_adresiyle_kabul() {
+        let mut reg = TokenRegistry::yeni();
+        let gercek = TokenKaydi::new(KURUCU_KANONIK_ADRES, sym("AIDAG"));
+        assert_eq!(reg.kaydet(gercek), KayitSonucu::Kabul);
+    }
+
+    #[test]
+    fn yasak_usdt_herkese_reddedilir() {
+        let mut reg = TokenRegistry::yeni();
+        let sahte = TokenKaydi::new(KURUCU_KANONIK_ADRES, sym("USDT"));
+        assert!(matches!(reg.kaydet(sahte), KayitSonucu::TaklitReddedildi { .. }));
+    }
+
+    #[test]
     fn gercek_token_kabul_edilir() {
         let mut reg = TokenRegistry::yeni();
-        let usdc = TokenKaydi::new([0xAA; 20], sym("USDC"));
+        let usdc = TokenKaydi::new([0xAA; 20], sym("TCOIN"));
         assert_eq!(reg.kaydet(usdc), KayitSonucu::Kabul);
         assert_eq!(reg.len(), 1);
     }
@@ -637,9 +671,9 @@ mod tests {
     fn sahte_token_protokol_seviyesinde_reddedilir() {
         let mut reg = TokenRegistry::yeni();
         // Gercek USDC kaydedilir
-        reg.kaydet(TokenKaydi::new([0xAA; 20], sym("USDC")));
+        reg.kaydet(TokenKaydi::new([0xAA; 20], sym("TCOIN")));
         // Sahte USDC: ayni sembol, farkli adres -> REDDEDILMELI
-        let sahte = TokenKaydi::new([0xBB; 20], sym("USDC"));
+        let sahte = TokenKaydi::new([0xBB; 20], sym("TCOIN"));
         assert_eq!(
             reg.kaydet(sahte),
             KayitSonucu::TaklitReddedildi {
@@ -653,8 +687,8 @@ mod tests {
     #[test]
     fn ayni_token_tekrar_eklenmez() {
         let mut reg = TokenRegistry::yeni();
-        reg.kaydet(TokenKaydi::new([0xAA; 20], sym("USDC")));
-        let ayni = TokenKaydi::new([0xAA; 20], sym("USDC"));
+        reg.kaydet(TokenKaydi::new([0xAA; 20], sym("TCOIN")));
+        let ayni = TokenKaydi::new([0xAA; 20], sym("TCOIN"));
         assert_eq!(reg.kaydet(ayni), KayitSonucu::ZatenKayitli);
         assert_eq!(reg.len(), 1);
     }
@@ -663,11 +697,11 @@ mod tests {
     fn farkli_tokenler_birlikte_yasar() {
         let mut reg = TokenRegistry::yeni();
         assert_eq!(
-            reg.kaydet(TokenKaydi::new([0xAA; 20], sym("USDC"))),
+            reg.kaydet(TokenKaydi::new([0xAA; 20], sym("TCOIN"))),
             KayitSonucu::Kabul
         );
         assert_eq!(
-            reg.kaydet(TokenKaydi::new([0xBB; 20], sym("DAI"))),
+            reg.kaydet(TokenKaydi::new([0xBB; 20], sym("TDAI"))),
             KayitSonucu::Kabul
         );
         assert_eq!(reg.len(), 2);
@@ -676,7 +710,7 @@ mod tests {
     #[test]
     fn adres_ile_bul_calisir() {
         let mut reg = TokenRegistry::yeni();
-        reg.kaydet(TokenKaydi::new([0xAA; 20], sym("USDC")));
+        reg.kaydet(TokenKaydi::new([0xAA; 20], sym("TCOIN")));
         assert!(reg.adres_ile_bul(&[0xAA; 20]).is_some());
         assert!(reg.adres_ile_bul(&[0xCC; 20]).is_none());
     }
@@ -684,12 +718,12 @@ mod tests {
     #[test]
     fn taklit_mi_sorgusu_eklemeden_calisir() {
         let mut reg = TokenRegistry::yeni();
-        reg.kaydet(TokenKaydi::new([0xAA; 20], sym("USDC")));
+        reg.kaydet(TokenKaydi::new([0xAA; 20], sym("TCOIN")));
         // Sahte USDC sorgusu -> taklit edilen gercek adresi doner
-        let sahte = TokenKaydi::new([0xBB; 20], sym("USDC"));
+        let sahte = TokenKaydi::new([0xBB; 20], sym("TCOIN"));
         assert_eq!(reg.taklit_mi(&sahte), Some([0xAA; 20]));
         // Temiz token -> taklit degil
-        let temiz = TokenKaydi::new([0xCC; 20], sym("DAI"));
+        let temiz = TokenKaydi::new([0xCC; 20], sym("TDAI"));
         assert_eq!(reg.taklit_mi(&temiz), None);
         // Sorgu deftere eklemedi (hala 1)
         assert_eq!(reg.len(), 1);
@@ -1628,3 +1662,13 @@ mod on_satis_testleri {
         );
     }
 }
+
+/// KALKAN rezerve semboller: SADECE kurucu kanonik adresi kaydedebilir.
+pub const REZERVE_SEMBOLLER: [&str; 3] = ["AIDAG", "LSC", "KUBR"];
+/// Yasak semboller: dis/populer taklitleri HIC KIMSE kaydedemez.
+pub const YASAK_SEMBOLLER: [&str; 8] = ["USDT", "USDC", "BTC", "ETH", "BNB", "USD", "WBTC", "DAI"];
+/// Kurucu kanonik adresi (mainnet.rs MAINNET_KURUCU_ADRES_HEX ile ayni).
+pub const KURUCU_KANONIK_ADRES: [u8; 20] = [
+    0x11,0xc1,0x90,0x6e,0x07,0x50,0x8e,0x0b,0x83,0xef,
+    0x4a,0xfa,0x04,0x28,0x79,0x28,0x1e,0x19,0x6b,0x9f,
+];

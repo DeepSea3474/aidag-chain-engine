@@ -1,0 +1,26 @@
+[
+ {
+  "baslik": "AIDAG-Chain nedir",
+  "metin": "AIDAG-Chain, Rust ile sıfırdan yazılmış, bağımsız, DAG (yönlü çevrimsiz çizge) tabanlı bir Layer-1 blok zinciridir. Klasik zincirlerde bloklar tek bir sıra hâlinde dizilir; AIDAG-Chain'de ise her birim, birden fazla ebeveyne referans verebilen bir köşedir (vertex). Bu sayede bloklar paralel üretilebilir. GHOSTDAG konsensüsü paralel köşeler arasından mavi kümeyi seçerek deterministik bir toplam sıra oluşturur; durum bu sıradan türetildiği için düğümler aynı duruma ulaşır. Yürütme katmanı revm tabanlı ve EVM uyumludur: Ethereum eth_* JSON-RPC, EIP-1559 işlemleri ve Solidity/ERC-20 sözleşmeleri desteklenir; MetaMask ve ethers.js ile çalışır. İmzalarda ed25519, özetlemede blake3 kullanılır. Zincir, doğrulanabilir dijital kayıtlar için altyapı olarak tasarlanmıştır: belge doğrulama ve kurumsal kimlik (kamu/özel ayrımıyla) sonradan eklenmiş sözleşmeler değil, zincirin yerel işlem türleridir. Mainnet canlıdır (network_id ve Chain ID 3474, sabitlenmiş genesis); bağımsız güvenlik denetimi henüz beklemededir. Explorer ve uygulamalar: https://aidag-chain.com",
+  "url": "https://github.com/DeepSea3474/aidag-chain-engine",
+  "anahtarlar": ["aidag", "chain", "zincir", "zincirin", "ghostdag", "layer 1", "layer1", "blok zinciri", "blockchain", "evm", "mainnet", "konsensus"]
+ },
+ {
+  "baslik": "KUBRA nedir",
+  "metin": "KUBRA, SoulwareAI'ın yapay zekasıdır ve AIDAG-Chain üzerinde çalışır. Adını AIDAG-Chain'in kurucusu vermiştir. Uydurmaya karşı iki ilkeyle çalışır: kaynağa dayalı cevap (grounding: soruyla ilgili kaynakları getirir ve cevabı onlara dayandırır) ve dürüst çekimserlik (emin değilse 'bilmiyorum' der, kaynak uydurmaz). Kesin cevap gereken işlerde modele tahmin ettirmek yerine deterministik araçlar kullanır: 64 haneli belge hash'inin zincirde kayıtlı olup olmadığını doğrulama, canlı ağ durumunu okuma, zincir sorgusu (bakiye, blok yüksekliği) ve hesap makinesi. KUBRA her etkileşiminin özetini (hash) kendi anahtarıyla imzalayıp AIDAG-Chain'e kayıt olarak yazar; böylece verdiği cevaplar sonradan zincir üzerinden doğrulanabilir. Beyni belirli bir modele bağlı değildir; açık modellerle çalışır. Görsel üretim için https://aidag-chain.com/gorsel sayfası kullanılır.",
+  "url": null,
+  "anahtarlar": ["kubra", "soulware", "soulwareai", "yapay zeka", "yapay zekasi", "asistan"]
+ },
+ {
+  "baslik": "Belge doğrulama nasıl çalışır",
+  "metin": "AIDAG-Chain'de belgenin kendisi zincire gönderilmez. Belgenin değişmez parmak izi (blake3 özeti, 64 haneli hash) kullanıcının tarayıcısında hesaplanır ve yalnızca bu özet zincire yazılır; içerik gizli kalır, bütünlük kanıtlanır. Kayıt (kurum tarafı): https://aidag-chain.com/belge sayfasındaki 'Belge Kaydet' bölümünde belge seçilir, 'İşlemi Hazırla' ile özet hesaplanıp gösterilir, 'İşlemi Onayla' ile özet zincire kalıcı olarak yazılır; onaydan sonra kayıt geri alınamaz. Doğrulama (herkes): aynı sayfanın 'Belge Doğrula' bölümünde belge seçilir, özet yeniden hesaplanır ve zincirde aranır. Belgede tek bir harf bile değişmişse özet tutmaz ve doğrulama başarısız olur; böylece sahte veya değiştirilmiş belge tespit edilir. 64 haneli hash doğrudan KUBRA'ya yazılarak da doğrulanabilir. Kurumsal kimlik kaydı sayesinde belgenin gerçek kaynağı da teyit edilebilir. Örnek: bir üniversite diplomanın parmak izini zincire kaydeder; işveren hash'i yeniden hesaplayıp aracı kuruma gerek kalmadan saniyeler içinde doğrular. Belge sayfası şu an pilot aşamasındadır.",
+  "url": "https://aidag-chain.com/belge",
+  "anahtarlar": ["belge", "dogrula", "dogrulama", "hash", "parmak izi", "diploma", "sahte", "kaydet", "kayit"]
+ },
+ {
+  "baslik": "Dijital ikiz ve RWA yaklaşımı",
+  "metin": "AIDAG-Chain'in gerçek dünya varlıkları (RWA) ve dijital ikiz konusundaki çözümü, resmi belgelerine (README ve whitepaper) göre, gerçek dünyadaki belge ve kayıtların doğrulanabilir dijital karşılığını zincire bağlamaktır: bir belgenin veya varlık kaydının parmak izi (hash) zincire yazılır, böylece varlığı ve bütünlüğü herkes tarafından doğrulanabilir; kurumsal kimlik kaydı ile de kaynağı teyit edilir. Whitepaper'daki senaryolar: diploma doğrulama; konşimento (bill of lading) — bir denizcilik şirketi kargo belgesini zincire bağlar, böylece sahtecilik, çifte satış ve kayıp tespit edilebilir hâle gelir; kurumsal kimlik — kurumlar kamu/özel ayrımıyla doğrulanabilir zincir kimliği taşır. Yol haritasındaki programlanabilir senaryolar (EVM katmanıyla): kargo varış limanına ulaştığında ödemenin serbest kalması, bir belgenin yalnızca yetkili kurum imzaladığında geçerli olması. Sınırlar: resmi belgelerde tokenleştirilmiş bir RWA ürünü veya ayrı bir 'dijital ikiz' platformu tanımlanmamıştır; whitepaper'a göre gerçek benimseme müşteri, hukuki çerçeve ve saha çalışması gerektirir.",
+  "url": "https://aidag-chain.com/whitepaper",
+  "anahtarlar": ["rwa", "dijital ikiz", "digital twin", "gercek dunya", "real world", "varlik", "tokeniz", "konsimento", "kargo", "tedarik"]
+ }
+]

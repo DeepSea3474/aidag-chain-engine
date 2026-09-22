@@ -7,10 +7,12 @@
 //! makinesinde offline calisir. Ag baglantisi yoktur (tips disaridan verilir).
 //!
 //! Kullanim:
-//!   on-satis-tahsis <key> <net_id> <alici_hex40> <aidag> <lsc_hediye> <odeme_ref> <ts_unix> <tips>
+//!   on-satis-tahsis <key> <net_id> <alici_hex40> <odeme_adresi_hex40> <aidag> <lsc_hediye> <odeme_ref> <ts_unix> <tips>
 //!     key       : aidag-kurucu.key yolu ([algo=1][32 seed])
 //!     net_id    : 3474 (mainnet) | 1 (devnet)
 //!     alici_hex : alicinin 0x adresi (40 hex, 0x opsiyonel)
+//!     odeme_adresi : odemeyi YAPAN 0x adresi (denetim izi). Otomatik akista
+//!                 odeyen = alici oldugu icin alici_hex ile ayni verilir.
 //!     aidag     : TAM AIDAG miktari (arac 10^18 ile carpar)
 //!     lsc_hediye: TAM LSC hediye (gaz icin; 0 olabilir)
 //!     odeme_ref : benzersiz odeme referansi (u64) — cifte-tahsis kilidi
@@ -29,7 +31,7 @@ const ONDALIK: u128 = 1_000_000_000_000_000_000; // 10^18
 
 fn hata(m: &str) -> ! {
     eprintln!("HATA: {m}");
-    eprintln!("Kullanim: on-satis-tahsis <key> <net_id> <alici_hex40> <aidag> <lsc_hediye> <odeme_ref> <ts_unix> <tips_virgul|->");
+    eprintln!("Kullanim: on-satis-tahsis <key> <net_id> <alici_hex40> <odeme_adresi_hex40> <aidag> <lsc_hediye> <odeme_ref> <ts_unix> <tips_virgul|->");
     std::process::exit(1);
 }
 
@@ -57,7 +59,7 @@ fn hex32(s: &str) -> [u8; 32] {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() != 10 {
-        hata("8 arguman gerekli");
+        hata("9 arguman gerekli");
     }
     let key_path = &args[1];
     let net_id: u32 = args[2].parse().unwrap_or_else(|_| hata("net_id sayi olmali"));

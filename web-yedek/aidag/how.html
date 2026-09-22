@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How KUBRA Works — The Flywheel</title>
+<style>
+  :root { --bg:#020617; --card:#0f1826; --ink:#e8ecf3; --dim:#93a1b3; --teal:#2dd4bf; --emer:#34d399; --purp:#a78bfa; --line:#1e2a3a; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink);
+    background-image:radial-gradient(800px 400px at 20% -10%, rgba(45,212,191,.08), transparent), radial-gradient(700px 500px at 100% 20%, rgba(167,139,250,.08), transparent); }
+  .wrap { max-width:760px; margin:0 auto; padding:26px 16px 70px; }
+  .top { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+  .brand { display:flex; align-items:center; gap:12px; }
+  .logo { height:42px; border-radius:8px; }
+  h1 { font-size:1.5rem; margin:.2em 0; }
+  .hook { font-size:1.35rem; font-weight:800; text-align:center; margin:22px 0 4px;
+    background:linear-gradient(90deg,var(--teal),var(--emer),var(--purp)); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .hooksub { text-align:center; color:var(--dim); margin-top:0; }
+  .lang { display:flex; gap:4px; background:#0f1826; border:1px solid var(--line); border-radius:999px; padding:3px; }
+  .lang button { border:0; background:transparent; color:var(--dim); padding:5px 12px; border-radius:999px; cursor:pointer; font-weight:600; font-size:.85rem; }
+  .lang button.sel { background:var(--purp); color:#160a2b; }
+
+  /* ── FLYWHEEL ── */
+  .flyw { position:relative; width:min(400px,92vw); aspect-ratio:1; margin:26px auto 6px; }
+  .flyw svg { position:absolute; inset:0; width:100%; height:100%; }
+  .ring { fill:none; stroke:url(#grad); stroke-width:3; stroke-dasharray:10 12; stroke-linecap:round; animation:flow 3.5s linear infinite; }
+  @keyframes flow { to { stroke-dashoffset:-220; } }
+  .hub { position:absolute; left:50%; top:47%; transform:translate(-50%,-50%); text-align:center; width:40%; }
+  .hub .k { font-weight:800; font-size:1.15rem; background:linear-gradient(90deg,var(--teal),var(--purp)); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .hub .k2 { color:var(--dim); font-size:.72rem; }
+  .node { position:absolute; transform:translate(-50%,-50%); width:120px; text-align:center; }
+  .node .ic { width:52px; height:52px; margin:0 auto 4px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:1.5rem;
+    background:radial-gradient(circle at 35% 30%,#16324a,#0b1420); border:1px solid var(--line); box-shadow:0 0 18px rgba(45,212,191,.12); }
+  .node .lb { font-size:.82rem; font-weight:600; }
+  .node .n { color:var(--dim); font-size:.62rem; font-weight:700; }
+  .n1{left:50%;top:11%} .n2{left:87%;top:37%} .n3{left:72%;top:82%} .n4{left:28%;top:82%} .n5{left:13%;top:37%}
+
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px 18px; margin:16px 0; }
+  .card b { color:#fff; }
+  .li { display:flex; gap:10px; margin:8px 0; color:var(--dim); } .li b { color:var(--ink); }
+  .btns { display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin:20px 0 6px; }
+  .btn { text-decoration:none; padding:13px 24px; border-radius:14px; font-weight:700; }
+  .btn-go { background:var(--teal); color:#04140f; }
+  .btn-o { border:1px solid rgba(45,212,191,.4); color:var(--teal); }
+  .note { color:var(--dim); font-size:.86rem; text-align:center; }
+  a { color:var(--purp); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div class="brand"><img src="/aidag-logo.jpg" class="logo" alt="AIDAG/KUBRA" onerror="this.style.display='none'"><h1 data-i="title">How KUBRA Works</h1></div>
+    <div class="lang"><button id="en" class="sel" onclick="setLang('en')">EN</button><button id="tr" onclick="setLang('tr')">TR</button></div>
+  </div>
+
+  <p class="hook" data-i="hook"></p>
+  <p class="hooksub" data-i="hooksub"></p>
+
+  <div class="flyw">
+    <svg viewBox="0 0 400 400" aria-hidden="true">
+      <defs><linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#2dd4bf"/><stop offset=".5" stop-color="#34d399"/><stop offset="1" stop-color="#a78bfa"/>
+      </linearGradient></defs>
+      <circle class="ring" cx="200" cy="200" r="150"/>
+    </svg>
+    <div class="hub"><div class="k">KUBRA</div><div class="k2" data-i="hub"></div></div>
+    <div class="node n1"><div class="ic">🖥️</div><div class="n">1</div><div class="lb" data-i="s1"></div></div>
+    <div class="node n2"><div class="ic">💰</div><div class="n">2</div><div class="lb" data-i="s2"></div></div>
+    <div class="node n3"><div class="ic">🤖</div><div class="n">3</div><div class="lb" data-i="s3"></div></div>
+    <div class="node n4"><div class="ic">💧</div><div class="n">4</div><div class="lb" data-i="s4"></div></div>
+    <div class="node n5"><div class="ic">📈</div><div class="n">5</div><div class="lb" data-i="s5"></div></div>
+  </div>
+
+  <div class="card">
+    <b data-i="whyT"></b>
+    <div class="li">💠 <span data-i="w1"></span></div>
+    <div class="li">💠 <span data-i="w2"></span></div>
+    <div class="li">💠 <span data-i="w3"></span></div>
+  </div>
+
+  <div class="card">
+    <b data-i="chainT"></b>
+    <p class="note" style="text-align:left;margin:6px 0 0" data-i="chainX"></p>
+  </div>
+
+  <div class="btns">
+    <a href="/ask" class="btn btn-go" data-i="ctaUse"></a>
+    <a href="/katil" class="btn btn-o" data-i="ctaContrib"></a>
+  </div>
+  <p class="note" data-i="honest"></p>
+</div>
+
+<script>
+const I18N = {
+ en:{ title:"How KUBRA Works",
+  hook:"An AI that pays you to build it — and belongs to you.",
+  hooksub:"A self-funding loop. No datacenters. No subscriptions. Owned by its builders.",
+  hub:"self-funding loop",
+  s1:"Contribute compute", s2:"Earn LSC", s3:"Use KUBRA", s4:"Fund the rewards", s5:"Grow stronger",
+  whyT:"Why it's different",
+  w1:"<b>No datacenters</b> — runs on contributed computers.",
+  w2:"<b>No subscriptions</b> — you earn what you use.",
+  w3:"<b>Not owned by a company</b> — owned by its builders.",
+  chainT:"⛓️ On-chain, not a promise",
+  chainX:"LSC is the gas coin of AIDAG-Chain. Every contribution, reward and use is written to a public blockchain. Open source — verify it, don't trust it.",
+  ctaUse:"💬 Use KUBRA free", ctaContrib:"⚡ Contribute & earn",
+  honest:"Honest: KUBRA today is early — good on basics, not frontier-level yet. It grows stronger with every contributor. That's the point.",
+ },
+ tr:{ title:"KUBRA Nasıl Çalışır",
+  hook:"Seni inşa etmen için ödeyen ve sana ait olan bir yapay zeka.",
+  hooksub:"Kendi kendini fonlayan döngü. Datacenter yok. Abonelik yok. İnşa edenlere ait.",
+  hub:"kendini fonlayan döngü",
+  s1:"Gücünü ver", s2:"LSC kazan", s3:"KUBRA'yı kullan", s4:"Ödülleri fonla", s5:"Güçlendir",
+  whyT:"Neden farklı",
+  w1:"<b>Datacenter yok</b> — katkı verilen bilgisayarlarda çalışır.",
+  w2:"<b>Abonelik yok</b> — kullandığını kazanırsın.",
+  w3:"<b>Bir şirkete ait değil</b> — inşa edenlere ait.",
+  chainT:"⛓️ Zincirde, vaat değil",
+  chainX:"LSC, AIDAG-Chain'in gaz coini. Her katkı, ödül ve kullanım halka açık zincire yazılır. Açık kaynak — güvenme, doğrula.",
+  ctaUse:"💬 KUBRA'yı ücretsiz kullan", ctaContrib:"⚡ Katkı ver & kazan",
+  honest:"Dürüst: KUBRA bugün erken — temelde iyi, henüz frontier değil. Her katkıcıyla güçlenir. Mesele bu.",
+ }
+};
+let L = localStorage.getItem("kubra_lang") || "en";
+const t = k => (I18N[L][k] ?? I18N.en[k]);
+function setLang(lang){
+  L=lang; localStorage.setItem("kubra_lang",lang); document.documentElement.lang=lang;
+  en.classList.toggle("sel",lang==="en"); tr.classList.toggle("sel",lang==="tr");
+  document.querySelectorAll("[data-i]").forEach(el=>{ el.innerHTML = t(el.dataset.i); });
+}
+setLang(L);
+</script>
+</body>
+</html>

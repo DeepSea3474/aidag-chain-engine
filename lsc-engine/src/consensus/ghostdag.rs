@@ -56,6 +56,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::dag::graph::Graph;
 use crate::dag::vertex::VertexId;
+use crate::mainnet;
 
 use super::{past, topological_order, topological_order_eksik_hizli};
 
@@ -119,7 +120,7 @@ impl Weigher for UniformWeight {
 /// PoA başlangıç metriği (denetçi Seçenek 3): üreticisi yetkili komitede olan
 /// vertex ağırlık 1, değilse 0. Sybil dirençlidir — komite dışı bir saldırgan
 /// kaç blok üretirse üretsin ağırlığı 0'dır, gizli doğrusal zincirle blue-work
-/// şişiremez. Komite başlangıçta DAO/multisig imzacı kümesi olabilir; ileride
+/// şişiremez. Komite başlangıçta yetkili çok imzalı imzacı kümesi olabilir; ileride
 /// `weight = stake` (PoS) ile değiştirilir, finality mantığı aynı kalır.
 #[derive(Debug, Clone)]
 pub struct CommitteeWeight {
@@ -144,6 +145,14 @@ impl Weigher for CommitteeWeight {
         }
         weigher_fingerprint(b"committee", &state)
     }
+}
+
+/// Mainnet PoA komitesi: yalnizca kurucu pubkey yetkili uretici. blue-work
+/// sisirme saldirisini engeller (komite disi vertex agirlik 0). Ileride PoS
+/// (stake tabanli) genisletilir; su an tek uyeli (kurucu) baslangic komitesi.
+pub fn mainnet_komite() -> CommitteeWeight {
+    let members: BTreeSet<[u8; 32]> = mainnet::komite_uyeleri().into_iter().collect();
+    CommitteeWeight { members }
 }
 
 /// Bir vertex'in GHOSTDAG renklendirme verisi. `mergeset_blues`/`reds`
@@ -411,6 +420,9 @@ impl Ghostdag {
                     self.iv = sp_tree_intervals_gapped(&self.data);
                     self.iv_next = self.iv.iter().map(|(k, &(s, _))| (*k, s)).collect();
                 }
+                // REBUILD oldu -> mevcut iv.start'lar degisti -> torba (start,id)
+                // ciftleri eskidi -> tazele (yoksa is_ancestor_torba yanlis-negatif).
+                self.torba_yeniden_kur(graph);
             }
             // INKREMENTAL TORBA: v'nin torbasi = sp-atasinin torbasi (miras) +
             // v'nin sp-olmayan parent'lari (kopruleri), sonra sikistir. iv hazir
@@ -458,9 +470,13 @@ impl Ghostdag {
             std::sync::atomic::Ordering::Relaxed,
         );
         let _ti = std::time::Instant::now();
-        if !self.assign_interval_incremental(&id, sp) && !self.lokal_rebuild_dene(&id, sp) {
-            self.iv = sp_tree_intervals_gapped(&self.data);
-            self.iv_next = self.iv.iter().map(|(k, &(s, _))| (*k, s)).collect();
+        if !self.assign_interval_incremental(&id, sp) {
+            if !self.lokal_rebuild_dene(&id, sp) {
+                self.iv = sp_tree_intervals_gapped(&self.data);
+                self.iv_next = self.iv.iter().map(|(k, &(s, _))| (*k, s)).collect();
+            }
+            // REBUILD oldu -> torba (start,id) start'lari eskidi -> tazele.
+            self.torba_yeniden_kur(graph);
         }
         U_IV.fetch_add(
             _ti.elapsed().as_nanos() as u64,
@@ -478,6 +494,20 @@ impl Ghostdag {
             _tu.elapsed().as_nanos() as u64,
             std::sync::atomic::Ordering::Relaxed,
         );
+    }
+
+    /// TORBA YENIDEN KUR: interval REBUILD (lokal veya tam) mevcut vertex'lerin
+    /// iv.start'larini DEGISTIRIR. Torba `(start,id)` ciftlerini saklar VE sikistirma
+    /// kararlari o anki iv'ye baglidir; bir rebuild hem start'lari ESKITIR hem de
+    /// eski iv ile alinmis drop kararlarini GECERSIZ kilar (dusuk marker geri
+    /// gelmez) -> `is_ancestor_torba` yanlis-negatif (genislik>=5 bug). Sadece
+    /// start tazelemek YETMEZ (icerik de bozulur). Bu yuzden rebuild olan HER
+    /// adimda torbayi STATIK dogru kurucuyla (torba_hesapla) GUNCEL iv uzerinden
+    /// bastan kurar -> incremental torba == static torba == past. Rebuild NADIR
+    /// (bosluk dolunca) -> amortize O(n) maliyet dusuk.
+    fn torba_yeniden_kur(&mut self, graph: &Graph) {
+        let topo = topological_order(graph);
+        self.torba = torba_hesapla(graph, &self.data, &topo, &self.iv);
     }
 
     fn torba_guncelle_tek(&mut self, graph: &Graph, v: &VertexId, sp: Option<VertexId>) {
@@ -628,6 +658,70 @@ impl Ghostdag {
         }
         order
     }
+
+    /// ARTIMLI `total_order`: `onceki_tip` o an `onceki_sira`'yi ureten secili
+    /// tip olmak uzere, YENI secili tip eski tip'in secili-ebeveyn zincirini
+    /// UZATIYORSA sadece yeni segmenti hesaplar (O(eklenen)); aksi halde (reorg
+    /// / ilk kez) tam `total_order`'a duser. Donen `Vec`, ayni graf durumunda
+    /// `total_order` ile BIREBIR OZDESTIR. Donus: (yeni_secili_tip, yeni_sira).
+    ///
+    /// DOGRULUK: `total_order(tip)` = genesis→tip secili zinciri boyunca her
+    /// blok icin `[mergeset_sirali ++ blok]`. Eski tip `pt` yeni tip'in
+    /// zincirinde bir ATA ise, `genesis→pt` onegi DEGISMEZ — mergeset'ler
+    /// renklendirmede (update_one) sabitlenir ve `past ∩ mergeset` iliskileri
+    /// yeni vertex eklenince degismez — dolayisiyla `onceki_sira` aynen korunur;
+    /// yalnizca pt-sonrasi zincir bloklari eklenir. `pt` yeni zincirde yoksa
+    /// reorg'dur ve tam hesap yapilir (dogruluk once).
+    pub fn total_order_artimli(
+        &self,
+        graph: &Graph,
+        onceki_tip: Option<VertexId>,
+        onceki_sira: &[VertexId],
+    ) -> (Option<VertexId>, Vec<VertexId>) {
+        let Some(tip) = self.selected_tip(graph) else {
+            return (None, Vec::new());
+        };
+        // Onceki durum yok -> tam hesap.
+        let Some(pt) = onceki_tip else {
+            return (Some(tip), self.total_order(graph));
+        };
+        // Secili tip degismedi -> sira ozdes.
+        if tip == pt {
+            return (Some(tip), onceki_sira.to_vec());
+        }
+        // Yeni tip'ten secili-ebeveyn zincirini geri yuru; pt'ye ulasirsak pt
+        // yeni zincirin atasidir -> SAF UZANTI. segment = (pt, tip] zincir
+        // bloklari (once tip'e yakin toplanir, sonra ters cevrilir).
+        let mut segment: Vec<VertexId> = Vec::new();
+        let mut cur = Some(tip);
+        let mut uzanti = false;
+        while let Some(c) = cur {
+            if c == pt {
+                uzanti = true;
+                break;
+            }
+            segment.push(c);
+            cur = self.data.get(&c).and_then(|d| d.selected_parent);
+        }
+        if !uzanti {
+            // pt yeni zincirde degil -> reorg. Tam hesap.
+            return (Some(tip), self.total_order(graph));
+        }
+        // SAF UZANTI: onceki_sira tabanina pt-sonrasi bloklari ekle.
+        segment.reverse(); // genesis yonu: pt'nin cocugu ... tip
+        let mut order: Vec<VertexId> = onceki_sira.to_vec();
+        for c in segment {
+            if let Some(d) = self.data.get(&c) {
+                order.extend(order_mergeset_blue_first(
+                    graph,
+                    &d.mergeset_blues,
+                    &d.mergeset_reds,
+                ));
+            }
+            order.push(c);
+        }
+        (Some(tip), order)
+    }
 }
 
 /// Bir zincir bloğunun mergeset'ini MAVİ-ÖNCELİKLİ ama TOPOLOJİYİ KORUYAN
@@ -642,6 +736,17 @@ impl Ghostdag {
 /// bozulur. Böylece saldırgan bir kırmızıyı id-grind ile dürüst bir mavinin
 /// ÖNÜNE sokamaz (naif "tüm maviler → tüm kırmızılar" ise kırmızı-ata/mavi-torun
 /// durumunda topolojiyi bozardı; bu yaklaşım bozmaz).
+///
+// PERF-TODO (dagitik TPS): rank hesabi her mergeset elemani icin `past(x)` (tum
+// ata BFS, O(n)) cagiriyor -> genis/dagitik DAG'da total_order O(n^2), reorg
+// basina -> O(n^3). Olcum: W=8 n=497'de 11 TPS (linear = 5822). Cozum: rank =
+// |past(x) ∩ mergeset|; mergeset KUCUK -> mavi-boncuk erisimiyle O(1)/O(log)
+// atalik. AMA torba SUPERKUME (yanlis-pozitif tolere) -> dogrudan kullanilamaz;
+// VERIFY-katmani gerek: torba=false kesin-red, torba=true adaylari
+// is_ancestor_bridged (bit-bit past-ozdes test edilmis) ile teyit. Ayni sorun
+// `topo_order_subset` (renklendirme yolu) icin de gecerli. Detay+plan: hafiza
+// notu "torba-completeness-bug". (torba yanlis-negatif bug'i 221a52d'de kapandi;
+// bu optimizasyon onun uzerine kurulur.)
 fn order_mergeset_blue_first(
     graph: &Graph,
     blues: &[VertexId],
@@ -1523,6 +1628,9 @@ fn blue_set_in_view(
 /// içindeki ata sayısı, VertexId). x, y'nin atası ve ikisi de alt-kümedeyse
 /// `|past(x) ∩ S| < |past(y) ∩ S|` (kesin) → ata daima önce; beraberlik id
 /// ile bozulur. (Adım 3a `topological_order`'ın alt-küme muadili.)
+// PERF-TODO (dagitik TPS): `past(x)` O(n) BFS -> renklendirme (update_one) genis
+// DAG'da O(n^2). Cozum = mavi-boncuk erisimi + verify-katmani. Bkz.
+// order_mergeset_blue_first ustundeki not + hafiza "torba-completeness-bug".
 fn topo_order_subset(graph: &Graph, subset: &BTreeSet<VertexId>) -> Vec<VertexId> {
     let mut v: Vec<VertexId> = subset.iter().copied().collect();
     v.sort_by_cached_key(|x| {
@@ -2536,6 +2644,59 @@ mod tests {
     }
 
     #[test]
+    fn artimli_torba_past_ile_birebir_genis() {
+        // REGRESYON (torba completeness bug): artimli (update_one) torba, GENIS
+        // DAG'da (W=2..10) rebuild tetikleyecek kadar derin, past ile BIREBIR mi?
+        // Bug oncesi W>=5'te is_ancestor_torba yanlis-negatif veriyordu (rebuild
+        // torba'yi eskitiyordu -> torba_yeniden_kur ile duzeltildi).
+        for w in 2u8..=8 {
+            let mut g = Graph::devnet(NET);
+            let mut gd = Ghostdag::new_incremental(DEFAULT_K);
+            let gen = signed(1, vec![], 1000, b"gen");
+            let gid = *gen.id();
+            g.insert_synced(gen).unwrap();
+            gd.update_one(&g, &gid);
+            let mut prev = vec![gid];
+            let mut ts = 1001u64;
+            for _k in 0..6 {
+                let mut parents = prev.clone();
+                parents.sort_unstable();
+                let mut bu = Vec::new();
+                for j in 0..w {
+                    let v = signed(j + 1, parents.clone(), ts, b"x");
+                    ts += 1;
+                    let id = *v.id();
+                    g.insert_synced(v).unwrap();
+                    gd.update_one(&g, &id);
+                    bu.push(id);
+                }
+                prev = bu;
+            }
+            let ri = ReachIndex {
+                iv: &gd.iv,
+                bridges: None,
+                torba: Some(&gd.torba),
+            };
+            let ids: Vec<VertexId> = gd.data.keys().copied().collect();
+            // TORBA SOZLESMESI: SUPERKUME. Gercek atalik (past) DAIMA torba'da
+            // gorulmeli (yanlis-NEGATIF = bug). Yanlis-POZITIF tasarim geregi
+            // TOLERE edilir (tuketiciler saf-dogrulanmis atalikla teyit eder).
+            // Bug oncesi W>=5'te YANLIS-NEGATIF vardi (rebuild torba'yi eskitti).
+            let mut yanlis_neg = 0;
+            for a in &ids {
+                for b in &ids {
+                    let torba = ri.is_ancestor_torba(a, b);
+                    let gercek = super::past(&g, b).contains(a) && a != b;
+                    if gercek && !torba {
+                        yanlis_neg += 1;
+                    }
+                }
+            }
+            assert_eq!(yanlis_neg, 0, "W={w}: torba SUPERKUME ihlali (yanlis-negatif={yanlis_neg}) — gercek atalik torbada YOK");
+        }
+    }
+
+    #[test]
     fn is_ancestor_bridged_past_ile_birebir() {
         // KOPRU-destekli atalik, mevcut past() ile AYNI olmali. Zincir + diamond +
         // COK-KATLI PARALEL DAG (asil hedef ortam). Yanlis atalik = sessiz
@@ -2891,6 +3052,80 @@ mod tests {
             assert_eq!(gd1.data(&id), gd2.data(&id));
         }
         assert_eq!(gd1.total_order(&g1), gd2.total_order(&g2));
+    }
+
+    #[test]
+    fn total_order_artimli_esittir_tam() {
+        // ARTIMLI == TAM: her vertex eklendikten sonra onbellekli artimli
+        // total_order, sifirdan hesaplanan tam total_order ile BIREBIR AYNI
+        // olmali. Hem saf-uzanti (lineer) hem reorg (paralel/genislik) yolunu
+        // tetikler. Node'un `durumu_yeniden_uygula` akisini birebir modeller.
+        fn senaryo_dogrula(vs: &[Vertex], etiket: &str) {
+            let mut g = Graph::devnet(NET);
+            let mut gd = Ghostdag::new_incremental(DEFAULT_K);
+            let mut onceki_tip: Option<VertexId> = None;
+            let mut onceki_sira: Vec<VertexId> = Vec::new();
+            for v in vs {
+                let id = *v.id();
+                g.insert_synced(v.clone()).unwrap();
+                gd.update_one(&g, &id);
+                let (yeni_tip, yeni_sira) =
+                    gd.total_order_artimli(&g, onceki_tip, &onceki_sira);
+                let tam = gd.total_order(&g);
+                assert_eq!(
+                    yeni_sira, tam,
+                    "[{etiket}] artimli != tam (vertex {id:?})"
+                );
+                assert_eq!(
+                    yeni_tip,
+                    gd.selected_tip(&g),
+                    "[{etiket}] onbellek tip yanlis"
+                );
+                onceki_tip = yeni_tip;
+                onceki_sira = yeni_sira;
+            }
+        }
+
+        // 1) Lineer zincir (saf-uzanti yolu).
+        {
+            let mut vs = Vec::new();
+            let gen = signed(1, vec![], 1000, b"lin-gen");
+            let mut parent = *gen.id();
+            vs.push(gen);
+            for i in 0..40u64 {
+                let v = signed(1, vec![parent], 1001 + i, format!("lin{i}").as_bytes());
+                parent = *v.id();
+                vs.push(v);
+            }
+            senaryo_dogrula(&vs, "lineer");
+        }
+
+        // 2) Katmanli DAG: her katta W paralel blok, hepsi onceki katin
+        //    tumunu ebeveyn alir -> secili tip degisir (reorg yolu tetiklenir).
+        {
+            let mut vs = Vec::new();
+            let gen = signed(1, vec![], 1000, b"dag-gen");
+            let gid = *gen.id();
+            vs.push(gen);
+            let mut prev: Vec<VertexId> = vec![gid];
+            let mut ts = 1001u64;
+            for kat in 0..8u64 {
+                let mut bu: Vec<VertexId> = Vec::new();
+                for j in 0..3u8 {
+                    let v = signed(
+                        j + 1,
+                        prev.clone(),
+                        ts,
+                        format!("k{kat}n{j}").as_bytes(),
+                    );
+                    ts += 1;
+                    bu.push(*v.id());
+                    vs.push(v);
+                }
+                prev = bu;
+            }
+            senaryo_dogrula(&vs, "katmanli-dag");
+        }
     }
 
     #[test]

@@ -214,7 +214,11 @@ async fn lsc_bakiye(State(st): State<RpcState>, Path(adres_hex): Path<String>) -
     Json(json!({
         "ok": true,
         "adres": adres_hex.trim(),
-        "lsc_bakiye": node.lsc_bakiye(&adres),
+        // STRING olarak don (AIDAG /bakiye ile ayni). u128 bakiye JSON sayisina
+        // SIGMAZ: serde_json u64'u asan sayida "number out of range" ile hata
+        // dondurur, json! makrosu unwrap'ledigi icin handler PANIKLER. ~18,4
+        // LSC'nin (u64::MAX wei) uzerindeki her bakiye bu uca carpardi.
+        "lsc_bakiye": node.lsc_bakiye(&adres).to_string(),
     }))
 }
 
@@ -340,20 +344,47 @@ fn mask_adres(adres: &[u8; 20]) -> String {
     format!("0x{}...{}", &h[0..5], &h[h.len() - 3..])
 }
 
+/// SATIS GORUNUMUNDEN HARIC TUTULAN odeme_ref'ler ( or. kurulus-oncesi OWNER
+/// TEST tahsisleri). Zincirde kayit AYNEN DURUR (degismez denetim izi); yalniz
+/// GENEL satis ozetinin rakamlarindan dislanir (ozet ayrica zincir toplamini ve
+/// dislanan ref'leri de acikca verir). KISISEL gorunumler (adres/tahsis-claim)
+/// ZINCIR GERCEGINI gosterir: hicbir kayit gizlenmez, test kaydi isaretlenir —
+/// aksi halde alici kendi claim edilebilir tahsisini goremezdi. Env: ON_SATIS_HARIC_REFLER="1001,1002" (virgullu).
+/// Ayarsizsa varsayilan "1001" (bilinen ilk owner test tahsisi).
+fn haric_refler() -> std::collections::HashSet<u64> {
+    std::env::var("ON_SATIS_HARIC_REFLER")
+        .unwrap_or_else(|_| "1001".to_string())
+        .split(',')
+        .filter_map(|s| s.trim().parse::<u64>().ok())
+        .collect()
+}
+
 /// GET /on-satis-ozet — GENEL seffaflik: toplam satilan AIDAG, alim sayisi,
 /// ve tum alimlar (adres MASKELI, zamana sirali). Hareket cizelgesi + seffaf liste icin.
+/// NOT: haric_refler() (test tahsisleri) satis rakamlarindan cikarilir.
 async fn on_satis_ozet(State(st): State<RpcState>) -> Json<Value> {
-    let (toplam, sayi, liste) = {
+    let liste = {
         let n = st.node.read().await;
-        (
-            n.on_satis_toplam_aidag(),
-            n.on_satis_sayisi(),
-            n.on_satis_liste(),
-        )
+        n.on_satis_liste()
     };
+    let haric = haric_refler();
+    // Seffaflik: zincirdeki TUM tahsislerin toplami (test dahil) da ayrica verilir.
+    let zincir_toplam: u128 = liste.iter().fold(0u128, |a, (_, k)| a.saturating_add(k.aidag));
+    let mut haric_tutulan: Vec<u64> = liste
+        .iter()
+        .map(|(r, _)| *r)
+        .filter(|r| haric.contains(r))
+        .collect();
+    haric_tutulan.sort_unstable();
+    // Test/haric kayitlarini SATIS gorunumunden ele: toplam+sayi filtreli listeden turer.
+    let mut toplam: u128 = 0;
+    let mut sayi: usize = 0;
     let alimlar: Vec<Value> = liste
         .iter()
+        .filter(|(odeme_ref, _)| !haric.contains(odeme_ref))
         .map(|(odeme_ref, k)| {
+            toplam = toplam.saturating_add(k.aidag);
+            sayi += 1;
             json!({
                 "odeme_ref": odeme_ref,
                 "alici_maskeli": mask_adres(&k.alici),
@@ -368,6 +399,8 @@ async fn on_satis_ozet(State(st): State<RpcState>) -> Json<Value> {
         "toplam_satilan_aidag": toplam.to_string(),
         "alim_sayisi": sayi,
         "alimlar": alimlar,
+        "zincir_toplam_tahsis_aidag": zincir_toplam.to_string(),
+        "haric_tutulan_test_refleri": haric_tutulan,
     }))
 }
 
@@ -380,21 +413,23 @@ async fn on_satis_adres(State(st): State<RpcState>, Path(adres_hex): Path<String
     };
     let mut adres = [0u8; 20];
     adres.copy_from_slice(&b);
-    let (alimlar_ham, toplam) = {
+    let alimlar_ham = {
         let n = st.node.read().await;
-        (
-            n.on_satis_adrese_gore(&adres),
-            n.on_satis_adres_toplam(&adres),
-        )
+        n.on_satis_adrese_gore(&adres)
     };
+    let haric = haric_refler();
+    let mut toplam: u128 = 0;
+    // KISISEL gorunum: zincir gercegi, hicbir kayit gizlenmez (test kaydi isaretli).
     let alimlar: Vec<Value> = alimlar_ham
         .iter()
         .map(|(odeme_ref, k)| {
+            toplam = toplam.saturating_add(k.aidag);
             json!({
                 "odeme_ref": odeme_ref,
                 "aidag": k.aidag.to_string(),
                 "lsc_hediye": k.lsc_hediye.to_string(),
                 "zaman": k.zaman,
+                "test_tahsisi": haric.contains(odeme_ref),
             })
         })
         .collect();
@@ -426,9 +461,12 @@ async fn on_satis_tahsis(State(st): State<RpcState>, Path(adres_hex): Path<Strin
         let n = st.node.read().await;
         (n.on_satis_tge(), n.on_satis_adrese_gore(&adres))
     };
+    let haric = haric_refler();
     let mut toplam_tahsis: u128 = 0;
     let mut toplam_hak: u128 = 0;
     let mut toplam_claimlenen: u128 = 0;
+    // CLAIM EKRANI: zincirdeki TUM tahsisler (claim zincirde ref'e gore calisir;
+    // gizlemek aliciyi kendi cekilebilir tutarindan habersiz birakir). Test kaydi isaretli.
     let tahsisler: Vec<Value> = alimlar_ham
         .iter()
         .map(|(odeme_ref, k)| {
@@ -448,6 +486,7 @@ async fn on_satis_tahsis(State(st): State<RpcState>, Path(adres_hex): Path<Strin
                 "lsc_hediye": k.lsc_hediye.to_string(),
                 "lsc_verildi": k.lsc_verildi,
                 "tamamlandi": k.tamamlandi(),
+                "test_tahsisi": haric.contains(odeme_ref),
             })
         })
         .collect();
@@ -456,6 +495,8 @@ async fn on_satis_tahsis(State(st): State<RpcState>, Path(adres_hex): Path<Strin
         "ok": true,
         "adres": adres_hex.trim(),
         "tge": tge,
+        // TGE tarihi acik birakildiysa (TGE_BELIRSIZ) arayuz tarih DEGIL "belirlenmedi" gostermeli.
+        "tge_belirlendi": tge < lsc_engine::mainnet::TGE_BELIRSIZ,
         "simdi": simdi,
         "tge_gecti": simdi >= tge,
         "toplam_tahsis": toplam_tahsis.to_string(),

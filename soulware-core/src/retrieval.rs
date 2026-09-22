@@ -56,6 +56,33 @@ fn katla(c: char) -> char {
     }
 }
 
+/// Niyet eşleştirme için metni sadeleştir: küçük harf + Türkçe→ascii katlama,
+/// alfanümerik dışı → tek boşluk. "Sağlık durumu?" → "saglik durumu".
+/// ('İ'.to_lowercase() = "i\u{307}" → birleşen nokta atılır.)
+pub fn sade(s: &str) -> String {
+    s.to_lowercase()
+        .chars()
+        .filter(|c| *c != '\u{307}')
+        .map(katla)
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Sade metinde anahtar var mı? Boşluklu anahtar → ifade (kelime sınırlı) eşleşmesi;
+/// tek kelime → token eşitliği, ≥5 harfliyse önek (Türkçe ekler: "zincirde" ~ "zincir").
+/// Kısa anahtarlar önekle eşleşmez ("rwa" ≠ "rwanda", "tps" ≠ "https").
+pub fn anahtar_var(sade_metin: &str, anahtar: &str) -> bool {
+    if anahtar.contains(' ') {
+        return format!(" {sade_metin} ").contains(&format!(" {anahtar}"));
+    }
+    sade_metin
+        .split(' ')
+        .any(|t| t == anahtar || (anahtar.chars().count() >= 5 && t.starts_with(anahtar)))
+}
+
 /// Sorguyu/metni token'lara ayır: küçük harf + Türkçe→ascii katlama, alfanümerik
 /// dışını ayraç yap, kısa (<3) ve durak kelimeleri at.
 pub fn tokenle(s: &str) -> Vec<String> {

@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AIDAG — Sistem Komutları</title>
+<style>
+  :root { --bg:#0a1120; --card:#111c30; --ink:#e9eef7; --dim:#8fa2bd; --acc:#d4a24e; --acc2:#3ba7c4; --line:#1e2c44; --ok:#3ddc97; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    background:radial-gradient(1000px 500px at 50% -10%, #12213c 0%, var(--bg) 60%); color:var(--ink);
+    padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0); }
+  .wrap { max-width:760px; margin:0 auto; padding:20px 14px 50px; }
+  h1 { font-size:1.4rem; margin:.2em 0; }
+  .sub { color:var(--dim); margin:.2em 0 1.4em; font-size:.92rem; }
+  h2 { font-size:1.02rem; color:var(--acc2); margin:1.6em 0 .3em; border-bottom:1px solid var(--line); padding-bottom:6px; }
+  .cmd { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin:12px 0; }
+  .cmd .baslik { font-weight:600; margin-bottom:8px; font-size:.95rem; }
+  .cmd .aciklama { color:var(--dim); font-size:.83rem; margin-bottom:10px; }
+  pre { background:#070d18; border:1px solid var(--line); border-radius:8px; padding:12px;
+    overflow-x:auto; margin:0 0 10px; font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
+    color:#d6e2f2; white-space:pre; }
+  .kopyala { border:0; border-radius:8px; padding:9px 16px; font-size:.9rem; font-weight:700;
+    cursor:pointer; background:var(--acc); color:#1a1204; }
+  .kopyala.ok { background:var(--ok); color:#04120b; }
+  .not { color:var(--dim); font-size:.82rem; margin-top:10px; }
+  a { color:var(--acc2); }
+  .ust { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="ust">
+    <h1>🛠️ AIDAG Sistem Komutları</h1>
+    <a href="/ask">← KUBRA'ya sor</a>
+  </div>
+  <p class="sub">Kanıtlanmış, çalışan komutlar. Kopyala → terminale yapıştır.</p>
+  <h2>🩺 Sağlık & Durum</h2>
+  <div class="cmd">
+    <div class="baslik">Tam sistem sağlık kontrolü</div>
+    <div class="aciklama">Node'lar, KUBRA, site, belge — hepsi ayakta mı.</div>
+    <pre id="c1">echo "=== NODE ==="; systemctl is-active lsc-node.service aidag-mainnet.service guvenli-mod.service
+echo "=== SENKRON ==="; curl -s -m5 http://127.0.0.1:8645/status | python3 -c "import sys,json; d=json.load(sys.stdin); print('vertex='+str(d.get('vertex_count','?')),'tip='+str(d.get('tip_count','?')),'orphan='+str(d.get('orphan_count','?')))"
+echo "=== KUBRA ==="; curl -s -m5 http://127.0.0.1:8646/health && echo ""
+echo "=== SITE ==="; curl -s -m8 -o /dev/null -w "site %{http_code}\n" https://aidag-chain.com/
+echo "=== BELGE ==="; curl -s -m8 -o /dev/null -w "belge %{http_code}\n" https://aidag-chain.com/belge</pre>
+    <button class="kopyala" onclick="kopya('c1',this)">📋 Kopyala</button>
+  </div>
+  <div class="cmd">
+    <div class="baslik">Node senkron durumu</div>
+    <div class="aciklama">Vertex, tip, orphan — zincir sağlıklı mı.</div>
+    <pre id="c2">curl -s -m5 http://127.0.0.1:8645/status | python3 -m json.tool</pre>
+    <button class="kopyala" onclick="kopya('c2',this)">📋 Kopyala</button>
+  </div>
+  <div class="cmd">
+    <div class="baslik">Tüm servisler ayakta mı</div>
+    <div class="aciklama">AIDAG systemd servislerinin durumu.</div>
+    <pre id="c3">systemctl list-units --type=service | grep -iE "lsc|aidag|kubra|soulware|nginx|guvenli"</pre>
+    <button class="kopyala" onclick="kopya('c3',this)">📋 Kopyala</button>
+  </div>
+  <h2>🧠 KUBRA Testleri</h2>
+  <div class="cmd">
+    <div class="baslik">KUBRA cevap veriyor mu</div>
+    <div class="aciklama">Basit soru + model bilgisi.</div>
+    <pre id="c4">curl -s -m60 http://127.0.0.1:8646/v1/ask -X POST -H "Content-Type: application/json" -d '{"prompt":"Merhaba","deterministic":true}' | python3 -c "import sys,json; d=json.load(sys.stdin); print('CEVAP:',d.get('answer','')[:200]); print('model:',d.get('model'))"</pre>
+    <button class="kopyala" onclick="kopya('c4',this)">📋 Kopyala</button>
+  </div>
+  <div class="cmd">
+    <div class="baslik">Streaming test (harf harf)</div>
+    <div class="aciklama">Token token akış. -N = buffersiz.</div>
+    <pre id="c5">curl -s -N -m60 http://127.0.0.1:8646/v1/ask-stream -X POST -H "Content-Type: application/json" -d '{"prompt":"AIDAG-Chain nedir? Kisaca.","deterministic":true}' | head -30</pre>
+    <button class="kopyala" onclick="kopya('c5',this)">📋 Kopyala</button>
+  </div>
+  <div class="cmd">
+    <div class="baslik">Beyin (llama-server) sağlıklı mı</div>
+    <div class="aciklama">Beyin ayakta mı, hangi model.</div>
+    <pre id="c6">curl -s -m5 http://127.0.0.1:18650/health && echo ""
+ps aux | grep llama-server | grep -v grep | grep -oE "\-m [^ ]+"</pre>
+    <button class="kopyala" onclick="kopya('c6',this)">📋 Kopyala</button>
+  </div>
+  <h2>📄 Belge Doğrulama</h2>
+  <div class="cmd">
+    <div class="baslik">Bir hash zincirde kayıtlı mı</div>
+    <div class="aciklama">HASH'i kendi hash'inle değiştir.</div>
+    <pre id="c7">curl -s -m8 "http://127.0.0.1:8645/belge/HASH" | python3 -m json.tool</pre>
+    <button class="kopyala" onclick="kopya('c7',this)">📋 Kopyala</button>
+  </div>
+  <h2>🌐 Web & Servis</h2>
+  <div class="cmd">
+    <div class="baslik">Tüm sayfalar açılıyor mu</div>
+    <div class="aciklama">Ana site, belge, ask, katıl — hepsi 200 mü.</div>
+    <pre id="c8">for s in "" belge ask katil gorsel how; do curl -s -m8 -o /dev/null -w "/$s -> %{http_code}\n" "https://aidag-chain.com/$s"; done</pre>
+    <button class="kopyala" onclick="kopya('c8',this)">📋 Kopyala</button>
+  </div>
+  <div class="cmd">
+    <div class="baslik">nginx test + yeniden yükle</div>
+    <div class="aciklama">Config test eder, sonra reload.</div>
+    <pre id="c9">nginx -t && systemctl reload nginx && echo "nginx OK"</pre>
+    <button class="kopyala" onclick="kopya('c9',this)">📋 Kopyala</button>
+  </div>
+  <div class="cmd">
+    <div class="baslik">KUBRA'yı yeniden başlat</div>
+    <div class="aciklama">Ayar değişince core'u yeniden başlatır.</div>
+    <pre id="c10">systemctl restart soulware-kubra.service && sleep 5 && curl -s -m5 http://127.0.0.1:8646/health && echo " OK"</pre>
+    <button class="kopyala" onclick="kopya('c10',this)">📋 Kopyala</button>
+  </div>
+  <h2>💾 Yedek & Güvenlik</h2>
+  <div class="cmd">
+    <div class="baslik">Kod bütünlüğü (yetkisiz değişiklik var mı)</div>
+    <div class="aciklama">Son commit'ler + değişmiş dosyalar.</div>
+    <pre id="c11">cd /root/aidag-lsc && git log --oneline -5 && echo "--- degisenler ---" && git status --short</pre>
+    <button class="kopyala" onclick="kopya('c11',this)">📋 Kopyala</button>
+  </div>
+  <p class="not">Bu komutlar bugün test edildi ve çalıştı. Yeni bir sorun için çözüm gerekiyorsa Claude'a danış — sistemi bozmadan.</p>
+</div>
+<script>
+function kopya(id, btn){
+  const txt = document.getElementById(id).textContent;
+  navigator.clipboard.writeText(txt).then(()=>{
+    btn.textContent="✓ Kopyalandı"; btn.classList.add("ok");
+    setTimeout(()=>{ btn.textContent="📋 Kopyala"; btn.classList.remove("ok"); }, 1600);
+  }).catch(()=>{
+    const r=document.createRange(); r.selectNode(document.getElementById(id));
+    getSelection().removeAllRanges(); getSelection().addRange(r);
+    try{ document.execCommand("copy"); btn.textContent="✓ Kopyalandı"; btn.classList.add("ok");
+      setTimeout(()=>{ btn.textContent="📋 Kopyala"; btn.classList.remove("ok"); }, 1600);
+    }catch(e){ btn.textContent="Elle seç"; }
+    getSelection().removeAllRanges();
+  });
+}
+</script>
+</body>
+</html>
