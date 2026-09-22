@@ -967,18 +967,24 @@ pub async fn run_node(
                                     tracing::warn!("Pull-sync cevabi gonderilemedi -> {peer}");
                                 }
                             }
-                            // CEVAP geldi: gelen vertex'leri ingest_synced (orphan+cascade)
-                            // ile yukle. ingest_synced = replay yolu (clock-policy YOK).
+                            // CEVAP geldi: gelen vertex'leri ingest_synced_es (orphan+cascade)
+                            // ile yukle. Gecmis tarih serbest (replay), ama es GUVENILMEZ:
+                            // gelecek tarihli vertex (kural 7) reddedilir -> kotu niyetli es
+                            // zincir saatini ileri itemez.
                             request_response::Message::Response { response, .. } => {
                                 let alinan = response.vertices.len() as u64;
                                 let resp_offset = response.offset;
                                 let resp_total = response.total;
                                 let mut integrated = 0u32;
                                 let mut buffered = 0u32;
+                                let now = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_secs())
+                                    .unwrap_or(0);
                                 for v_bytes in response.vertices {
                                     let outcome = {
                                         let mut st = node_state.write().await;
-                                        st.ingest_synced(&v_bytes)
+                                        st.ingest_synced_es(&v_bytes, now)
                                     };
                                     match outcome {
                                         lsc_engine::NetworkIngestOutcome::Integrated(_) => {

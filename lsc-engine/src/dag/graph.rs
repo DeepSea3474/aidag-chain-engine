@@ -298,6 +298,14 @@ impl Graph {
         Ok(())
     }
 
+    /// Kural 7'yi (yerel saat politikası) mutasyonsuz uygula. Eşlerden gelen
+    /// sync cevapları gibi GÜVENİLMEYEN ama `insert_synced` ile işlenen yollar
+    /// için: gelecek tarihli vertex (ts > now + skew) içeri alınmaz. Geçmişe
+    /// sınır yoktur → dürüst geçmiş (eski timestamp'ler) etkilenmez.
+    pub fn saat_politikasi(&self, v: &Vertex, now: u64) -> Result<(), GraphError> {
+        self.within_clock_policy(v, now)
+    }
+
     /// Yerel saat politikası (kural 7). Düğümden düğüme değişebilir.
     /// Whitelist'li genesis ileri-skew kontrolünden MUAF (O3).
     fn within_clock_policy(&self, v: &Vertex, now: u64) -> Result<(), GraphError> {

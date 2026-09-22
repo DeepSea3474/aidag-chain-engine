@@ -13,7 +13,7 @@ use std::time::Duration;
 use crate::consensus::ghostdag::{Ghostdag, DEFAULT_K};
 use crate::dag::graph::Graph;
 use crate::dag::orphan::OrphanPool;
-use crate::dag::pipeline::{ingest_bytes, IngestError};
+use crate::dag::pipeline::IngestError;
 use crate::dag::vertex::{Vertex, VertexId};
 use crate::dag::wire;
 
@@ -58,9 +58,15 @@ pub struct NodeState {
     /// On satis dagitim defteri: odeme_ref -> kayit (cifte dagitim engeli, seffaflik).
     on_satis_registry: crate::registry::OnSatisRegistry,
     /// GUNLUK CAP takibi (owner custody): (gun_no, o_gunku_toplam_aidag).
-    /// gun_no = vertex zaman damgasi / 86400 -> deterministik, tum dugumlerde ayni.
+    /// gun_no = zincir_saati / 86400 -> deterministik, tum dugumlerde ayni.
     /// tip=10 on-satis dagitimlari bu gun icinde ON_SATIS_GUNLUK_CAP'i asamaz.
     on_satis_gunluk: (u64, u128),
+    /// ZINCIR SAATI: total_order'da simdiye kadar islenen vertex'lerin EN BUYUK
+    /// zaman damgasi (monoton, asla geri gitmez). Vertex zaman damgasini imzalayan
+    /// secer ve gecmise siniri yoktur; custody kurallari (gunluk cap, TGE gecmise-ayar)
+    /// bu yuzden vertex zamanina DEGIL zincir saatine baglidir -> gecmis tarihli
+    /// vertex'le sayac sifirlanamaz / TGE geriye cekilemez. total_order'dan turer.
+    zincir_saati: u64,
     /// ON-SATIS TGE (Unix sn). Owner tip=15 ile ZINCIRDEN ayarlar; None ise pinli
     /// sabit (MAINNET_VESTING_BASLANGIC) kullanilir. DAG total_order'dan turer ->
     /// tum dugumler ayni; node yeniden baslatma gerekmez.
@@ -200,6 +206,7 @@ impl NodeState {
             eslestirme_registry: crate::registry::EslestirmeRegistry::yeni(),
             on_satis_registry: crate::registry::OnSatisRegistry::yeni(),
             on_satis_gunluk: (0, 0),
+            zincir_saati: 0,
             on_satis_tge: None,
             faucet_owner: None,
             faucet_verildi: std::collections::HashSet::new(),
@@ -218,15 +225,16 @@ impl NodeState {
     /// Ağdan/diskten gelen ham baytları ingest eder:
     /// decode → insert → ghostdag update. Hata aşama tipini korur.
     pub fn ingest(&mut self, bytes: &[u8], now: u64) -> Result<VertexId, IngestError> {
-        let id = ingest_bytes(&mut self.graph, &mut self.ghostdag, bytes, now)?;
-        // DURUM = ghostdag.total_order()'dan TURETILIR (belirlenimci, idempotent).
-        // KRITIK (K1): eskiden burada dogrudan `kalkana_yonlendir` cagriliyordu AMA
-        // `son_uygulanan_sira` guncellenmiyordu; sonraki `durumu_yeniden_uygula`
-        // append fast-path'i AYNI vertex'i TEKRAR isliyordu. Nonce'suz STAKE bu
-        // yuzden CIFT sayiliyordu (transferler nonce ile korunuyordu, stake degil)
-        // -> uretici dugum agdan ayrisiyordu (konsensus bolunmesi). Cozum: ingest de
-        // tek yol olan total_order-turevi yeniden-uygulamaya guvenir (idempotent).
-        self.durumu_yeniden_uygula();
+        // TEK YOL: decode -> integrate_vertex (graf insert + ghostdag + durum).
+        // Eskiden `ingest_bytes` kullaniliyordu; o ghostdag'i DAIMA UniformWeight ile
+        // gunceller. Mainnet'te (weigher=CommitteeWeight) bos veriyle acilan dugum
+        // genesis'i Uniform ile yukleyip ilk ag vertex'inde (Committee) "weigher
+        // karisti" assert'iyle PANIK yapiyordu. integrate_vertex dugumun KENDI
+        // agirligini kullanir. Devnet'te (None) update_one == update (bit-bit ozdes).
+        // DURUM = ghostdag.total_order()'dan TURETILIR (K1: idempotent, cift sayim yok).
+        let vertex = wire::decode(bytes)?;
+        let id = *vertex.id();
+        self.integrate_vertex(vertex, now, false, false)?;
         Ok(id)
     }
 
@@ -629,6 +637,23 @@ impl NodeState {
         }
     }
 
+    /// ESLERDEN GELEN SYNC cevabi yolu: `ingest_synced` + kural 7 (gelecek-zaman
+    /// siniri). Eskiden pull-sync cevaplari dogrudan `ingest_synced` ile islenirdi;
+    /// kotu niyetli bir es, canli yolda (kural 7) reddedilecek GELECEK tarihli
+    /// vertex'i bu yoldan sokup zincir saatini ileri itebilirdi (gunluk cap'i yeni
+    /// "gunlere" bolmek, TGE ayarini engellemek). Gecmis tarihli durust gecmis
+    /// etkilenmez (kural 7'nin gecmise siniri yok). Diskten yukleme bu yolu KULLANMAZ.
+    pub fn ingest_synced_es(&mut self, bytes: &[u8], now: u64) -> NetworkIngestOutcome {
+        let vertex = match wire::decode(bytes) {
+            Ok(v) => v,
+            Err(e) => return NetworkIngestOutcome::Rejected(IngestError::Decode(e)),
+        };
+        if let Err(e) = self.graph.saat_politikasi(&vertex, now) {
+            return NetworkIngestOutcome::Rejected(IngestError::Graph(e));
+        }
+        self.ingest_synced(bytes)
+    }
+
     /// `ingest_synced` ile AYNI — fakat ed25519 imza dogrulamasi ATLANIR.
     /// ON KOSUL (CAGIRANIN SORUMLULUGU): `bytes`'in vertex'inin imzasi ZATEN
     /// (paralel toplu) dogrulanmis olmali. Diger TUM yapisal kontroller (ag,
@@ -831,6 +856,11 @@ impl NodeState {
         self.kurum_registry = crate::registry::KurumRegistry::yeni();
         self.eslestirme_registry = crate::registry::EslestirmeRegistry::yeni();
         self.on_satis_registry = crate::registry::OnSatisRegistry::yeni();
+        // total_order'dan tureyen TUM sayaclar sifirlanir (yoksa reorg'da gunun
+        // satislari eski toplamin USTUNE yeniden sayilir -> gecerli satis reddi,
+        // restart eden dugumle durum ayrismasi = konsensus bolunmesi).
+        self.on_satis_gunluk = (0, 0);
+        self.zincir_saati = 0;
         self.on_satis_tge = None;
         self.faucet_verildi = std::collections::HashSet::new();
         self.compute_reward_verildi = std::collections::HashSet::new();
@@ -935,6 +965,8 @@ impl NodeState {
         // dugumler ayni transfer'i farkli kilit durumuyla degerlendirir → ayrisma.
         // EVM `block.timestamp` mantigi: islem, kendi zaman damgasina gore degerlenir.
         self.bakiye_registry.zaman_ayarla(zaman);
+        // ZINCIR SAATI: bu vertex dahil, sira boyunca gorulen en buyuk zaman (monoton).
+        self.zincir_saati = self.zincir_saati.max(zaman);
         match payload.first() {
             // tip=2: token kimlik kaydi -> KALKAN (STAKE-KONTROLLU + taklit reddi)
             Some(&crate::tx::TX_TYPE_TOKEN) => {
@@ -1160,9 +1192,11 @@ impl NodeState {
                             .toplam_aidag()
                             .saturating_add(d.aidag)
                             <= crate::mainnet::ON_SATIS_FAZ1_TAVAN;
-                        // GUNLUK CAP: vertex zamanindan gun turet (deterministik).
+                        // GUNLUK CAP: gun ZINCIR SAATINDEN turetilir (deterministik,
+                        // monoton). Vertex zamanindan turetilseydi imzalayan gecmis/
+                        // donusumlu tarih secerek sayaci her seferinde sifirlardi.
                         // Gun degistiyse sayac sifirdan; ayni gunse mevcut toplam.
-                        let bugun = zaman / 86400;
+                        let bugun = self.zincir_saati / 86400;
                         let gunluk_mevcut = if self.on_satis_gunluk.0 == bugun {
                             self.on_satis_gunluk.1
                         } else {
@@ -1236,12 +1270,19 @@ impl NodeState {
             Some(&crate::tx::TX_TYPE_TGE_AYARLA) => {
                 if let Ok(t) = crate::tx::TgeAyarla::decode(payload) {
                     let cagiran = crate::registry::public_key_to_adres(signer);
-                    // GECMISE-AYAR KORUMASI (custody): ayarlanan TGE, islemin geldigi
-                    // andan (vertex zamani) daha ERKEN olamaz. Ele gecen anahtar
-                    // "TGE dun oldu" deyip herkesin vesting kilidini erkenden acamaz.
-                    // Kesin TGE tarihi hala ILERIYE serbestce ayarlanabilir.
-                    // Deterministik: karsilastirma vertex zaman damgasiyla (tum dugumler ayni).
-                    if self.faucet_owner == Some(cagiran) && t.tge >= zaman {
+                    // CUSTODY KORUMASI (bkz. mainnet::TGE_MIN_BILDIRIM_SURESI):
+                    //  (a) ONCEDEN BILDIRIM: yeni TGE >= zincir saati + bildirim suresi. Vertex
+                    //      zamani DEGIL zincir saati: onu imzalayan secemez (eski tarihli
+                    //      vertex'le "TGE dun/simdi" denemesi calismaz).
+                    //  (b) KESINLIK: mevcut TGE'ye ulasildiysa TGE artik degismez
+                    //      (acilmis vesting geri kilitlenemez, alici korunur).
+                    // Deterministik: zincir saati total_order'dan turer (tum dugumler ayni).
+                    let tge_kesin = self.zincir_saati >= self.on_satis_tge();
+                    let bildirim_ok = t.tge
+                        >= self
+                            .zincir_saati
+                            .saturating_add(crate::mainnet::TGE_MIN_BILDIRIM_SURESI);
+                    if self.faucet_owner == Some(cagiran) && !tge_kesin && bildirim_ok {
                         self.on_satis_tge = Some(t.tge);
                     }
                 }
@@ -4136,12 +4177,240 @@ mod tests {
         assert_eq!(node.on_satis_tge(), ileri,
             "gecmise-ayar REDDEDILDI: TGE hala ileri degerde, degismedi");
 
-        // 3) BUGUNE (tam vertex zamani) ayar -> KABUL (>= zaman, sinirda gecerli)
-        let bugun = satis;
-        let v3 = Vertex::new_signed(NET, vec![*v2.id()], TgeAyarla::new(bugun).encode(), satis, &osk)
+        // 3) BUGUNE ("hemen ac") ayar -> RED: TGE bildirim suresi kadar once ilan edilmeli.
+        let v3 = Vertex::new_signed(NET, vec![*v2.id()], TgeAyarla::new(satis).encode(), satis, &osk)
             .expect("v3");
         node.ingest_networked(&wire::encode(&v3), satis);
-        assert_eq!(node.on_satis_tge(), bugun, "tam bugune (>=zaman) ayar kabul");
+        assert_eq!(node.on_satis_tge(), ileri, "bildirim suresiz (hemen) TGE REDDEDILDI");
+
+        // 4) Tam bildirim suresi sonrasi -> KABUL (sinirda); 1 sn eksik -> RED.
+        let bildirim = crate::mainnet::TGE_MIN_BILDIRIM_SURESI;
+        let v4 = Vertex::new_signed(NET, vec![*v3.id()], TgeAyarla::new(satis + bildirim - 1).encode(), satis, &osk)
+            .expect("v4");
+        node.ingest_networked(&wire::encode(&v4), satis);
+        assert_eq!(node.on_satis_tge(), ileri, "bildirim suresinden kisa REDDEDILDI");
+        let v5 = Vertex::new_signed(NET, vec![*v4.id()], TgeAyarla::new(satis + bildirim).encode(), satis, &osk)
+            .expect("v5");
+        node.ingest_networked(&wire::encode(&v5), satis);
+        assert_eq!(node.on_satis_tge(), satis + bildirim, "tam bildirim suresiyle KABUL");
+    }
+
+    #[test]
+    fn tge_gunu_gelince_kesinlesir() {
+        use crate::registry::public_key_to_adres;
+        use crate::tx::TgeAyarla;
+        let satis = crate::mainnet::ON_SATIS_BASLANGIC;
+        let bildirim = crate::mainnet::TGE_MIN_BILDIRIM_SURESI;
+
+        let mut node = NodeState::new_devnet(NET);
+        let (gen, gid) = genesis_bytes(1, satis);
+        node.ingest_networked(&gen, satis);
+        let osk = SigningKey::from_bytes(&[0x91u8; 32]);
+        node.faucet_owner_ayarla(public_key_to_adres(&osk.verifying_key().to_bytes()));
+
+        let tge = satis + bildirim;
+        let v1 = Vertex::new_signed(NET, vec![gid], TgeAyarla::new(tge).encode(), satis, &osk).unwrap();
+        node.ingest_networked(&wire::encode(&v1), satis);
+        assert_eq!(node.on_satis_tge(), tge);
+
+        // TGE gunu geldi (zincir saati >= TGE). Ertelemek artik MUMKUN DEGIL:
+        // acilmis kilitler geri kilitlenemez.
+        let v2 = Vertex::new_signed(NET, vec![*v1.id()], TgeAyarla::new(tge + 60 * 86400).encode(), tge, &osk)
+            .unwrap();
+        node.ingest_networked(&wire::encode(&v2), tge);
+        assert_eq!(node.on_satis_tge(), tge, "TGE gunu gelince TGE KESINLESIR");
+    }
+
+    // DENETIM (2026-09-22): vertex zamanini imzalayan secer ve gecmise siniri yok.
+    // Eski TARIHLI bir vertex (genesis'e baglanarak kural 8'i gecer), sonradan
+    // birlestirilince sirada islenir. Kurallar zincir saatine bagli olmali.
+
+    /// Owner imzali vertex'i eski tarihle (genesis'e bagli) uret, sonra `birlestiren`
+    /// ile guncel uca birlestir (total_order'a girsin). Donus: birlestirici id.
+    fn eski_tarihli_birlestir(
+        node: &mut NodeState,
+        gid: VertexId,
+        son: VertexId,
+        payload: Vec<u8>,
+        eski_zaman: u64,
+        simdi: u64,
+        osk: &SigningKey,
+    ) -> VertexId {
+        let eski = Vertex::new_signed(NET, vec![gid], payload, eski_zaman, osk).expect("eski");
+        node.ingest_networked(&wire::encode(&eski), simdi);
+        let bsk = SigningKey::from_bytes(&[0x5Au8; 32]);
+        let mut ebeveyn = vec![son, *eski.id()];
+        ebeveyn.sort();
+        let m = Vertex::new_signed(NET, ebeveyn, b"birlestir".to_vec(), simdi, &bsk)
+            .expect("birlestirici");
+        node.ingest_networked(&wire::encode(&m), simdi);
+        *m.id()
+    }
+
+    #[test]
+    fn gunluk_cap_eski_tarihli_vertexle_asilamaz() {
+        use crate::registry::public_key_to_adres;
+        use crate::tx::OnSatisDagitim;
+        let satis = crate::mainnet::ON_SATIS_BASLANGIC;
+        let od = crate::genesis::ONDALIK;
+        let islem = crate::mainnet::ON_SATIS_ISLEM_UST_SINIR; // 50k
+        let t = satis + 10 * 86400; // "bugun"
+
+        let mut node = NodeState::new_devnet(NET);
+        let (gen, gid) = genesis_bytes(1, satis);
+        node.ingest_networked(&gen, satis);
+        let osk = SigningKey::from_bytes(&[0x91u8; 32]);
+        let owner = public_key_to_adres(&osk.verifying_key().to_bytes());
+        node.faucet_owner_ayarla(owner);
+        node.test_bakiye_ekle(owner, 1_000_000 * od);
+        let alici = [0x44u8; 20];
+
+        // Bugun 2 x 50k = gunluk cap (100k) doldu.
+        let mut son = gid;
+        for r in [701u64, 702] {
+            let v = Vertex::new_signed(NET, vec![son], OnSatisDagitim::new(alici, alici, islem, 0, r).encode(), t, &osk)
+                .expect("satis");
+            node.ingest_networked(&wire::encode(&v), t);
+            son = *v.id();
+        }
+        assert_eq!(node.on_satis_toplam_aidag(), 2 * islem);
+
+        // SALDIRI: 5 ve 6 gun ONCESINE tarihli satislar (her biri farkli "gun").
+        // Vertex zamanindan gun turetilseydi sayac her seferinde sifirlanirdi.
+        for (r, geri) in [(703u64, 5u64), (704, 6)] {
+            let p = OnSatisDagitim::new(alici, alici, islem, 0, r).encode();
+            son = eski_tarihli_birlestir(&mut node, gid, son, p, t - geri * 86400, t, &osk);
+        }
+        assert!(node.on_satis_sorgula(703).is_none() && node.on_satis_sorgula(704).is_none(),
+            "eski tarihli satislar gunluk cap'i ASAMAZ (zincir saati = bugun)");
+        assert_eq!(node.on_satis_toplam_aidag(), 2 * islem, "toplam hala 100k");
+    }
+
+    #[test]
+    fn tge_eski_tarihli_vertexle_geri_cekilemez() {
+        use crate::registry::public_key_to_adres;
+        use crate::tx::TgeAyarla;
+        let satis = crate::mainnet::ON_SATIS_BASLANGIC;
+        let t = satis + 10 * 86400;
+
+        let mut node = NodeState::new_devnet(NET);
+        let (gen, gid) = genesis_bytes(1, satis);
+        node.ingest_networked(&gen, satis);
+        let osk = SigningKey::from_bytes(&[0x91u8; 32]);
+        node.faucet_owner_ayarla(public_key_to_adres(&osk.verifying_key().to_bytes()));
+
+        let ileri = t + 30 * 86400;
+        let v1 = Vertex::new_signed(NET, vec![gid], TgeAyarla::new(ileri).encode(), t, &osk).expect("v1");
+        node.ingest_networked(&wire::encode(&v1), t);
+        assert_eq!(node.on_satis_tge(), ileri);
+
+        // Guncel dal eski tarihli daldan AGIR olsun (secili zincir = guncel dal) ->
+        // eski tarihli TGE vertex'i v1'den SONRA islenir (gercek saldiri sirasi).
+        let bsk = SigningKey::from_bytes(&[0x5Bu8; 32]);
+        let f = Vertex::new_signed(NET, vec![*v1.id()], b"dolgu".to_vec(), t, &bsk).expect("dolgu");
+        node.ingest_networked(&wire::encode(&f), t);
+
+        // SALDIRI: vertex zamani = TGE = 5 gun once (t.tge >= vertex zamani saglanir).
+        let gecmis = t - 5 * 86400;
+        eski_tarihli_birlestir(&mut node, gid, *f.id(), TgeAyarla::new(gecmis).encode(), gecmis, t, &osk);
+        assert_eq!(node.on_satis_tge(), ileri,
+            "eski tarihli vertex TGE'yi gecmise CEKEMEZ (zincir saati = bugun)");
+    }
+
+    #[test]
+    fn reorg_tam_yeniden_hesap_gunluk_sayaci_sifirlar() {
+        use crate::registry::public_key_to_adres;
+        use crate::tx::OnSatisDagitim;
+        let satis = crate::mainnet::ON_SATIS_BASLANGIC;
+        let od = crate::genesis::ONDALIK;
+        let islem = crate::mainnet::ON_SATIS_ISLEM_UST_SINIR;
+
+        let mut node = NodeState::new_devnet(NET);
+        let (gen, gid) = genesis_bytes(1, satis);
+        node.ingest_networked(&gen, satis);
+        let osk = SigningKey::from_bytes(&[0x91u8; 32]);
+        let owner = public_key_to_adres(&osk.verifying_key().to_bytes());
+        node.faucet_owner_ayarla(owner);
+        node.test_bakiye_ekle(owner, 1_000_000 * od);
+        let alici = [0x44u8; 20];
+
+        // A dali: ayni gun 2 x 50k (cap tam dolu).
+        let a1 = Vertex::new_signed(NET, vec![gid], OnSatisDagitim::new(alici, alici, islem, 0, 801).encode(), satis, &osk).unwrap();
+        node.ingest_networked(&wire::encode(&a1), satis);
+        let a2 = Vertex::new_signed(NET, vec![*a1.id()], OnSatisDagitim::new(alici, alici, islem, 0, 802).encode(), satis, &osk).unwrap();
+        node.ingest_networked(&wire::encode(&a2), satis);
+        assert_eq!(node.on_satis_toplam_aidag(), 2 * islem);
+
+        // B dali daha agir -> secili zincir degisir -> REORG (tam yeniden hesap).
+        let bsk = SigningKey::from_bytes(&[0x5Au8; 32]);
+        let mut b = gid;
+        for i in 0..3u8 {
+            let v = Vertex::new_signed(NET, vec![b], vec![0xB0, i], satis, &bsk).unwrap();
+            node.ingest_networked(&wire::encode(&v), satis);
+            b = *v.id();
+        }
+        let mut ebeveyn = vec![b, *a2.id()];
+        ebeveyn.sort();
+        let m = Vertex::new_signed(NET, ebeveyn, b"birlestir".to_vec(), satis, &bsk).unwrap();
+        node.ingest_networked(&wire::encode(&m), satis);
+
+        // Yeniden oynatmada ayni satislar TEKRAR sayilmamali: ikisi de kayitli kalmali.
+        assert!(node.on_satis_sorgula(801).is_some() && node.on_satis_sorgula(802).is_some(),
+            "reorg sonrasi gecerli satislar REDDEDILMEMELI");
+        assert_eq!(node.on_satis_toplam_aidag(), 2 * islem);
+
+        // Ayni vertex'leri sifirdan yukleyen dugum AYNI duruma ulasmali (ayrisma yok).
+        let mut taze = NodeState::new_devnet(NET);
+        taze.faucet_owner_ayarla(owner);
+        taze.test_bakiye_ekle(owner, 1_000_000 * od);
+        for vb in node.export_vertices() {
+            taze.ingest_synced(&vb);
+        }
+        let sirali = |n: &NodeState| {
+            let mut l = n.on_satis_liste();
+            l.sort_by_key(|(r, _)| *r);
+            l
+        };
+        assert_eq!(sirali(&taze), sirali(&node), "reorg'lu dugum == taze dugum");
+    }
+
+    #[test]
+    fn mainnet_bos_dugum_genesis_sonrasi_panik_yapmaz() {
+        // Bos veriyle acilan mainnet dugumu: genesis NodeState::ingest ile yuklenir,
+        // sonraki vertex ag yolundan (komite agirligi) gelir. Eskiden "weigher karisti".
+        let mut node = NodeState::new_mainnet();
+        let simdi = crate::mainnet::ON_SATIS_BASLANGIC;
+        let gid = node
+            .ingest(&crate::mainnet::genesis_wire(), simdi)
+            .expect("pinli genesis yuklenmeli");
+        let sk = SigningKey::from_bytes(&[0x33u8; 32]);
+        let v = Vertex::new_signed(crate::mainnet::MAINNET_NETWORK_ID, vec![gid], b"ilk".to_vec(), simdi, &sk)
+            .unwrap();
+        assert!(matches!(
+            node.ingest_networked(&wire::encode(&v), simdi),
+            NetworkIngestOutcome::Integrated(_)
+        ));
+        assert_eq!(node.vertex_count(), 2);
+    }
+
+    #[test]
+    fn es_sync_gelecek_tarihli_vertexi_reddeder() {
+        let simdi = crate::mainnet::ON_SATIS_BASLANGIC;
+        let mut node = NodeState::new_devnet(NET);
+        let (gen, gid) = genesis_bytes(1, simdi - 10 * 86400);
+        node.ingest_networked(&gen, simdi);
+        let sk = SigningKey::from_bytes(&[0x33u8; 32]);
+        let gelecek = Vertex::new_signed(NET, vec![gid], b"g".to_vec(), simdi + 30 * 86400, &sk).unwrap();
+        assert!(matches!(
+            node.ingest_synced_es(&wire::encode(&gelecek), simdi),
+            NetworkIngestOutcome::Rejected(_)
+        ), "esten gelen gelecek tarihli vertex reddedilmeli");
+        // Eski tarihli durust gecmis kabul edilir (replay serbest).
+        let eski = Vertex::new_signed(NET, vec![gid], b"e".to_vec(), simdi - 86400, &sk).unwrap();
+        assert!(matches!(
+            node.ingest_synced_es(&wire::encode(&eski), simdi),
+            NetworkIngestOutcome::Integrated(_)
+        ));
     }
 
     #[test]

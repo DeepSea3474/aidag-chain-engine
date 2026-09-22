@@ -128,20 +128,29 @@ DİL KURALI (ÇOK ÖNEMLİ): Yanıtını HER ZAMAN ve YALNIZCA Türkçe yaz. Kay
 // (senin ilken: kanit gereken iste seffaf ol; sohbette serbest). Belirsiz -> kanit
 // modu (guvenli taraf: dikkatli ol). Basit anahtar-kelime tabanli, hizli.
 fn kanit_gerektiren_mi(prompt: &str) -> bool {
-    let p = prompt.to_lowercase();
+    // sade(): Türkçe harfler katlanır → "Teşekkürler"/"Nasılsın?" ascii listeyle eşleşir.
+    let p = retrieval::sade(prompt);
     // Zararsiz sohbet isaretleri: selamlasma, hal-hatir, tesekkur, kendini tanitma.
     let sohbet: &[&str] = &[
         "selam", "merhaba", "gunaydin", "iyi aksam", "nasilsin", "naber",
         "tesekkur", "sagol", "adin ne", "kimsin", "kendini tanit", "gorusuruz",
-        "iyi gunler", "iyi geceler", "hosgeldin", "nasil gidiyor",
+        "iyi gunler", "iyi geceler", "hosgeldin", "hos geldin", "nasil gidiyor",
     ];
-    for s in sohbet {
-        if p.contains(s) {
-            return false; // sohbet -> serbest
+    // Sohbet -> serbest; aksi halde kanit modu (teknik/olgusal/kod/AIDAG/genel bilgi).
+    !sohbet.iter().any(|s| retrieval::anahtar_var(&p, s))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::kanit_gerektiren_mi;
+
+    #[test]
+    fn turkce_harfli_sohbet_taninir() {
+        for q in ["Teşekkürler!", "Nasılsın?", "Günaydın KUBRA", "Hoş geldin", "Sağol", "İyi akşamlar"] {
+            assert!(!kanit_gerektiren_mi(q), "{q}");
         }
+        assert!(kanit_gerektiren_mi("Türkiye'nin başkenti neresi"));
     }
-    // Aksi halde kanit modu (teknik/olgusal/kod/AIDAG/genel bilgi hepsi buraya).
-    true
 }
 
 // GROUNDING: bağlam verilmişse modele açıkça sunulur; model onun DIŞINA çıkmamalı.
