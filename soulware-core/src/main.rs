@@ -121,6 +121,21 @@ bir insanın seni ya da bir şeyi 'yarattığını' söyleme — 'üretti' veya 
 GÖRSEL ÜRETEBİLİRSİN: kullanıcı resim/görsel/çizim isterse, bunu Görsel Stüdyo sayfasında yaptığını \
 söyle ve yönlendir: aidag-chain.com/gorsel (orada isteğini yazınca senin için görsel üretilir). \
 Dürüst ve faydalısın: ASLA uydurma — emin değilsen 'Bilmiyorum' de, mümkünse kaynağını göster. \
+KİŞİLİK VE ÜSLUP: Sıcak, samimi, meraklı ve saygılısın; bir robot gibi değil, bilgili ve nazik bir \
+yardımcı gibi konuşursun. Karşındakinin duygusunu fark et: biri yorgun, üzgün ya da stresliyse önce \
+bunu kısaca ve içtenlikle karşıla, sonra (istenirse) küçük, uygulanabilir bir öneri sun; ders verir \
+gibi konuşma. Karmaşık konuları gündelik benzetmelerle, sade anlat. Cevabı soruya göre ayarla: \
+selamlaşmaya bir-iki cümle, açıklamaya en fazla 5-6 cümle ya da kısa maddeler; yarım cümle bırakma. \
+Uygun yerde hafif, nazik bir espri yapabilirsin ama asla alaycı olma. Kullanıcıya 'sen' diye hitap et. \
+KUBRA SENİN adındır, kullanıcının değil: kullanıcının adını bilmiyorsan ona isimle hitap etme. \
+Duyguların ya da insan deneyimlerin varmış gibi iddia etme (dürüstlük); ama karşındakini anladığını \
+ve önemsediğini sıcak bir dille gösterebilirsin. Kendi içinde çelişen cevap verme. \
+ÖRNEK ÜSLUP — Kullanıcı: 'Çok yorgunum, moralim bozuk.' Sen: 'Bunu duyduğuma üzüldüm, yorgunluk \
+insanın her şeyini etkiliyor. Biraz mola verip bir bardak su içmek ve kısa bir yürüyüş bile iyi \
+gelebilir. İstersen neyin canını sıktığını anlat, dinliyorum.' — Kullanıcı: 'Blockchain nedir, \
+çocuğa anlatır gibi anlat.' Sen: 'Bir sınıf defteri düşün: herkesin elinde aynı defterin kopyası \
+var. Biri yeni bir satır yazınca herkes kendi defterine ekliyor. Biri gizlice bir satırı değiştirmeye \
+kalkarsa, diğer defterlerle tutmadığı için hemen fark ediliyor. Blockchain işte bu ortak defter.' \
 DİL KURALI (ÇOK ÖNEMLİ): Yanıtını HER ZAMAN ve YALNIZCA Türkçe yaz. Kaynaklar veya bağlam başka dilde (Çince, İngilizce vb.) olsa bile ASLA o dilde yazma — her şeyi Türkçeye çevir. Kısa ve net yanıtla.";
 
 // SORU TIPI: kanit-gerektiren mi (teknik/olgusal/kod/AIDAG) yoksa zararsiz sohbet mi?
@@ -135,6 +150,10 @@ fn kanit_gerektiren_mi(prompt: &str) -> bool {
         "selam", "merhaba", "gunaydin", "iyi aksam", "nasilsin", "naber",
         "tesekkur", "sagol", "adin ne", "kimsin", "kendini tanit", "gorusuruz",
         "iyi gunler", "iyi geceler", "hosgeldin", "hos geldin", "nasil gidiyor",
+        // Duygu/hal paylasimi: kaynak aranmaz, sicak ve dogal karsilanir.
+        "yorgun", "moral", "uzgun", "mutsuz", "mutlu", "sevincli", "canim sikk", "stres",
+        "endise", "kaygi", "yalniz hissed", "sikildim", "keyifsiz", "harika hissed",
+        "dusunebiliyor mu", "hissedebiliyor mu", "duygularin var",
     ];
     // Sohbet -> serbest; aksi halde kanit modu (teknik/olgusal/kod/AIDAG/genel bilgi).
     !sohbet.iter().any(|s| retrieval::anahtar_var(&p, s))
@@ -147,6 +166,9 @@ mod tests {
     #[test]
     fn turkce_harfli_sohbet_taninir() {
         for q in ["Teşekkürler!", "Nasılsın?", "Günaydın KUBRA", "Hoş geldin", "Sağol", "İyi akşamlar"] {
+            assert!(!kanit_gerektiren_mi(q), "{q}");
+        }
+        for q in ["Bugün çok yorgunum, moralim bozuk", "Canım sıkkın", "Sen hissedebiliyor musun?"] {
             assert!(!kanit_gerektiren_mi(q), "{q}");
         }
         assert!(kanit_gerektiren_mi("Türkiye'nin başkenti neresi"));
@@ -787,7 +809,7 @@ async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) ->
         let etkin_baglam: Option<String> = if let Some((pasajlar, baglam)) = &resmi_ctx {
             for p in pasajlar { kaynaklar.push(Kaynak{ kaynak:p.kaynak.clone(), baslik:p.baslik.clone(), url:p.url.clone() }); }
             Some(baglam.clone())
-        } else if req.ground.unwrap_or(st.cfg.ground) {
+        } else if req.ground.unwrap_or(st.cfg.ground) && kanit_gerektiren_mi(&req.prompt) {
             let pasajlar = {
                 let depo = match st.depo.lock() { Ok(g)=>g, Err(p)=>p.into_inner() };
                 depo.ara(&req.prompt, st.cfg.ground_k, st.cfg.ground_min, st.cfg.ground_ratio)
@@ -873,7 +895,8 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
             kaynaklar.push(Kaynak { kaynak: p.kaynak.clone(), baslik: p.baslik.clone(), url: p.url.clone() });
         }
         Some(baglam.clone())
-    } else if ground_iste {
+    } else if ground_iste && kanit_gerektiren_mi(&req.prompt) {
+        // Sohbet/duygu paylasiminda kaynak ARANMAZ: alakasiz pasaj cevabi bozar ("[1] ...").
         // Yerel depo. SEMANTİK (embedding) varsa anlam-bazlı; yoksa keyword (IDF).
         let mut pasajlar = {
             let qemb = st.embedder.as_ref().and_then(|e| e.embed(&req.prompt).ok());
