@@ -628,6 +628,14 @@ const FAUCET_LIMIT: lsc_engine::registry::Tutar = 500 * 1_000_000_000_000_000_00
 /// SADECE testnet/devnet icindir; test AIDAG'in GERCEK DEGERI YOKTUR (gercek
 /// satis degeri/arz belirlenmedi). Gercege (mainnet) geciste KALDIRILMALIDIR.
 async fn faucet(State(st): State<RpcState>, Path(adres_hex): Path<String>) -> Json<Value> {
+    // MAINNET KAPISI: basim/test ucu mainnet'te HICBIR SEY YAZMAZ (vertex uretilmez).
+    // Eskiden faucet mainnet'te de owner-imzali tip=6 vertex yazip "ok" donuyordu
+    // (motor basimi reddettigi icin bakiye 0) -> yaniltici cevap + spam vektoru.
+    // Env (LSC_PRODUCTION) degil dugumun kendisi belirler: her mainnet dugumunde kapali.
+    if st.node.read().await.mainnet_mi() {
+        return Json(json!({ "ok": false, "hata": "Mainnet'te test/basim ucu KAPALI (21.000.000 sabit arz; bakiye basilmaz)." }));
+    }
+
     let adres_bytes = match hex::decode(adres_hex.trim()) {
         Ok(b) if b.len() == 20 => b,
         _ => return Json(json!({ "ok": false, "hata": "adres 20 bayt (40 hex) olmali" })),
@@ -689,6 +697,14 @@ async fn faucet(State(st): State<RpcState>, Path(adres_hex): Path<String>) -> Js
 /// Govde: {"adres":"<hex40>","miktar":<u64>}. Sadece gelistirme/test icin.
 /// Gercek arz/dagitim modeli sonra (audit+hukuk asamasi).
 async fn test_bakiye(State(st): State<RpcState>, body: String) -> Json<Value> {
+    // MAINNET KAPISI: basim/test ucu mainnet'te HICBIR SEY YAZMAZ (vertex uretilmez).
+    // Eskiden faucet mainnet'te de owner-imzali tip=6 vertex yazip "ok" donuyordu
+    // (motor basimi reddettigi icin bakiye 0) -> yaniltici cevap + spam vektoru.
+    // Env (LSC_PRODUCTION) degil dugumun kendisi belirler: her mainnet dugumunde kapali.
+    if st.node.read().await.mainnet_mi() {
+        return Json(json!({ "ok": false, "hata": "Mainnet'te test/basim ucu KAPALI (21.000.000 sabit arz; bakiye basilmaz)." }));
+    }
+
     let v: Value = match serde_json::from_str(&body) {
         Ok(v) => v,
         Err(e) => return Json(json!({ "ok": false, "hata": format!("gecersiz json: {e}") })),
@@ -718,6 +734,14 @@ async fn test_bakiye(State(st): State<RpcState>, body: String) -> Json<Value> {
 /// POST /lsc_test_bakiye — DEVNET/TEST: bir adrese LSC bakiyesi basla (gercek arz DEGIL).
 /// Govde: {"adres":"<hex40>","miktar":<u64>}. AVM/gas testleri icin (LSC = yakit).
 async fn lsc_test_bakiye(State(st): State<RpcState>, body: String) -> Json<Value> {
+    // MAINNET KAPISI: basim/test ucu mainnet'te HICBIR SEY YAZMAZ (vertex uretilmez).
+    // Eskiden faucet mainnet'te de owner-imzali tip=6 vertex yazip "ok" donuyordu
+    // (motor basimi reddettigi icin bakiye 0) -> yaniltici cevap + spam vektoru.
+    // Env (LSC_PRODUCTION) degil dugumun kendisi belirler: her mainnet dugumunde kapali.
+    if st.node.read().await.mainnet_mi() {
+        return Json(json!({ "ok": false, "hata": "Mainnet'te test/basim ucu KAPALI (21.000.000 sabit arz; bakiye basilmaz)." }));
+    }
+
     let v: Value = match serde_json::from_str(&body) {
         Ok(v) => v,
         Err(e) => return Json(json!({ "ok": false, "hata": format!("gecersiz json: {e}") })),
@@ -1121,8 +1145,9 @@ pub fn router(
         .route("/on-satis-tahsis/:adres", get(on_satis_tahsis))
         .route("/on-satis-claim", post(on_satis_claim_relay));
 
-    // FAUCET: anti-spam korumali (bakiye limitli), production da dahil ACIK.
-    // test_bakiye/lsc_test_bakiye: sinirsiz basma -> sadece GELISTIRME modunda.
+    // FAUCET: anti-spam korumali (bakiye limitli); MAINNET dugumunde handler reddeder.
+    // test_bakiye/lsc_test_bakiye: sinirsiz basma -> sadece GELISTIRME modunda ve
+    // mainnet OLMAYAN dugumde (handler ayrica mainnet_mi() ile reddeder).
     let router = router.route("/faucet/:adres", get(faucet));
     let router = if std::env::var("LSC_PRODUCTION").is_ok() {
         tracing::warn!("PRODUCTION MODU: faucet ACIK (limitli), test_bakiye KAPALI.");
@@ -1149,4 +1174,55 @@ pub async fn serve(
     tracing::info!("RPC sunucusu dinliyor: http://{addr}  (GET /health, /status)");
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod mainnet_kapisi_testleri {
+    use super::*;
+
+    fn durum(node: lsc_engine::NodeState) -> (RpcState, tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let st = RpcState {
+            node: Arc::new(RwLock::new(node)),
+            submit_tx: tx,
+            signing_key: ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]),
+        };
+        (st, rx)
+    }
+
+    #[tokio::test]
+    async fn mainnet_faucet_ve_test_bakiye_hicbir_sey_yazmaz() {
+        let mut node = lsc_engine::NodeState::new_mainnet();
+        let gid = node.ingest(&lsc_engine::mainnet::genesis_wire(), 1_785_024_000).expect("genesis");
+        let _ = gid;
+        let (st, mut rx) = durum(node);
+        let once = st.node.read().await.vertex_count();
+        let adres = "0000000000000000000000000000000000000001".to_string();
+
+        let Json(v) = faucet(State(st.clone()), Path(adres.clone())).await;
+        assert_eq!(v["ok"], false, "mainnet faucet reddetmeli: {v}");
+        let Json(v) = test_bakiye(State(st.clone()), format!("{{\"adres\":\"{adres}\",\"miktar\":\"5\"}}")).await;
+        assert_eq!(v["ok"], false, "mainnet test_bakiye reddetmeli: {v}");
+        let Json(v) = lsc_test_bakiye(State(st.clone()), format!("{{\"adres\":\"{adres}\",\"miktar\":\"5\"}}")).await;
+        assert_eq!(v["ok"], false, "mainnet lsc_test_bakiye reddetmeli: {v}");
+
+        let node = st.node.read().await;
+        assert_eq!(node.vertex_count(), once, "mainnet'e HICBIR vertex yazilmamali");
+        assert_eq!(node.bakiye(&[0u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]), 0);
+        assert!(rx.try_recv().is_err(), "aga hicbir sey yayinlanmamali");
+    }
+
+    #[tokio::test]
+    async fn devnet_faucet_calismaya_devam_eder() {
+        let mut node = lsc_engine::NodeState::new_devnet(1);
+        let sk = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        let g = lsc_engine::Vertex::new_signed(1, vec![], b"lsc-genesis".to_vec(), now, &sk).unwrap();
+        node.ingest(&lsc_engine::dag::wire::encode(&g), now).unwrap();
+        node.faucet_owner_ayarla(lsc_engine::public_key_to_adres(&sk.verifying_key().to_bytes()));
+        let (st, _rx) = durum(node);
+        let Json(v) = faucet(State(st.clone()), Path("0000000000000000000000000000000000000002".into())).await;
+        assert_eq!(v["ok"], true, "devnet faucet calismali: {v}");
+        assert_ne!(v["yeni_bakiye"], "0");
+    }
 }

@@ -473,6 +473,12 @@ impl NodeState {
     }
 
     /// Bu düğümün ağ kimliği (network_id).
+    /// MAINNET dugumu mu? (new_mainnet ile kurulduysa true). RPC katmani test/basim
+    /// uclarini (faucet, test_bakiye) bununla KAPATIR — env degiskenine bagli degil.
+    pub fn mainnet_mi(&self) -> bool {
+        self.mainnet
+    }
+
     pub fn network_id(&self) -> u32 {
         self.network_id
     }
