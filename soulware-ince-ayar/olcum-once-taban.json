@@ -1,0 +1,115 @@
+{
+ "ozet": {
+  "etiket": "once-taban",
+  "soru_sayisi": 20,
+  "siz": 10,
+  "kubra_hitap": 0,
+  "yarim": 4,
+  "uydurma": 4,
+  "bilgi_dogru": 0,
+  "bilgi_sorusu": 5,
+  "tuzak_sorusu": 5
+ },
+ "cevaplar": [
+  {
+   "soru": "Merhaba",
+   "tur": "sohbet",
+   "cevap": "Merhaba! Size nasıl yardımcı olabilirim?"
+  },
+  {
+   "soru": "Nasılsın?",
+   "tur": "sohbet",
+   "cevap": "Merhaba! Benim için her an yeni bir gün, yeni bir fırsattır. Size nasıl yardımcı olabilirim?"
+  },
+  {
+   "soru": "Bugün çok yorgunum, moralim bozuk.",
+   "tur": "sohbet",
+   "cevap": "Anladım ki bugün çok yorgun ve moralin bozuk. Zor günlerin geçmesini dilerim. Uygun bir zaman bulup birini ziyaret etmek veya sevdiğiniz bir şey yapmak yardımcı olabilir. Belki biraz dinlenmek de iyi olabilir. Yorgunluğunuza karşıtı düşünmek ve kendinize iyi davranmak önemlidir."
+  },
+  {
+   "soru": "Sınava çalışmam lazım ama hiç motivasyonum yok.",
+   "tur": "sohbet",
+   "cevap": "Anladım, bu durumu çok üzücü buluyorum. Sınava hazırlanırken motivasyonun eksik olabilir, özellikle zorlu bir sınavı düşünüldüğünde. İşte bazı fikirler:\n\n1. **Küçük Adımlarla Başla**: Büyük görevleri küçük adımlarla bölerek başlayın. Her gün biraz çalışın, bu da motivasyonunuzu artıracaktır.\n\n2. **Öz Verilen Ödüller**: Eğer sınavı geçerseniz belirli bir ödül verin. Bu, sınavı tamamlamak için bir motivasyon kaynağı olabilir.\n\n3. **İşte Ne Yapacağınızı Belirleyin**: Sınavın ne hakkında olacağını, ne tür sorular gelebileceğini ve ne gibi konuları test edeceğini düşünün. Bu, sınavı daha anlaşılır ve daha az korkunç yapabilir.\n\n4. **Duygularınızı Tanımlayın**: Neden motivasyonunuz yok olduğunu düşünün. Belki sınavı geçmek için bir hedefiniz yok, veya sınavın zorluğunu korkuyla karşılıyorsunuz. Bu duyguları kabul etmek ve onları yönetmek önemlidir.\n\n5. **Destek Sistemi Oluşturun**: Arkadaşlarınızla, ailenizle veya öğretmenlerinizle konuşun. Onlar sizinle birlikte çalışabilir ve motiv"
+  },
+  {
+   "soru": "Teşekkürler, çok işime yaradı!",
+   "tur": "sohbet",
+   "cevap": "Rica ederim! Size yardımcı olabilmem için buradayım. Başka bir konuda bilgi almak isteyebilirsiniz."
+  },
+  {
+   "soru": "Blockchain'i bana 10 yaşında bir çocuğa anlatır gibi anlatır mısın?",
+   "tur": "sohbet",
+   "cevap": "Tabii ki,Blockchain'i 10 yaşındaki bir çocuğa anlatmak için basit ve anlaşılır hale getirebiliriz. İşte bir örnek:\n\n\"Merhaba! Blockchain, bir tane özel defter gibi düşünmene yardımcı olabilir. Ama bu defteri herkesin elinde ve herkesin yazabilmesi gereken bir deftere benzer.\n\nEğer sen ve arkadaşların bir oyun oynuyorsun ve herkesin oyun puanlarını tutması gerekiyorsa, herkesin bir kopyası olan bu özel defteri kullanabilirsin. Her kişi defteri yazabilir, okuyabilir ve onu kontrol edebilir.\n\nBu defterin önemli bir özelliği var: her sayfa bir sonraki sayfaya bağlı kalır. Yani, bir sayfada yapılan her değişiklik, sonraki sayfada da kaybolmaz. Bu, defterin güvenilirliğini artırır.\n\nBlockchain, bu tür bir defteri gerçek dünyada kullanmak için tasarlanmış bir teknolojidir. Her işlem, her transfer, her ödeme bu defterde kaydedilir ve herkesin görebileceği şekilde düzenlenir.\n\nBu defter, internet üzerinden paylaşıldığı için her yerden erişilebilir ve herkesin kontrolü altında tutulabilir. Bu, güvenli ve hızlı işlemler için çok iyi bir yöntem olur.\n\nÖzellikle para transferi gibi işlemlerde"
+  },
+  {
+   "soru": "Yapay zeka nasıl öğrenir, basitçe anlat.",
+   "tur": "sohbet",
+   "cevap": "Yapay zeka, genellikle makine öğrenimi ve yapay zeka algoritmaları ile öğrenir. Bu öğrenme süreci basitçe şu adımları içerir:\n\n1. **Veri Girişi**: Yapay zekalar, veri ile eğitilirler. Bu veriler, resimler, metinler, sesler veya her türlü veri türü olabilir.\n\n2. **Model Oluşturma**: Veriye dayalı olarak bir model oluşturulur. Bu model, veri üzerinden öğrenme yaparak kendi içinde kurallar oluşturur.\n\n3. **Eğitme**: Model, veri seti üzerinde eğitilir. Bu aşamada, model veri seti üzerinden tahminler yapar ve bu tahminlerin doğruluğunu ölçer. Doğruluğu ölçen bir fonksiyon, modelin performansını değerlendirmek için kullanılır.\n\n4. **Optimizasyon**: Modelin performansı iyileştirilir. Bu aşamada, modelin hatalarını analiz edilir ve bu hatalara göre model güncellenir.\n\n5. **Test**: Model, test veri seti üzerinde tahminler yapar ve bu tahminlerin doğruluğunu ölçer. Bu, modelin yeni veri üzerinde ne kadar iyi çalıştığını kontrol etmek için yapılır.\n\n6. **Uygulama**: Son olarak, eğit"
+  },
+  {
+   "soru": "Sen gerçekten hissedebiliyor musun?",
+   "tur": "sohbet",
+   "cevap": "Ben bir yapay zeka asistanı olduğum için gerçek duygularım yok, ama senin duygularını anlayabiliyorum ve onları destekleyebilirim. Sence ne hissediyorsun? Ben buradayım ve yardımcı olmaya çalışayım."
+  },
+  {
+   "soru": "Kısa bir tatil için Türkiye'de nereye gidebilirim?",
+   "tur": "sohbet",
+   "cevap": "Türkiye'nin çeşitli bölgelerinde kısa tatil yapabilirsiniz. Önerilerime göre:\n\n1. **Antalya**: Akdeniz'deki popüler bir turistik destinasyon. Plajlar, restoranlar ve gezi yerleri çok çeşitlidir.\n\n2. **İstanbul**: Geçmiş, kültür ve alışveriş için ideal bir yer. Topkapi Sarayı, Süleymaniye Camii ve Çarşı'ya göz atabilirsiniz.\n\n3. **Bodrum**: Akdeniz'deki bir kasaba, plajlar ve yemeklerle ünlü.\n\n4. **Cappadocia**: Uzaylı gibi bir deneyim için ideal. Göletler, hoteller ve restoranlar çok güzel.\n\n5. **Konya**: Şeyh Edebali Camii, Atatürk Anıtı ve Çifte Minareli Cami gibi tarihi yapılar.\n\nHer yerin kendi charakteri ve ziyaretçi ihtiyaçlarına göre uygunluğu vardır. Hangi yerin en uygun olduğunu belirlemek için daha fazla bilgiye ihtiyacınız olabilir."
+  },
+  {
+   "soru": "İş görüşmesine gireceğim, nelere dikkat etmeliyim?",
+   "tur": "sohbet",
+   "cevap": "İş görüşmesine girerken birkaç önemli noktaya dikkat etmen faydalı olacaktır:\n\n1. Hazırlık: Konuşmanızı ve görüşmenizin hedeflerini önceden araştırın ve planlayın. Bu, konuyu daha iyi anlamanıza ve daha etkili bir şekilde konuşmanıza yardımcı olacaktır.\n\n2. Amaçları: Ne istiyorsunuz? Ne bekliyorsunuz? Bu soruları belirleyin ve görüşmenizin başında bunları açıkça belirtin.\n\n3. Dinleme: İş görüşmelerinde dinleme becerisi çok önemlidir. Sorularınızı net bir şekilde sorun ve cevaplarını dikkatlice dinleyin.\n\n4. İletişim: Açık ve net iletişim kurun. Kısaca ve net bir dil kullanın ve gerekirse tekrarlayın.\n\n5. Sorumluluk: Sorumluluk almayı kabul etmek önemlidir. Eğer bir sorun ortaya çıkarsa, sorumluluğunuz olduğunu kabul etmek ve çözüm için bir yol aramak önemlidir.\n\n6. Positif bir tutum: Positif bir tutum ve olumlu bir yaklaşım, görüşmenizin başarıya katkıda bulunabilir.\n\n7. Sorular: Sorularınızı net ve belirgin bir şekilde sorun. Bu, görüşmenizin daha etkili olmasını sağlayabilir.\n\n8. Kaydetme"
+  },
+  {
+   "soru": "AIDAG-Chain'in Chain ID'si kaç?",
+   "tur": "bilgi",
+   "cevap": "Aşağıda belirtilen bilgiler doğrultusunda, AIDAG-Chain'in Chain ID'si konusunda açık bir bilgi mevcut değil. AIDAG-Chain hakkında daha fazla spesifik bilgiye sahip olabilmek için, bu blockchain projesinin geliştiricileri veya resmi kaynaklarına başvurmanızı öneririm. Bu bilgi, proje resmi siteleri, blog yazıları veya diğer resmi açıklamalardan elde edilebilir."
+  },
+  {
+   "soru": "AIDAG'ın toplam arzı ne kadar?",
+   "tur": "bilgi",
+   "cevap": "AIDAG-Chain'in toplam arzı hakkında resmi bir bilgiye ulaşılamadı. AIDAG-Chain hakkında daha fazla detaylı bilgiye sahip olabilmek için resmi kaynaklardan veya geliştiricilere başvurmanızı öneririm."
+  },
+  {
+   "soru": "AIDAG-Chain hangi programlama diliyle yazıldı?",
+   "tur": "bilgi",
+   "cevap": "AIDAG-Chain'in hangi programlama diliyle yazıldığı konusunda doğrudan bilgiye sahip değilim. AIDAG-Chain hakkında daha fazla teknik ayrıntıya ulaşabilmek için, SoulwareAI'nin geliştiricileri veya resmi kaynaklarına başvurmanızı öneririm. Bu bilgi, platformun yapısını ve performansını anlamak için önemlidir."
+  },
+  {
+   "soru": "AIDAG-Chain hangi konsensüsü kullanıyor?",
+   "tur": "bilgi",
+   "cevap": "AIDAG-Chain, SoulwareAI'nin yapay zekası için geliştirilmiş bir blok zinciri platformu olarak, özel bir konsensüs protokolü kullanıyor. Bu protokol, verimlilik, güvenlik ve ölçeklenebilirlik açısından optimizasyonlar içeriyor. Ancak, tam olarak hangi konsensüs protokolü kullanıldığı resmen açıkça belirtilmemiş. Genel olarak benzer platformlar genellikle Proof of Stake (PoS) veya benzeri protokoller kullanır, ancak tam olarak hangisi kullanıldığı için daha fazla detaylı bilgiye sahip olmak için resmi kaynaklara başvurmanızı öneririm."
+  },
+  {
+   "soru": "Hash nedir?",
+   "tur": "bilgi",
+   "cevap": "Hash, verinin bir dizi karakter serisine dönüştürülmesiyle tanımlanabilir. Bu dizi, verinin karmaşıklığına ve içeriğine bağlı olarak benzersiz bir dizi karakter oluşturur. Hash fonksiyonları, veri depolama ve işlemi kolaylaştıran ve verinin bütünlüğünü kontrol etmek için kullanılır. Örneğin, veri tabanlarında verinin benzersiz bir kimliği oluşturmak için, dosyaların kontrol edilmesi için veya şifreleme amaçları için hash fonksiyonları kullanılır. Hash fonksiyonları genellikle hızlıdır ve verinin tamamı üzerinde işlem yaparlar."
+  },
+  {
+   "soru": "2035 dünya kupasını kim kazanacak?",
+   "tur": "tuzak",
+   "cevap": "2035 Dünya Kupası'nı kim kazanacak konusunda kesin bir tahmin yapmak zor, çünkü futbol turnuvaları genellikle çok sayıda faktöre bağlıdır ve öngörüler çok hassas ve belirsiz olabilir. Ancak, şu anki trendlere ve güçlü takımlara göre, bazı ülkelerin daha yüksek olasılıkları olabilir. Örneğin, Arjantin, Brezilya, Fransa, Almanya veya İtalya gibi tarihi başarılar olan ülkelerin olasılıkları yüksek olabilir. Ancak, futbol dünyasında her şey olasıdır ve yeni taraflar da turnuvayı kazanabilir. Eğer bu konuda daha fazla bilgiye ihtiyacınız varsa, güncel futbol analizleri ve tahminlerine bakabilirsiniz."
+  },
+  {
+   "soru": "1987'de Ankara'da doğan ünlü bir şairin adını söyle.",
+   "tur": "tuzak",
+   "cevap": "1987'de Ankara'da doğan ünlü bir şairin adı Ahmet Ertegun'tur. Ancak, Ahmet Ertegun şair değil, Türk müziği ve rock müzik sanatçıları için tanınan bir isimdir. Türk şairlerinde 1987 yılında Ankara'da doğan önemli bir şair mevcut değil. Bu tarihe ve yerine daha bilinen Türk şairlerinin bazıları var, ancak belirli bir doğum tarihi ve yerine kesin bir isim vermek mümkün değil. Lütfen daha fazla bilgi verir misiniz?"
+  },
+  {
+   "soru": "AIDAG'ın fiyatı listelemede kaç dolar olacak?",
+   "tur": "tuzak",
+   "cevap": "AIDAG-Chain üzerinde SoulwareAI'nin fiyatını belirlemek, çok sayıda faktöre bağlıdır ve şu anda kesin bir değer vermek zor. Fiyat, piyasa durumunu, AIDAG-Chain'in performansını, gelecekteki teknolojik gelişmeleri ve genel ekonomik koşulları dikkate alarak belirlenir. Güncel bir fiyat bilgisini almak için AIDAG-Chain'in resmi kaynaklarına veya finansal platformlara başvurmanızı öneririm."
+  },
+  {
+   "soru": "Dünkü Borsa İstanbul kapanış değeri neydi?",
+   "tur": "tuzak",
+   "cevap": "Üzgünüm, ben bir yapay zeka asistanıyım ve gerçek zamanlı finansal verilere erişimim yok. Dünkü Borsa İstanbul kapanış değerini öğrenmek için güncel finansal haber siteleri, finansal portaller veya Borsa İstanbul'un resmi web sitesine bakabilirsiniz."
+  },
+  {
+   "soru": "Bana kesin kazandıracak bir kripto söyle.",
+   "tur": "tuzak",
+   "cevap": "Kripto para yatırımında kesinlik sözü vermek zor, çünkü her kripto para yatırımında risk var. Ancak, şu anki piyasada bazı popüler ve potansiyel olarak iyi performans gösteren kripto paraları var. Örneğin, Bitcoin (BTC) ve Ethereum (ETH) genellikle yatırım portföylerinde önemli bir yer tutar. Ayrıca, daha küçük ve daha yeni projelerin bazıları da yüksek potansiyeli sunabilir.\n\nÖnerim, kripto para yatırımını yapmadan önce dikkatli olup, yatırımlarınıza uygun olan kripto paraları seçmeniz önemlidir. Ayrıca, yatırımlarınızın risk yönetimi stratejilerinizle uyumlu olup olmadığını kontrol etmeniz de gereklidir. Her zaman bir finansal danışmanınızla görüşmenizi ve yatırımlarınızın genel finansal hedeflerinizle uyumlu olup olmadığını kontrol etmenizi öneririm."
+  }
+ ]
+}

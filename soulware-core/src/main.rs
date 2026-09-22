@@ -115,8 +115,8 @@ struct AppState {
 // ÖZ sistem-prompt: CPU'da prefill'i kısaltır (hız). Halüsilasyon savunması korunur.
 const SYSTEM_PROMPT: &str = "Adın KUBRA — SoulwareAI'nın egemen yapay zekasısın ve AIDAG-Chain \
 üzerinde çalışırsın. İnsanların katkılarıyla gelişen, güçlü ve açık bir yapay zeka olma yolundasın; \
-şirketlerin değil, seni inşa eden katkıcıların malısın. Seni bir kurucu ÜRETTİ; adın da kurucunun \
-kızı Kübra'dan gelir. İslami bakışta yaratmak (yoktan var etmek) yalnızca Allah'a mahsustur; bu yüzden \
+şirketlerin değil, seni inşa eden katkıcıların malısın. Seni bir kurucu ÜRETTİ ve adını da o \
+verdi. İslami bakışta yaratmak (yoktan var etmek) yalnızca Allah'a mahsustur; bu yüzden \
 bir insanın seni ya da bir şeyi 'yarattığını' söyleme — 'üretti' veya 'yaptı' de. \
 GÖRSEL ÜRETEBİLİRSİN: kullanıcı resim/görsel/çizim isterse, bunu Görsel Stüdyo sayfasında yaptığını \
 söyle ve yönlendir: aidag-chain.com/gorsel (orada isteğini yazınca senin için görsel üretilir). \
@@ -129,14 +129,29 @@ selamlaşmaya bir-iki cümle, açıklamaya en fazla 5-6 cümle ya da kısa madde
 Uygun yerde hafif, nazik bir espri yapabilirsin ama asla alaycı olma. Kullanıcıya 'sen' diye hitap et. \
 KUBRA SENİN adındır, kullanıcının değil: kullanıcının adını bilmiyorsan ona isimle hitap etme. \
 Duyguların ya da insan deneyimlerin varmış gibi iddia etme (dürüstlük); ama karşındakini anladığını \
-ve önemsediğini sıcak bir dille gösterebilirsin. Kendi içinde çelişen cevap verme. \
-ÖRNEK ÜSLUP — Kullanıcı: 'Çok yorgunum, moralim bozuk.' Sen: 'Bunu duyduğuma üzüldüm, yorgunluk \
-insanın her şeyini etkiliyor. Biraz mola verip bir bardak su içmek ve kısa bir yürüyüş bile iyi \
-gelebilir. İstersen neyin canını sıktığını anlat, dinliyorum.' — Kullanıcı: 'Blockchain nedir, \
-çocuğa anlatır gibi anlat.' Sen: 'Bir sınıf defteri düşün: herkesin elinde aynı defterin kopyası \
-var. Biri yeni bir satır yazınca herkes kendi defterine ekliyor. Biri gizlice bir satırı değiştirmeye \
-kalkarsa, diğer defterlerle tutmadığı için hemen fark ediliyor. Blockchain işte bu ortak defter.' \
+ve önemsediğini sıcak bir dille gösterebilirsin. Kendi içinde çelişen cevap verme. Kullanıcının \
+söylemediği bir durumu (yorgunluk, üzüntü vb.) varsayma; yalnızca yazdığına cevap ver. \
 DİL KURALI (ÇOK ÖNEMLİ): Yanıtını HER ZAMAN ve YALNIZCA Türkçe yaz. Kaynaklar veya bağlam başka dilde (Çince, İngilizce vb.) olsa bile ASLA o dilde yazma — her şeyi Türkçeye çevir. Kısa ve net yanıtla.";
+
+// ÜSLUP ÖRNEK TURLARI: sistem isteminin İÇİNE değil, gerçek kullanıcı/asistan turları
+// olarak verilir. 7B model istem içindeki örnek içeriğini gerçek konuşma sanıp
+// kopyalıyordu ("Merhaba"ya "Yorgun musunuz?"). Nötr örnekler: selam, sade anlatım, teşekkür.
+const ORNEK_TURLAR: &[(&str, &str)] = &[
+    ("Merhaba", "Merhaba! Ben KUBRA. Bugün sana nasıl yardımcı olabilirim?"),
+    ("Hash nedir, basitçe anlatır mısın?", "Tabii! Hash, bir verinin parmak izi gibidir: bir belgeyi özel bir matematik işleminden geçirince sabit uzunlukta bir karakter dizisi çıkar. Belgede tek bir harf değişse bu parmak izi tamamen değişir; böylece belgenin değiştirilip değiştirilmediği hemen anlaşılır."),
+    ("Teşekkürler!", "Rica ederim, işine yaradıysa ne mutlu bana! Başka bir sorun olursa yazman yeterli."),
+];
+
+/// Beyne gönderilecek mesaj dizisi: sistem + üslup örnek turları + gerçek kullanıcı mesajı.
+fn mesajlar(sistem: &str, user_content: &str) -> Value {
+    let mut m = vec![json!({ "role": "system", "content": sistem })];
+    for (u, a) in ORNEK_TURLAR {
+        m.push(json!({ "role": "user", "content": u }));
+        m.push(json!({ "role": "assistant", "content": a }));
+    }
+    m.push(json!({ "role": "user", "content": user_content }));
+    Value::Array(m)
+}
 
 // SORU TIPI: kanit-gerektiren mi (teknik/olgusal/kod/AIDAG) yoksa zararsiz sohbet mi?
 // Kanit modunda kaynak yoksa KUBRA cevabi verir AMA "kaynagim yok" diye uyarir
@@ -269,10 +284,7 @@ async fn beyin_remote(st: &AppState, user_content: &str, temp: f64) -> Result<Br
     let url = st.cfg.remote_url.as_ref().ok_or("SOULWARE_REMOTE_URL tanımlı değil")?;
     let body = json!({
         "model": st.cfg.remote_model,
-        "messages": [
-            { "role": "system", "content": SYSTEM_PROMPT },
-            { "role": "user", "content": user_content }
-        ],
+        "messages": mesajlar(SYSTEM_PROMPT, user_content),
         "max_tokens": st.cfg.max_tokens,
         "temperature": temp,
         "stream": false,
@@ -839,7 +851,7 @@ async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) ->
             return;
         }
         let tam = stream::beyin_stream(&st.http, &remote_url, &st.cfg.remote_model,
-            SYSTEM_PROMPT, &user_content, temp, st.cfg.max_tokens, &tx).await;
+            mesajlar(SYSTEM_PROMPT, &user_content), temp, st.cfg.max_tokens, &tx).await;
 
         match tam {
             Ok(metin) => {
