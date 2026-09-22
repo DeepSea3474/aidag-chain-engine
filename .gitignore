@@ -56,3 +56,5 @@ soulware-knowledge/kb.json
 soulware-knowledge/*.emb.json
 soulware-knowledge/*.bozuk-*
 data/
+.on-satis-son-blok.json
+soulware-knowledge/bilim-durum.json
