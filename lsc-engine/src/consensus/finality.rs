@@ -16,7 +16,7 @@
 //! 5. **Slashing/dışlama**: equivocation yapan yazarlar (gerçek paralel vertex
 //!    çifti) tespit edilir → PoA komiteden çıkarma / PoS stake slashing girdisi.
 //!
-//! Çerçeve: **AI önerir → DAO/multisig onaylar ve uygular.** Bu modül yalnızca
+//! Çerçeve: **AI önerir → yetkili çok imzalı onay uygular.** Bu modül yalnızca
 //! kesinlik/reorg-sınırı hesaplar; hiçbir işlemi otomatik yürütmez.
 
 use std::collections::BTreeSet;
@@ -212,7 +212,7 @@ impl FinalityState {
     /// "prev'i koru" ile geçiştirdiği iki durumdan KRİTİK olanıdır: en-ağır
     /// zincir finalize bloğu TERK ETMİŞ (eclipse / partition / saldırı). `advance`
     /// güvenle geri-alma YAPMAZ; ama düğüm bu sinyalde DURMALI / alarm vermeli —
-    /// gerçek karar (devam/rollback/manuel müdahale) DAO/multisig'dedir (AI
+    /// gerçek karar (devam/rollback/manuel müdahale) yetkili çok imzalı onaydadır (AI
     /// önerir, imzalamaz). Finalizasyon öncesi veya tip yoksa `false`.
     pub fn has_finality_conflict(&self, gd: &Ghostdag, graph: &Graph) -> bool {
         match self.finalized {
@@ -233,7 +233,7 @@ impl FinalityState {
 /// Semantik uyarı (denetçi B7): "paralel vertex" otomatik "kötü niyet" DEĞİL —
 /// dürüst bir düğüm çökme/restart, HA-failover veya anahtarın iki cihazda olması
 /// nedeniyle kazara paralel vertex üretebilir. Bu yüzden çıktı yalnızca ÖNERİ
-/// girdisidir: gerçek slashing/çıkarma kararı DAO/multisig onayıyla uygulanır
+/// girdisidir: gerçek slashing/çıkarma kararı yetkili çok imzalı onayla uygulanır
 /// (AI imzalamaz) — çerçevenin doğal koruması.
 pub fn equivocators(graph: &Graph) -> BTreeSet<[u8; 32]> {
     let mut authors: BTreeSet<[u8; 32]> = BTreeSet::new();

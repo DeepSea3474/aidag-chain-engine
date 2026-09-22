@@ -120,7 +120,7 @@ impl Weigher for UniformWeight {
 /// PoA başlangıç metriği (denetçi Seçenek 3): üreticisi yetkili komitede olan
 /// vertex ağırlık 1, değilse 0. Sybil dirençlidir — komite dışı bir saldırgan
 /// kaç blok üretirse üretsin ağırlığı 0'dır, gizli doğrusal zincirle blue-work
-/// şişiremez. Komite başlangıçta DAO/multisig imzacı kümesi olabilir; ileride
+/// şişiremez. Komite başlangıçta yetkili çok imzalı imzacı kümesi olabilir; ileride
 /// `weight = stake` (PoS) ile değiştirilir, finality mantığı aynı kalır.
 #[derive(Debug, Clone)]
 pub struct CommitteeWeight {
