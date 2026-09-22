@@ -4,7 +4,9 @@
 //! önce README + whitepaper'dan derlenmiş, yalnızca doğrulanmış bilgileri içeren
 //! kısa resmi belgeler (kb.aidag.json) aranır. Resmi kaynak yoksa model
 //! çağrılmaz → sabit "doğrulanmış bilgim yok" (uydurma YOK).
-//! Token/ön satış/fiyat bilgisi bu belgelerde bilinçli olarak YOKTUR.
+//! Kapsam (kurucu karari 2026-09-22): tum sistem — zincir, KUBRA yetenekleri,
+//! kurumsal hizmetler, kapali sistem, on satis/TGE, site sayfalari. Her belge
+//! "bugun calisan" ile "plan/tasarim"i ayirir. Yatirim tavsiyesi YOK.
 
 use crate::retrieval::{anahtar_var, sade, Pasaj};
 use serde::Deserialize;
@@ -37,7 +39,9 @@ pub fn aidag_konusu_mu(prompt: &str) -> bool {
     let s = sade(prompt);
     [
         "aidag", "kubra", "soulware", "soulwareai", "rwa", "dijital ikiz", "digital twin",
-        "belge dogrulama", "belge kayd",
+        "belge dogrulama", "belge kayd", "on satis", "presale", "tge", "tahsis", "claim",
+        "kurumsal", "kurumlar icin", "sirketler icin", "kapali sistem", "ozel ag",
+        "kuruma ozel", "metamask", "chain id", "lsc", "whitepaper", "aidag chain com",
     ]
     .iter()
     .any(|a| anahtar_var(&s, a))
@@ -86,7 +90,9 @@ pub fn resmi_user(prompt: &str, baglam: &str) -> String {
     format!(
         "ÖNEMLİ: Yanıtını YALNIZCA TÜRKÇE yaz. Aşağıda AIDAG-Chain'in RESMİ ve DOĞRULANMIŞ kaynakları var. \
 Soruyu YALNIZCA bu kaynaklardaki bilgiyle cevapla; kaynakta olmayan hiçbir bilgi, rakam, özellik, \
-tarih veya iddia EKLEME, tahmin yürütme. Token, fiyat, ön satış veya yatırım konusunda bilgi verme. \
+tarih veya iddia EKLEME, tahmin yürütme. Kaynakta 'plan', 'tasarım' veya 'geliştirme aşamasında' \
+diye geçen bir şeyi ASLA 'çalışıyor' diye sunma. Ön satış/fiyat bilgisini kaynaktaki gibi aktarabilirsin \
+ama yatırım tavsiyesi, fiyat tahmini veya getiri vaadi VERME. \
 Kaynak soruyla ilgiliyse (kısmen de olsa) kaynaktaki bilgiyi özetleyerek cevap ver; kaynakta belirtilen \
 sınırlar varsa onları da söyle. Yalnızca kaynaklar soruyla HİÇ ilgili değilse şunu yaz: \"{DOGRULANMAMIS}\" \
 Kısa, net ve resmi bir dille yanıtla (en fazla 5-6 cümle).\n\nRESMİ KAYNAKLAR:\n{baglam}\nSORU:\n{prompt}"
@@ -103,7 +109,8 @@ mod tests {
 
     #[test]
     fn konu_tespiti() {
-        for q in ["Aidag chain nedir", "KUBRA nedir", "Rwa icin cozumu nedir", "Kübra'nın görevi ne"] {
+        for q in ["Aidag chain nedir", "KUBRA nedir", "Rwa icin cozumu nedir", "Kübra'nın görevi ne",
+                  "Ön satış ne zaman bitiyor", "Kapalı sistem kurabilir miyiz", "MetaMask'e nasıl eklerim"] {
             assert!(aidag_konusu_mu(q), "{q}");
         }
         assert!(!aidag_konusu_mu("Türkiye'nin başkenti neresi"));
@@ -114,13 +121,17 @@ mod tests {
     fn dogru_belge_secilir() {
         let b = belgeler();
         assert_eq!(sec(&b, "Aidag chain nedir", 2)[0].baslik, "AIDAG-Chain nedir");
-        assert_eq!(sec(&b, "KUBRA nedir", 2)[0].baslik, "KUBRA nedir");
+        assert_eq!(sec(&b, "KUBRA nedir", 2)[0].baslik, "KUBRA nedir ve neler yapabilir");
         assert_eq!(sec(&b, "Rwa icin cozumu nedir", 2)[0].baslik, "Dijital ikiz ve RWA yaklaşımı");
         assert_eq!(sec(&b, "Belge doğrulama nasıl çalışır", 2)[0].baslik, "Belge doğrulama nasıl çalışır");
-        // Resmi belgeler token/fiyat/ön satış içermez.
+        assert_eq!(sec(&b, "Kurumlar için hangi hizmetleri veriyorsunuz", 2)[0].baslik, "Kurumlar ve şirketler için AIDAG-Chain hizmetleri");
+        assert_eq!(sec(&b, "KUBRA ve AIDAG-Chain birlikte neler yapabilir?", 2)[0].baslik, "KUBRA ve AIDAG-Chain birlikte neler yapabilir");
+        assert_eq!(sec(&b, "Kapalı sistem nasıl çalışır", 2)[0].baslik, "Kapalı (kuruma özel) sistem nasıl çalışır");
+        assert_eq!(sec(&b, "Ön satış nasıl işliyor, TGE ne zaman", 2)[0].baslik, "AIDAG ön satış ve TGE");
+        // Resmi belgeler getiri/fiyat VAADİ içermez (bilgi var, vaat yok).
         for x in &b {
             let m = sade(&x.metin);
-            for yasak in ["fiyat", "on satis", "presale", "usdt", "21 000 000", "arz"] {
+            for yasak in ["garanti kazanc", "kesin kazanc", "fiyat artacak", "yuzde getiri"] {
                 assert!(!anahtar_var(&m, yasak), "{} içinde '{yasak}'", x.baslik);
             }
         }
