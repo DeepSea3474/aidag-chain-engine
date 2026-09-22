@@ -58,3 +58,21 @@ Payhawk sirket karti mantigi zincire uyarlanir:
 ### Durum
 - Ilke MUHURLU. DAO mekanizmasi (oylama, uyelik, tavan) mainnet oncesi kodlanir.
 - DAO baslangici: mainnet + listeleme oncesi, gercek topluluk olusunca.
+
+---
+
+## EK KARARLAR — 2026-09-22 (kurucu onayli, mainnet'e deploy edildi)
+
+1. **On satis asamalari otomatik devam.** Faz 1 (630.000; 3 x 210k @ $0,20/0,25/0,30)
+   dolunca Faz 2 Rezerv (1.050.000; 5 x 210k @ $0,35/0,40/0,45/0,50/0,55) kesintisiz baslar.
+   Zincir: `ON_SATIS_TOPLAM_TAVAN = 1.680.000` (escrow diliminin tamami). Fiyat asla dusmez.
+2. **TGE politikasi.** Tarih ACIK (`TGE_BELIRSIZ`, 2100-01-01 isareti). 1.680.000 satilip
+   listeleme/launchpad karari alininca kurucu tarih+saat belirler. Zincir kurali: yeni TGE
+   >= zincir saati + 3 gun (`TGE_MIN_BILDIRIM_SURESI`); TGE gunu gelince KESINLESIR.
+3. **Custody kurallari zincir saatine bagli.** Gunluk 100k tavan ve TGE kurallari, imzalayanin
+   secebildigi vertex zamanina degil, total_order'daki en buyuk zaman damgasina (monoton) baglidir.
+4. **Mainnet'te test/basim uclari kapali.** faucet, test_bakiye, lsc_test_bakiye mainnet
+   dugumunde hicbir sey yazmadan reddeder (env'e degil dugumun kendisine bagli).
+5. **Konsensus degisikligi kurali.** Her konsensus degisikliginden once gercek mainnet gecmisi
+   eski ve yeni kodla yeniden oynatilir; durum ozeti BIREBIR ayni olmadan deploy YAPILMAZ.
+   Iki mainnet dugumu her zaman AYNI ANDA ayni binary'ye gecer (BAKIM-REHBERI.md bolum 7).

@@ -7,41 +7,43 @@
 
 ---
 
-## SU AN NEREDEYIZ / CURRENT STATUS (2026)
+## SU AN NEREDEYIZ / CURRENT STATUS (guncelleme 2026-09-22)
 
 ### Tamamlanan ve kanitli / Completed & proven
-- **Cekirdek DAG + GHOSTDAG** — 279 test yesil. O(n^2) darbogazi cozuldu
-  (1M vertex'te ~3535 TPS benchmark ile dogrulandi).
-- **Transfer, Kalkan (anti-fraud), belge dogrulama, kurum kimligi** — calisiyor.
-- **AVM (Akilli Kontrat Motoru)** — Kopru 1-5 calisiyor: gas, nonce/replay
-  korumasi, kontrat storage, node-seviye deploy/call. Standart ERC-20 (deploy+transfer) ve eth_call ile disaridan okuma KANITLANDI. ~25 test.
-- **EVM uyumlulugu** — secp256k1, ecrecover, raw Ethereum tx cozme.
-- **MetaMask entegrasyonu** — AIDAG cuzdanda goruntulenebiliyor (eth_ RPC,
-  chain_id 3474); kisisel test ortaminda dogrulandi.
-- **Iki-varlik altyapisi (u128)** — AIDAG + LSC buyuk-sayi (18 ondalik) gecisi.
-- **On satis dagitim altyapisi** — owner-imzali dagitim kodlandi + test edildi.
-- **Acik kaynak yapi** — Apache-2.0, dokumantasyon, katki rehberi.
+- **MAINNET CANLI** — 26 Temmuz 2026'dan beri; network/Chain ID 3474, pinli genesis
+  `b82345008ae109d8`, 2 dugum (lsc-node :8645, aidag-mainnet :8655, ayni sunucu).
+  / Mainnet live since 26 Jul 2026 (Chain ID 3474), 2 nodes on one server.
+- **Cekirdek DAG + GHOSTDAG** — lsc-engine 339 test yesil; O(n^2) darbogazi cozuldu.
+  Mainnet'te PoA komite agirligi (blue-work sisirme engeli).
+- **Iki-varlik ekonomisi** — AIDAG (21M sabit, genesis'te muhurlu 7 dilim + vesting)
+  ve LSC (gaz; %50 yakim / %50 gelistirme havuzu) mainnet'te calisiyor.
+- **AVM (EVM uyumlu, revm)** — MetaMask, eth_* RPC, ERC-20, secp256k1/ecrecover.
+- **Transfer, Kalkan (token kimlik korumasi), belge dogrulama, kurum kimligi** — mainnet'te.
+- **On satis** — Faz 1 (630k) CANLI; dolunca Faz 2 Rezerv (1,05M) OTOMATIK devam;
+  zincir tavani 1.680.000, islem basi 50k, gunluk 100k. Tahsis zincire yazilir,
+  claim TGE sonrasi (%20 + %80/12 ay).
+- **Custody sertlestirme (Eylul 2026)** — gunluk tavan ve TGE kurallari zincir saatine
+  bagli; reorg sayac, bos-dugum panigi, es-sync gelecek-zaman acigi kapatildi;
+  mainnet'te faucet/test basim uclari kapali. Her konsensus degisikliginden once
+  gercek mainnet gecmisi eski ve yeni kodla yeniden oynatilir, durum BIREBIR ayni olmali.
+- **TGE politikasi** — tarih ACIK; on satis bitip listeleme karari alininca zincirde
+  en az 3 gun once ilan edilir, TGE gunu gelince kesinlesir.
+- **KUBRA (SoulwareAI)** — resmi kaynaklara dayali cevap, zincirde belge dogrulama,
+  canli ag/on satis bilgisi, her cevap zincire damgali; bilim (OpenAlex), Wikipedia ve
+  guvenli GitHub README ogrenicileri (kod calistirmaz).
 
-### KALAN SON IKI ASAMA / FINAL TWO STAGES
+### KALAN ASAMALAR / REMAINING STAGES
+**1 — BAGIMSIZ GUVENLIK DENETIMI (AUDIT)** — henuz yapilmadi; tum bilesenler denetim
+oncesi kabul edilmelidir. / Not done yet; treat everything as pre-audit.
 
-Proje su an erken-asama prototiptir. Uretim/ciddi kullanim icin iki buyuk
-asama kalmistir. Bunlar tamamlanmadan mainnet'e ALINMAZ, token satisi YAPILMAZ.
-Early-stage prototype. Two major stages remain before production; the chain
-will NOT go live and NO token sale will occur before these are complete.
+**2 — TGE + LISTELEME** — on satis tamamlanip listeleme/launchpad karari alininca.
 
-**ASAMA 1 — BAGIMSIZ GUVENLIK DENETIMI (AUDIT)**
-- Henuz yapilmadi. Repo bu inceleme icin hazir (temiz, dokumante, acik kaynak).
-- Not done yet. The repo is ready for this review.
+**3 — Dagitik cok-dugumlu ag** — farkli sunucu/konumlarda bagimsiz dugumler.
 
-**ASAMA 2 — MAINNET**
-- Henuz yok. Gerekli: gercek genesis (sabit arz, vesting), coklu-node aginin
-  yuk altinda kanitlanmasi, halka acik kalici RPC, owner anahtar guvenligi.
-- Not live yet. Requires real genesis, multi-node proven under load, public
-  RPC, secure owner key management.
-
-> Ancak audit + mainnet tamamlaninca: borsa listeleme, token satisi, kurumsal
-> pilot gundeme gelebilir. Once guvenlik ve olgunluk. / Only after audit +
-> mainnet can listing, token sale, or pilots be considered. Security first.
+> DURUSTLUK NOTU: Bu belgenin Temmuz surumu "audit + mainnet olmadan token satisi
+> yapilmaz" diyordu. Karar BILINCLI olarak degisti (ON_SATIS_PLANI.md bolum 1):
+> on satis denetimden ONCE acildi, hukuki risk kabul edildi. Denetim hala bekliyor.
+> / The July version said no sale before audit; that decision was consciously changed.
 
 ---
 
@@ -57,7 +59,7 @@ will NOT go live and NO token sale will occur before these are complete.
 
 ## TAMAMLANAN — Çalışan Çekirdek
 
-1. **GHOSTDAG çekirdek** [ÇALIŞIYOR] — Rust, DAG Layer-1, çalışan testnet (binlerce vertex, canlı).
+1. **GHOSTDAG çekirdek** [ÇALIŞIYOR] — Rust, DAG Layer-1, MAINNET canlı (Chain ID 3474).
 2. **Transfer / ödeme** [ÇALIŞIYOR] — çift-harcama + imza (ed25519) korumalı.
 3. **Kalkan (anti-fraud)** [ÇALIŞIYOR] — stake-gated token kaydı + slashing (sahte token reddi).
 4. **Belge doğrulama** [ÇALIŞIYOR] — hash + kim + ne zaman, değiştirilemez kayıt.
@@ -68,19 +70,18 @@ will NOT go live and NO token sale will occur before these are complete.
 
 ## SIRADAKİ ADIMLAR (sıralı — atlanmaz)
 
-9. **Token ekonomisi** [TASARIM→kodlanacak]
-   - AIDAG (teminat/değer, 21M sabit) + LSC (yakıt/gas, 2.1B) iki ayrı native defter.
-   - Genesis'te sabit arz tanımlı (üretim/madencilik yok).
-   - DURUM: tasarım belgesi var (TOKENOMICS_TASARIM.md); kod HENÜZ YOK.
+9. **Token ekonomisi** [ÇALIŞIYOR]
+   - AIDAG (değer, 21M sabit, genesis'te mühürlü) + LSC (gaz, 2.1B) iki ayrı native defter — mainnet'te.
+   - LSC tam dağıtım tablosunun kodla uyumlanması BEKLİYOR (ON_SATIS_PLANI.md bölüm 3).
 
-10. **AVM — Akıllı Kontrat Motoru** [HEDEF] — "zirve" adım.
+10. **AVM — Akıllı Kontrat Motoru** [ÇALIŞIYOR] — revm tabanlı, EVM uyumlu (MetaMask, ERC-20).
     - Hazır motor entegre (revm / wasm — sıfırdan değil).
     - Nonce (replay koruma) + yakıt (gas) mekanizması BURADA bağlanır.
     - DEX, köprü gibi her şey AVM'nin üstüne kurulur — bu yüzden AVM önce gelir.
 
-11. **Mainnet** [HEDEF] — testnet olgunlaşınca.
+11. **Mainnet** [ÇALIŞIYOR] — 26 Temmuz 2026; Eylül 2026'da custody/konsensüs sertleştirmesi.
 
-12. **Bağımsız güvenlik denetimi (audit)** [HEDEF] — mainnet öncesi, ciddi/pahalı (top-tier).
+12. **Bağımsız güvenlik denetimi (audit)** [HEDEF — SIRADAKİ] — ciddi/pahalı (top-tier); henüz yapılmadı.
 
 ## İLERİ VİZYON (en son — AVM + mainnet + audit'e bağlı)
 
@@ -102,12 +103,12 @@ will NOT go live and NO token sale will occur before these are complete.
     - 3 AI (OpenAI/Claude/Groq) + kendi modeli vizyonu.
     - DAO'ya öneri sunan, insan-onaylı ortak yönetişim katmanı.
     - SINIR: AI öneri/sunum yapar, bağlayıcı DEĞİL — DAO/insan oylar.
-    - DURUM: şu an sadece AI-router (soru-cevap asistanı) çalışıyor. Otonom yönetim = uzak hedef.
+    - DURUM: KUBRA çalışıyor (kaynağa dayalı cevap, zincirde belge doğrulama, cevaplar zincire damgalı). Otonom yönetim = uzak hedef; AI işlem imzalayamaz.
 
 ## Borsa / değer notu (dürüst)
 - CEX listeleme: pahalı (30-50K$+), mainnet + audit + hacim ister — çok ileri.
 - DEX: AVM sonrası, kendi zincirinde.
-- Token SATIŞI: EN SON — mainnet + audit + avukat + yasal yapı sonrası. Şu an YOK, planlanmıyor.
+- Token SATIŞI: ön satış CANLI (Faz 1 → Faz 2 otomatik; yalnız aidag-chain.com/on-satis). Karar bilinçli olarak denetimden önceye alındı; listeleme fiyatı garanti edilmez.
 - Değer, spekülasyondan değil GERÇEK KULLANIMDAN gelir.
 
 ## Kritik prensip

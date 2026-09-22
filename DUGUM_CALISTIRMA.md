@@ -1,17 +1,18 @@
-# AIDAG-Chain — Dugum Calistirma ve Testnet'e Katilma
+# AIDAG-Chain — Dugum Calistirma (Mainnet ve yerel deneme)
 
-Bu rehber, bir AIDAG dugumunu nasil derleyip calistiracagini ve testnet'e
+Bu rehber, bir AIDAG dugumunu nasil derleyip calistiracagini ve aga
 nasil katilacagini anlatir.
 
-> Not: AIDAG-Chain su an gelistirme/testnet asamasindadir. Test AIDAG'in
-> GERCEK DEGERI YOKTUR (gercek satis degeri/arz henuz belirlenmedi).
+> Not: AIDAG-Chain MAINNET 26 Temmuz 2026'dan beri canlidir (network/Chain ID 3474,
+> genesis b82345008ae109d8). Mainnet'te AIDAG gercektir (21.000.000 sabit arz) ve
+> faucet YOKTUR. Bagimsiz guvenlik denetimi henuz yapilmadi.
 
 ## 1. Derleme
 
 Rust gerekli (https://rustup.rs). Sonra:
 
-    git clone https://github.com/DeepSea3474/aidag-chain-kubrairem2007.git
-    cd aidag-chain-kubrairem2007
+    git clone https://github.com/DeepSea3474/aidag-chain-engine.git
+    cd aidag-chain-engine
     cargo build --release
 
 ## 2. Dugum modlari
@@ -29,30 +30,35 @@ Dugum uc modda calisir:
 
 RPC artik http://localhost:8645 adresinde.
 
-## 4. Testnet'e katilma (bootstrap ile)
+## 4. Mainnet'e katilma (bootstrap ile)
 
-Bilinen bir bootstrap dugumune baglanarak aga katil. Kendi genesis'ini
-URETME (listen modu) — bootstrap dugumunun zincirini cekersin:
+Mainnet dugumu pinli genesis'i kendisi yukler (uretmez); LSC_MAINNET=1 ile
+baslat ve bilinen bir mainnet dugumune baglan (listen modu):
 
+    LSC_MAINNET=1 LSC_PRODUCTION=1 \
     LSC_BOOTSTRAP=/ip4/<BOOTSTRAP_IP>/tcp/40001 \
-    LSC_RPC_ADDR=0.0.0.0:8645 \
-      ./target/release/lsc-node /ip4/0.0.0.0/tcp/40002 listen
+    LSC_RPC_ADDR=127.0.0.1:8645 \
+      ./target/release/lsc-node /ip4/0.0.0.0/tcp/40002 /MUTLAK/YOL/aidag-data-mainnet.log listen
+
+Izole deneme agi (mainnet'e karismaz): LSC_NETWORK_ID=99999 ile ayri ag kimligi ver;
+ag kapisi farkli network_id'li vertex'leri reddeder.
 
 LSC_BOOTSTRAP virgulle ayrilmis birden cok adres alabilir:
 
     LSC_BOOTSTRAP=/ip4/1.2.3.4/tcp/40001,/ip4/5.6.7.8/tcp/40001
 
-## 5. Test AIDAG alma (faucet)
+## 5. Faucet (yalniz yerel/izole deneme agi)
 
-Dugum calisirken, bir adrese test AIDAG iste:
+MAINNET'te faucet ve test basim uclari KAPALIDIR (21.000.000 sabit arz); istek
+hicbir sey yazmadan reddedilir. Yalniz kendi yerel/izole deneme aginda:
 
     curl http://localhost:8645/faucet/<ADRES_HEX_40>
 
-Ya da Python SDK ile:
+Ya da Python SDK ile (deneme agi):
 
     from aidag_sdk import AidagClient
     c = AidagClient("http://localhost:8645", network_id=1)
-    c.faucet()                  # kendi adresine test AIDAG
+    c.faucet()
     print(c.bakiye(c.adres().hex()))
 
 ## 6. Islem yapma
@@ -64,7 +70,8 @@ sdk/python/README.md ve ornek_*.py dosyalarinda anlatiliyor.
 
 - GET  /health, /status, /tips
 - GET  /bakiye/:adres, /lsc-bakiye/:adres, /belge/:hash, /kurum/:adres
-- GET  /faucet/:adres          (testnet test AIDAG)
+- GET  /faucet/:adres          (yalniz deneme agi; mainnet'te KAPALI)
+- GET  /on-satis-ozet, /on-satis-tahsis/:adres   (on satis seffafligi, TGE durumu)
 - GET  /tokens
 - POST /submit                 (imzali vertex)
 
@@ -97,5 +104,6 @@ Calisan dugumu durdurup yeniden baslatirken DIKKAT:
 
 ## Bilinen sinirlar
 
-NOTLAR_BILINEN_SINIRLAR.md dosyasina bak. Ozetle: erken asama prototip;
-genis olcekli public testnet henuz ayakta degil; bagimsiz audit yapilmadi.
+NOTLAR_BILINEN_SINIRLAR.md dosyasina bak. Ozetle: mainnet canli ama 2 dugum ayni
+sunucuda (dagitik cok-dugumlu ag henuz yok); bagimsiz audit yapilmadi.
+Mainnet'e guvenli yukleme prosedurü: BAKIM-REHBERI.md bolum 7.

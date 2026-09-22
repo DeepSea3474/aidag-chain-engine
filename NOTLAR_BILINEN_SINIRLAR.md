@@ -632,3 +632,22 @@ DURUST SINIR (gercekle ortusmeli):
   o olcum sart; mevcut rakam onlarla DOGRUDAN kiyaslanamaz (elma-armut).
 - TPS tam sabit degil, hafif logaritmik dususlu (BTreeMap log n + ara sira lokal
   rebuild). O(n^2) degil ama O(1) de degil; kabul edilebilir olceklenir davranis.
+
+---
+
+## 2026-09-22 guncellemesi — acik kalan / bilincli sinirlar
+
+- **Dagitik ag yok:** iki mainnet dugumu (8645, 8655) ayni sunucuda. Sunucu kaybi = ag kaybi
+  (veri yedekleri /root/lsc-node-canli-yedek/). Farkli konumlarda bagimsiz dugum gerekli.
+- **Canli yol kural 7 yerel saate bagli:** zincir saati, canli yoldan gelen vertex'lerle en fazla
+  ~300 sn ileri itilebilir; es pull-sync yolu artik ayni siniri uygular. Disk yuklemesi uygulamaz
+  (kendi gecmisimiz).
+- **Kademe tablosu 4 yerde tekrarli:** on-satis-izleyici.py, site app/on-satis/page.tsx,
+  public/on-satis.html, soulware-core zincir.rs. Fiyat degisirse DORDU birlikte guncellenmeli
+  (tek kaynaga indirmek teknik borc).
+- **Owner tek anahtar:** on satis/TGE yonetimi tek anahtarda; zincir kurallari (tavanlar, 3 gun
+  bildirim, kesinlik) hasari sinirlar ama coklu-imza yok.
+- **Test tahsisi (ref 1001):** zincirde duruyor; genel satis ozetinden dislanir, kisisel
+  gorunumlerde "test_tahsisi" olarak isaretli. Toplam tavandan 10 AIDAG'i tuketir.
+- **Site tarafi olay defteri** (Next.js, off-chain) Rust mainnet'i DEGILDIR; arayuzde bu adla gosterilir.
+- **Bagimsiz guvenlik denetimi yapilmadi.**
