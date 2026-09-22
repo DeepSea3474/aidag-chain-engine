@@ -6,7 +6,9 @@
 # ODEYENIN adresine otomatik TAHSIS (tip=10) kaydeder (owner imzalama araciyla).
 # Odeyen adres = alicinin adresi = TGE'de claim adresi -> manuel eslestirme YOK.
 #
-# Faz-1 tavani (630.000 AIDAG) MOTORDA otomatik uygulanir; asilirsa tahsis reddedilir.
+# ASAMALAR OTOMATIK DEVAM EDER: Faz-1 (630.000) dolunca fiyat kendiliginden Faz-2
+# (Rezerv) kademelerine gecer. Toplam tavan (1.680.000 AIDAG) MOTORDA uygulanir;
+# asilirsa tahsis reddedilir (izleyici fazlasi icin IADE uyarisi basar).
 # Idempotent: islenmis tx hash'leri state dosyasinda tutulur (cifte-tahsis yok).
 #
 # Calistirma: periyodik (systemd timer / cron), ornegin her 2-3 dakikada.
@@ -46,8 +48,15 @@ ILK_GERI_BLOK = int(os.environ.get("ILK_GERI_BLOK", "20"))
 ETHERSCAN_KEY = os.environ.get("ETHERSCAN_API_KEY", "")
 # Etherscan yolunda: bu unix-sn ONCESI odemeler ATLANIR (eski islemler tahsis olmasin).
 BASLANGIC = int(os.environ.get("BASLANGIC", "1785024000"))  # 2026-07-26
-# Faz-1 tier'lari: (kumulatif AIDAG siniri, USD fiyat). Frontend TIERS ile ayni.
-TIERS = [(210000, 0.20), (420000, 0.25), (630000, 0.30)]
+# Kademeler: (kumulatif AIDAG siniri, USD fiyat). Frontend TIERS ile AYNI olmali
+# (/var/www/aidag-chain/app/on-satis/page.tsx). Kurucu karari 2026-09-22:
+#   Faz-1        : 3 x 210k @ $0,20 / 0,25 / 0,30              (630.000)
+#   Faz-2 Rezerv : 5 x 210k @ $0,35 / 0,40 / 0,45 / 0,50 / 0,55 (1.050.000)
+# Son sinir = motordaki ON_SATIS_TOPLAM_TAVAN (1.680.000).
+TIERS = [
+    (210000, 0.20), (420000, 0.25), (630000, 0.30),                              # Faz-1
+    (840000, 0.35), (1050000, 0.40), (1260000, 0.45), (1470000, 0.50), (1680000, 0.55),  # Faz-2
+]
 
 def http_json(url, data=None, headers=None):
     req = urllib.request.Request(url, data=data, headers=headers or {})
@@ -85,7 +94,17 @@ def usd_ile_aidag(usd, satilan):
         if kalan <= maliyet:
             return int(aidag + kalan / fiyat)
         aidag += dilim; kalan -= maliyet; nokta = sinir
-    return int(aidag)  # tavan asilirsa motor keser
+    return int(aidag)  # toplam tavan doldu: kalan USD karsiligi yok (bkz. aidag_maliyeti)
+
+def aidag_maliyeti(aidag, satilan):
+    # 'satilan' noktasindan itibaren 'aidag' kadarinin kademeli USD maliyeti.
+    usd = 0.0; nokta = satilan; kalan = aidag; bas = 0
+    for sinir, fiyat in TIERS:
+        if nokta < sinir and kalan > 0:
+            al = min(kalan, sinir - max(nokta, bas))
+            usd += al * fiyat; kalan -= al; nokta += al
+        bas = sinir
+    return usd
 
 def bsc(method, params):
     """Public BSC RPC cagrisi (ANAHTARSIZ). RPC'leri sirayla dener; hiz-limitinde
@@ -272,7 +291,15 @@ def main():
         if efektif_usd < usd:
             print(f"TAVAN {addr}: {usd:.2f} USD'nin {efektif_usd:.2f}'i tahsis edilir; {usd-efektif_usd:.2f} USD tavan asimi -> IADE gerekir tx={h[:12]}")
         aidag = usd_ile_aidag(efektif_usd, satilan)
+        # TOPLAM TAVAN (1.680.000) dolarken odemenin bir kismi AIDAG'a donusemez:
+        # bu fark SESSIZCE yutulmaz, acikca IADE olarak bildirilir.
+        harcanan_usd = aidag_maliyeti(aidag, satilan)
+        if efektif_usd - harcanan_usd >= 1.0:
+            print(f"TOPLAM TAVAN: tx={h[:12]} {efektif_usd:.2f} USD'nin yalniz {harcanan_usd:.2f}'i karsilanabildi; {efektif_usd-harcanan_usd:.2f} USD -> IADE gerekir ({addr})")
+            efektif_usd = harcanan_usd
         if aidag <= 0:
+            if usd >= 1.0:
+                print(f"TOPLAM TAVAN DOLU: tx={h[:12]} {usd:.2f} USD TAHSIS EDILMEDI -> IADE gerekir ({addr})")
             islenmis.add(h); continue
         # >50k odemeyi <=50k DILIMLERE bol (motor tek tahsiste 50k'yi asamaz).
         # Her dilim benzersiz + DETERMINISTIK ref: base*100+idx (yeniden-calisma guvenli).
