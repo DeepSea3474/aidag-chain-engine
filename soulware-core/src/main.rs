@@ -405,6 +405,10 @@ async fn arac_calistir(st: &AppState, prompt: &str) -> Option<(String, &'static 
     if let Some(x) = zincir::belge_dogrula(&st.http, &st.cfg.chain_rpc, prompt).await {
         return Some((x, "belge-dogrula"));
     }
+    // ÖN SATIŞ / TGE: satılan, aktif kademe, TGE durumu zincirden CANLI (belge eskir, bu eskimez).
+    if let Some(x) = zincir::on_satis_durumu(&st.http, &st.cfg.chain_rpc, prompt).await {
+        return Some((x, "on-satis-durumu"));
+    }
     // AĞ DURUMU: /status'tan canlı özet (zincir sorgusundan ÖNCE: daha spesifik niyet).
     if let Some(x) = zincir::ag_durumu(&st.http, &st.cfg.chain_rpc, prompt).await {
         return Some((x, "ag-durumu"));

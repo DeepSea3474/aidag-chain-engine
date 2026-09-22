@@ -1,26 +1,215 @@
 [
  {
   "baslik": "AIDAG-Chain nedir",
-  "metin": "AIDAG-Chain, Rust ile sıfırdan yazılmış, bağımsız, DAG (yönlü çevrimsiz çizge) tabanlı bir Layer-1 blok zinciridir. Klasik zincirlerde bloklar tek bir sıra hâlinde dizilir; AIDAG-Chain'de ise her birim, birden fazla ebeveyne referans verebilen bir köşedir (vertex). Bu sayede bloklar paralel üretilebilir. GHOSTDAG konsensüsü paralel köşeler arasından mavi kümeyi seçerek deterministik bir toplam sıra oluşturur; durum bu sıradan türetildiği için düğümler aynı duruma ulaşır. Yürütme katmanı revm tabanlı ve EVM uyumludur: Ethereum eth_* JSON-RPC, EIP-1559 işlemleri ve Solidity/ERC-20 sözleşmeleri desteklenir; MetaMask ve ethers.js ile çalışır. İmzalarda ed25519, özetlemede blake3 kullanılır. Zincir, doğrulanabilir dijital kayıtlar için altyapı olarak tasarlanmıştır: belge doğrulama ve kurumsal kimlik (kamu/özel ayrımıyla) sonradan eklenmiş sözleşmeler değil, zincirin yerel işlem türleridir. Mainnet canlıdır (network_id ve Chain ID 3474, sabitlenmiş genesis); bağımsız güvenlik denetimi henüz beklemededir. Explorer ve uygulamalar: https://aidag-chain.com",
+  "metin": "AIDAG-Chain, Rust ile sıfırdan yazılmış, bağımsız, DAG (yönlü çevrimsiz çizge) tabanlı bir Layer-1 blok zinciridir. Her birim, birden fazla ebeveyne referans verebilen bir köşedir (vertex); bloklar paralel üretilir. GHOSTDAG konsensüsü paralel köşeler arasından mavi kümeyi seçerek deterministik bir toplam sıra oluşturur; durum bu sıradan türetildiği için tüm düğümler aynı duruma ulaşır. Mainnet'te PoA komite ağırlığı kullanılır. Yürütme katmanı revm tabanlı ve EVM uyumludur: eth_* JSON-RPC, EIP-1559, Solidity/ERC-20; MetaMask ve ethers.js ile çalışır. İmzalarda ed25519, özetlemede blake3 kullanılır. Belge doğrulama ve kurumsal kimlik zincirin yerel işlem türleridir. MAINNET 26 Temmuz 2026'dan beri canlıdır: network_id/Chain ID 3474, sabitlenmiş genesis b82345008ae109d8, RPC https://aidag-chain.com/rpc. Bağımsız güvenlik denetimi henüz yapılmadı (bekliyor).",
   "url": "https://github.com/DeepSea3474/aidag-chain-engine",
-  "anahtarlar": ["aidag", "chain", "zincir", "zincirin", "ghostdag", "layer 1", "layer1", "blok zinciri", "blockchain", "evm", "mainnet", "konsensus"]
+  "anahtarlar": [
+   "aidag",
+   "chain",
+   "zincir",
+   "zincirin",
+   "ghostdag",
+   "layer 1",
+   "layer1",
+   "blok zinciri",
+   "blockchain",
+   "evm",
+   "mainnet",
+   "konsensus",
+   "genesis"
+  ]
  },
  {
-  "baslik": "KUBRA nedir",
-  "metin": "KUBRA, SoulwareAI'ın yapay zekasıdır ve AIDAG-Chain üzerinde çalışır. Adını AIDAG-Chain'in kurucusu vermiştir. Uydurmaya karşı iki ilkeyle çalışır: kaynağa dayalı cevap (grounding: soruyla ilgili kaynakları getirir ve cevabı onlara dayandırır) ve dürüst çekimserlik (emin değilse 'bilmiyorum' der, kaynak uydurmaz). Kesin cevap gereken işlerde modele tahmin ettirmek yerine deterministik araçlar kullanır: 64 haneli belge hash'inin zincirde kayıtlı olup olmadığını doğrulama, canlı ağ durumunu okuma, zincir sorgusu (bakiye, blok yüksekliği) ve hesap makinesi. KUBRA her etkileşiminin özetini (hash) kendi anahtarıyla imzalayıp AIDAG-Chain'e kayıt olarak yazar; böylece verdiği cevaplar sonradan zincir üzerinden doğrulanabilir. Beyni belirli bir modele bağlı değildir; açık modellerle çalışır. Görsel üretim için https://aidag-chain.com/gorsel sayfası kullanılır.",
+  "baslik": "KUBRA nedir ve neler yapabilir",
+  "metin": "KUBRA, SoulwareAI'ın yapay zekasıdır ve AIDAG-Chain üzerinde çalışır; adını AIDAG-Chain'in kurucusu vermiştir. Projenin çalıştırdığı açık kaynak modellerle çalışır. BUGÜN YAPABİLDİKLERİ: (1) Kaynağa dayalı cevap: AIDAG sorularını yalnızca doğrulanmış resmi belgelerden cevaplar, kaynak yoksa 'doğrulanmış bilgim yok' der. (2) Belge doğrulama: 64 haneli bir belge hash'i yazılınca zincirde kayıtlı olup olmadığını, kaydeden adresi ve zamanı doğrudan zincirden söyler. (3) Canlı ağ durumu: blok (vertex) sayısı, orphan, ağ sağlığı. (4) Zincir sorgusu: adres bakiyesi ve blok yüksekliği. (5) Ön satış ve TGE durumu: satılan miktar, aktif kademe ve TGE durumu zincirden canlı okunur. (6) Kesin hesap: aritmetik işlemleri hesap aracıyla yapar. (7) Görsel üretimi: aidag-chain.com/gorsel sayfasında; üretim öncesi içerik güvenlik kapısı zararlı istemleri reddeder, her görselin köken özeti zincire yazılır. (8) Denetlenebilirlik: her cevabın özeti (hash) KUBRA'nın anahtarıyla imzalanıp AIDAG-Chain'e kaydedilir; cevaplar sonradan zincirden doğrulanabilir. (9) Sürekli öğrenme: hakemli açık erişimli bilimsel makalelerden (OpenAlex, DOAJ, CC-BY) ve Wikipedia'dan bilgi tabanını büyütür. KUBRA işlem imzalayamaz, fon hareket ettiremez. Sohbet: aidag-chain.com/ask",
   "url": null,
-  "anahtarlar": ["kubra", "soulware", "soulwareai", "yapay zeka", "yapay zekasi", "asistan"]
+  "anahtarlar": [
+   "kubra",
+   "soulware",
+   "soulwareai",
+   "yapay zeka",
+   "yapay zekasi",
+   "asistan",
+   "yeteneklerin",
+   "yeteneklerini",
+   "neler yapabilir",
+   "ne yapabilirsin",
+   "kabiliyet"
+  ]
  },
  {
   "baslik": "Belge doğrulama nasıl çalışır",
   "metin": "AIDAG-Chain'de belgenin kendisi zincire gönderilmez. Belgenin değişmez parmak izi (blake3 özeti, 64 haneli hash) kullanıcının tarayıcısında hesaplanır ve yalnızca bu özet zincire yazılır; içerik gizli kalır, bütünlük kanıtlanır. Kayıt (kurum tarafı): https://aidag-chain.com/belge sayfasındaki 'Belge Kaydet' bölümünde belge seçilir, 'İşlemi Hazırla' ile özet hesaplanıp gösterilir, 'İşlemi Onayla' ile özet zincire kalıcı olarak yazılır; onaydan sonra kayıt geri alınamaz. Doğrulama (herkes): aynı sayfanın 'Belge Doğrula' bölümünde belge seçilir, özet yeniden hesaplanır ve zincirde aranır. Belgede tek bir harf bile değişmişse özet tutmaz ve doğrulama başarısız olur; böylece sahte veya değiştirilmiş belge tespit edilir. 64 haneli hash doğrudan KUBRA'ya yazılarak da doğrulanabilir. Kurumsal kimlik kaydı sayesinde belgenin gerçek kaynağı da teyit edilebilir. Örnek: bir üniversite diplomanın parmak izini zincire kaydeder; işveren hash'i yeniden hesaplayıp aracı kuruma gerek kalmadan saniyeler içinde doğrular. Belge sayfası şu an pilot aşamasındadır.",
   "url": "https://aidag-chain.com/belge",
-  "anahtarlar": ["belge", "dogrula", "dogrulama", "hash", "parmak izi", "diploma", "sahte", "kaydet", "kayit"]
+  "anahtarlar": [
+   "belge",
+   "dogrula",
+   "dogrulama",
+   "hash",
+   "parmak izi",
+   "diploma",
+   "sahte",
+   "kaydet",
+   "kayit"
+  ]
  },
  {
   "baslik": "Dijital ikiz ve RWA yaklaşımı",
   "metin": "AIDAG-Chain'in gerçek dünya varlıkları (RWA) ve dijital ikiz konusundaki çözümü, resmi belgelerine (README ve whitepaper) göre, gerçek dünyadaki belge ve kayıtların doğrulanabilir dijital karşılığını zincire bağlamaktır: bir belgenin veya varlık kaydının parmak izi (hash) zincire yazılır, böylece varlığı ve bütünlüğü herkes tarafından doğrulanabilir; kurumsal kimlik kaydı ile de kaynağı teyit edilir. Whitepaper'daki senaryolar: diploma doğrulama; konşimento (bill of lading) — bir denizcilik şirketi kargo belgesini zincire bağlar, böylece sahtecilik, çifte satış ve kayıp tespit edilebilir hâle gelir; kurumsal kimlik — kurumlar kamu/özel ayrımıyla doğrulanabilir zincir kimliği taşır. Yol haritasındaki programlanabilir senaryolar (EVM katmanıyla): kargo varış limanına ulaştığında ödemenin serbest kalması, bir belgenin yalnızca yetkili kurum imzaladığında geçerli olması. Sınırlar: resmi belgelerde tokenleştirilmiş bir RWA ürünü veya ayrı bir 'dijital ikiz' platformu tanımlanmamıştır; whitepaper'a göre gerçek benimseme müşteri, hukuki çerçeve ve saha çalışması gerektirir.",
   "url": "https://aidag-chain.com/whitepaper",
-  "anahtarlar": ["rwa", "dijital ikiz", "digital twin", "gercek dunya", "real world", "varlik", "tokeniz", "konsimento", "kargo", "tedarik"]
+  "anahtarlar": [
+   "rwa",
+   "dijital ikiz",
+   "digital twin",
+   "gercek dunya",
+   "real world",
+   "varlik",
+   "tokeniz",
+   "konsimento",
+   "kargo",
+   "tedarik"
+  ]
+ },
+ {
+  "baslik": "Kurumlar ve şirketler için AIDAG-Chain hizmetleri",
+  "metin": "AIDAG-Chain'in kurumlara ve şirketlere sunduğu, zincirde BUGÜN ÇALIŞAN yetenekler: (1) Belge doğrulama (RecordRegistry, işlem tipi 1): sertifika, diploma, sözleşme, konşimento, laboratuvar/medikal rapor, tedarik zinciri kaydı gibi belgelerin parmak izi zincire yazılır; kim ve ne zaman kaydettiği tahrif edilemez biçimde tutulur, herkes saniyeler içinde doğrular; belgenin kendisi zincire gitmez. (2) Kurumsal kimlik (KurumRegistry, işlem tipi 5): kamu ve özel kurum ayrımıyla doğrulanabilir zincir kimliği; bir belgenin gerçek kaynağı teyit edilir. (3) Ödeme/transfer altyapısı: çifte harcama ve imza korumalı, aracısız hızlı transfer (kapalı döngü veya B2B). (4) EVM uyumluluğu: Ethereum araçlarıyla (MetaMask, Solidity) yazılmış uygulamalar yeniden yazılmadan AIDAG-Chain'e kurulabilir. (5) Kalkan token kimlik koruması: aynı sembolü farklı adresten kaydetme girişimi reddedilir ve stake'i yakılır. (6) KUBRA ile kurumsal asistanlık: belge doğrulama, ağ durumu ve kurumun kendi belgeleriyle kaynağa dayalı cevap. Entegrasyon: standart JSON-RPC ve REST uçları. DÜRÜSTLÜK NOTU: bunlar çalışan kod ve tasarım hedefidir; henüz imzalı bir kurumsal kurulum yoktur, kurumsal entegrasyonlar kurucu tarafında hukuki anlaşmalarla yürütülür ve bağımsız güvenlik denetimi beklemededir.",
+  "url": "https://aidag-chain.com/investor-deck.html",
+  "anahtarlar": [
+   "kurum",
+   "kurumlar",
+   "kurumsal",
+   "sirket",
+   "sirketler",
+   "isletme",
+   "b2b",
+   "hizmet",
+   "hizmetler",
+   "entegrasyon",
+   "kurumsal kimlik",
+   "enterprise"
+  ]
+ },
+ {
+  "baslik": "Kapalı (kuruma özel) sistem nasıl çalışır",
+  "metin": "AIDAG-Chain düğümü, ayrı bir ağ kimliğiyle (network_id) kendi izole ağında çalışabilir: kurum kendi düğümlerini ve kendi genesis'ini çalıştırır; ağ kapısı farklı network_id'ye sahip vertex'leri reddettiği için kurum ağı ile genel ağ birbirine karışmaz ve veriler kurumun kendi sunucularında kalır. Bu kapalı ağda aynı yetenekler kullanılır: belge kaydı ve doğrulama, kurum kimliği, transfer, EVM uyumlu akıllı sözleşmeler. Kurum, herkese açık doğrulanabilirlik istediği kayıtların yalnızca parmak izini (hash) genel AIDAG-Chain mainnet'ine belge kaydı (işlem tipi 1) olarak da yazabilir; içerik gizli kalır, bütünlük herkesçe doğrulanır. KUBRA, kurumun kendi belgeleriyle beslenen bir bilgi tabanıyla kurum içi asistan olarak çalışabilir. DÜRÜSTLÜK NOTU: izole ağ çalıştırma ve genel ağa hash yazma bugün mevcut yeteneklerdir; kuruma özel kapalı sistem kurulumu her proje için ayrıca tasarlanır ve anlaşmayla kurulur, hazır bir paket ürün olarak sunulmamaktadır.",
+  "url": null,
+  "anahtarlar": [
+   "kapali sistem",
+   "kapali ag",
+   "ozel ag",
+   "kuruma ozel",
+   "private",
+   "permissioned",
+   "izole",
+   "kurum ici",
+   "sirket ici",
+   "on prem"
+  ]
+ },
+ {
+  "baslik": "KUBRA ve AIDAG-Chain birlikte neler yapabilir",
+  "metin": "KUBRA'nın yapay zekası ile AIDAG-Chain'in tahrif edilemez kaydı birleşince: (1) Sahte belge tespiti: kullanıcı belgenin hash'ini yazar, KUBRA zincirden kayıtlı mı, kim ne zaman kaydetmiş söyler. (2) Denetlenebilir yapay zeka: KUBRA'nın her cevabının özeti zincire yazılır; bir yapay zeka kararının sonradan değiştirilmediği kanıtlanabilir (kurumsal uyum ve denetim için). (3) Görsel köken kanıtı: KUBRA'nın ürettiği her görselin özeti zincire yazılır; sahiplik ve üretim zamanı kanıtlanır. (4) Canlı ağ izleme ve zincir sorgusu: ağ sağlığı, bakiye, blok yüksekliği. (5) Kurumsal bilgi asistanı: kurumun kendi belgeleriyle beslenen, kaynağa dayalı ve uydurmayan asistan. (6) Merkeziyetsiz hesaplama (geliştirme aşamasında): katkıcıların boştaki GPU/CPU gücüyle KUBRA'yı çalıştırıp LSC ile ödüllendirildiği hesaplama ağı; katkı sayfası aidag-chain.com/katil. PLAN AŞAMASINDA OLANLAR (henüz çalışmıyor): Kalkan AI tespit katmanı (akıllı sözleşmelerde dolandırıcılık kalıbı tespiti) ve kontrat güvenlik kapısı tasarım belgeleridir; programlanabilir kurumsal senaryolar (kargo limana ulaşınca ödeme, yetkili imzasıyla geçerli belge) yol haritasındadır.",
+  "url": null,
+  "anahtarlar": [
+   "birlikte",
+   "kubra ve aidag",
+   "aidag ve kubra",
+   "kubra ile",
+   "aidag chain ile",
+   "beraber",
+   "neler yapabilir",
+   "ne yapabilir",
+   "kullanim alani",
+   "kullanim alanlari",
+   "senaryo",
+   "isler",
+   "basarabilecegi",
+   "uygulama alani"
+  ]
+ },
+ {
+  "baslik": "AIDAG ön satış ve TGE",
+  "metin": "Resmi AIDAG ön satışı yalnızca aidag-chain.com/on-satis sayfasındadır: cüzdan bağlanır, USDT (BEP-20) ile ödenir; tahsis ödeme yapan adrese otomatik olarak zincire yazılır ve aidag-chain.com/tahsislerim sayfasından görülür. Faz 1: 630.000 AIDAG, üç 210.000'lik kademe — 0,20 / 0,25 / 0,30 dolar. Faz 1 dolunca Faz 2 (Rezerv, 1.050.000 AIDAG) beş kademede otomatik devam eder — 0,35 / 0,40 / 0,45 / 0,50 / 0,55 dolar. Zincir kuralları: toplam 1.680.000 tavanı, işlem başı 50.000 ve günlük 100.000 sınırı. Tokenler TGE'den sonra claim edilir: TGE'de yüzde 20, kalan yüzde 80 on iki ayda doğrusal. TGE tarihi henüz belirlenmedi: ön satış tamamlanıp listeleme veya launchpad kararı alınınca kurucu tarafından belirlenir, zincirde en az 3 gün önceden ilan edilir ve TGE günü gelince kesinleşir (değiştirilemez). Herhangi bir listeleme fiyatı garanti edilmez; bağımsız denetim henüz tamamlanmadı; bu bilgi yatırım tavsiyesi değildir. Bu sayfa dışında AIDAG satan kişi veya site resmi değildir.",
+  "url": "https://aidag-chain.com/on-satis",
+  "anahtarlar": [
+   "on satis",
+   "presale",
+   "tge",
+   "tahsis",
+   "claim",
+   "kademe",
+   "faz",
+   "vesting",
+   "listeleme",
+   "satin al",
+   "satin alma",
+   "nasil alirim"
+  ]
+ },
+ {
+  "baslik": "AIDAG ve LSC: iki varlık ve genesis dağılımı",
+  "metin": "AIDAG değer varlığıdır: arz 21.000.000 ile sabittir, genesis'te mühürlenmiştir, madencilik ve basım yoktur, 18 ondalık. LSC gaz (yakıt) varlığıdır: 2.100.000.000; her işlem LSC ile gaz öder, gaz ücreti yüzde 50 yakılır ve yüzde 50 geliştirme havuzuna gider. AIDAG genesis dağılımı: Hazine yüzde 25 (kilitsiz), Ekosistem yüzde 22 (12 ay doğrusal), Likidite yüzde 15 (2 yıl doğrusal), Kurucu yüzde 13 (6 ay bekleme + 24 ay), Topluluk yüzde 12 (6 ay doğrusal), Ön satış escrow yüzde 8 (alıcılar: TGE'de yüzde 20 + 12 ayda yüzde 80), Erken destekçi yüzde 5 (6 ay bekleme + 24 ay). AIDAG bir BSC/ERC-20 token değildir, kontrat adresi yoktur; başka zincirdeki 'AIDAG token' resmi değildir. Mainnet'te faucet yoktur.",
+  "url": "https://aidag-chain.com/whitepaper",
+  "anahtarlar": [
+   "lsc",
+   "tokenomik",
+   "tokenomics",
+   "dagilim",
+   "arz",
+   "gaz",
+   "gas",
+   "hazine",
+   "ekosistem",
+   "likidite",
+   "kontrat adresi"
+  ]
+ },
+ {
+  "baslik": "AIDAG-Chain ağ bilgileri ve MetaMask",
+  "metin": "MetaMask'e ağ ekleme: Ağ adı AIDAG-Chain, RPC https://aidag-chain.com/rpc, Chain ID 3474, sembol AIDAG, 18 ondalık. Explorer: aidag-chain.com/scan. Web cüzdanı: aidag-chain.com/cuzdan. Mainnet genesis: b82345008ae109d8. Mainnet'te faucet yoktur; ücretsiz test AIDAG verilmez. İşlemler gerçektir ve kalıcıdır; her işlem LSC gazı öder.",
+  "url": "https://aidag-chain.com/dapp",
+  "anahtarlar": [
+   "metamask",
+   "chain id",
+   "rpc",
+   "ag ekle",
+   "ag bilgi",
+   "ag bilgileri",
+   "network",
+   "cuzdan",
+   "explorer",
+   "scan",
+   "faucet"
+  ]
+ },
+ {
+  "baslik": "AIDAG web sitesi sayfaları",
+  "metin": "aidag-chain.com sayfaları: Ana sayfa (canlı mainnet verisi); /scan explorer (vertex, işlem, adres); /dapp EVM uygulama alanı ve ağ ekleme; /cuzdan web cüzdanı; /on-satis ön satış (USDT BEP-20); /tahsislerim kendi tahsisini ve claim durumunu görme; /belge belge kaydetme ve doğrulama (pilot); /whitepaper teknik belge ve ilerleme; /ask KUBRA ile sohbet; /komutlar KUBRA komutları; /gorsel KUBRA görsel stüdyosu; /katil tarayıcıdan hesaplama gücü katkısı; /contributors katkıcılar; /investor-deck.html yatırımcı ve kurumsal ortaklık özeti; /faucet mainnet'te faucet olmadığını açıklar ve doğru sayfalara yönlendirir.",
+  "url": "https://aidag-chain.com",
+  "anahtarlar": [
+   "site",
+   "web sitesi",
+   "sayfa",
+   "sayfalar",
+   "nerede",
+   "link",
+   "adres",
+   "aidag-chain.com"
+  ]
+ },
+ {
+  "baslik": "Güvenlik ve denetim durumu",
+  "metin": "Bağımsız güvenlik denetimi henüz yapılmadı (bekliyor); denetim tamamlanana kadar tüm bileşenler denetim öncesi kabul edilmelidir. Zincirde kanıtlı korumalar: çifte harcama ve tekrar (replay) koruması; Kalkan token kimlik koruması; ön satışta toplam, işlem başı ve günlük sınırlar; TGE için en az 3 gün önceden ilan ve TGE günü gelince kesinlik (owner anahtarı ele geçse bile aşılamaz); günlük sınır ve TGE kuralları imzalayanın seçemeyeceği zincir saatine bağlıdır; mainnet'te test ve basım uçları kapalıdır. Her konsensüs değişikliğinden önce gerçek mainnet geçmişi eski ve yeni kodla yeniden oynatılır ve sonuç durum birebir aynı olmalıdır.",
+  "url": null,
+  "anahtarlar": [
+   "guvenlik",
+   "denetim",
+   "audit",
+   "guvenli mi",
+   "guvenilir",
+   "risk",
+   "koruma",
+   "hack"
+  ]
  }
 ]

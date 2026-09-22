@@ -296,3 +296,95 @@ mod tests {
         assert!(!ag_niyeti_mi("https://aidag-chain.com nedir"));
     }
 }
+
+// ── ON SATIS / TGE CANLI DURUM ARACI ────────────────────────────────────────
+// Satilan miktar, aktif kademe ve TGE durumu DEGISKEN bilgidir: belgeye yazilirsa
+// eskir. Bu arac her soruda zincirden okur (arka planda kendiliginden guncel).
+// Kademe tablosu on-satis-izleyici.py + site (app/on-satis/page.tsx) ile AYNI olmali.
+const KADEMELER: [(u64, f64); 8] = [
+    (210_000, 0.20), (420_000, 0.25), (630_000, 0.30),
+    (840_000, 0.35), (1_050_000, 0.40), (1_260_000, 0.45), (1_470_000, 0.50), (1_680_000, 0.55),
+];
+const TGE_BELIRSIZ: u64 = 4_102_444_800; // lsc_engine::mainnet::TGE_BELIRSIZ
+
+fn on_satis_niyeti_mi(sorgu: &str) -> bool {
+    let s = sade(sorgu);
+    let canli = [
+        "ne kadar satildi", "kac aidag satildi", "kac satildi", "satilan", "satis durumu",
+        "on satis durumu", "presale durumu", "hangi kademe", "aktif kademe", "su anki fiyat",
+        "guncel fiyat", "simdiki fiyat", "tge ne zaman", "tge tarihi", "tge belli mi",
+        "kalan aidag", "ne kadar kaldi",
+    ];
+    canli.iter().any(|a| anahtar_var(&s, a))
+}
+
+/// Satilan (test haric) miktara gore aktif kademe: (faz, kademe_no 1..8, fiyat, kademede kalan).
+fn aktif_kademe(satilan: u64) -> Option<(u8, usize, f64, u64)> {
+    KADEMELER.iter().enumerate().find(|(_, (sinir, _))| satilan < *sinir).map(|(i, (sinir, fiyat))| {
+        (if i < 3 { 1 } else { 2 }, i + 1, *fiyat, sinir - satilan)
+    })
+}
+
+fn binlik(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 { out.push('.'); }
+        out.push(c);
+    }
+    out
+}
+
+pub async fn on_satis_durumu(http: &reqwest::Client, rpc_url: &str, sorgu: &str) -> Option<String> {
+    if !on_satis_niyeti_mi(sorgu) {
+        return None;
+    }
+    let base = rpc_url.trim_end_matches('/');
+    let oz: serde_json::Value = match http.get(format!("{base}/on-satis-ozet")).send().await {
+        Ok(r) => r.json().await.ok()?,
+        Err(_) => return Some("Ön satış durumunu şu an zincirden okuyamadım; lütfen biraz sonra tekrar dene.".to_string()),
+    };
+    let satilan = oz.get("toplam_satilan_aidag").and_then(|x| x.as_str())
+        .and_then(|x| x.parse::<u128>().ok()).map(|w| (w / 1_000_000_000_000_000_000) as u64)?;
+    let alim = oz.get("alim_sayisi").and_then(|x| x.as_u64()).unwrap_or(0);
+    let tge = http.get(format!("{base}/on-satis-tahsis/0000000000000000000000000000000000000000")).send().await.ok()?
+        .json::<serde_json::Value>().await.ok()?
+        .get("tge").and_then(|x| x.as_u64())?;
+    let kademe = match aktif_kademe(satilan) {
+        Some((faz, no, fiyat, kalan)) => format!(
+            "Aktif kademe: Faz {faz}{} · kademe {no}/8 · {fiyat:.2} $ / AIDAG · bu kademede kalan {} AIDAG.",
+            if faz == 2 { " (Rezerv)" } else { "" }, binlik(kalan)
+        ),
+        None => "Ön satış toplam tavanı (1.680.000 AIDAG) doldu.".to_string(),
+    };
+    let tge_metin = if tge >= TGE_BELIRSIZ {
+        "TGE tarihi henüz BELİRLENMEDİ: ön satış tamamlanıp listeleme kararı alınınca zincirde en az 3 gün önceden ilan edilecek.".to_string()
+    } else {
+        format!("TGE zincirde ayarlı: {} UTC.", utc_tarih(tge))
+    };
+    Some(format!(
+        "AIDAG ön satış durumu (zincirden canlı): {} AIDAG satıldı ({} alım) / toplam tavan 1.680.000. {kademe} {tge_metin} Resmi satış yalnızca aidag-chain.com/on-satis sayfasındadır; bu bilgi yatırım tavsiyesi değildir.",
+        binlik(satilan), alim
+    ))
+}
+
+#[cfg(test)]
+mod on_satis_testleri {
+    use super::*;
+
+    #[test]
+    fn kademe_gecisleri() {
+        assert_eq!(aktif_kademe(29), Some((1, 1, 0.20, 209_971)));
+        assert_eq!(aktif_kademe(630_000), Some((2, 4, 0.35, 210_000)), "Faz 1 dolunca Faz 2 baslar");
+        assert_eq!(aktif_kademe(1_679_999).map(|k| k.1), Some(8));
+        assert_eq!(aktif_kademe(1_680_000), None);
+        assert_eq!(binlik(1_680_000), "1.680.000");
+    }
+
+    #[test]
+    fn niyet() {
+        assert!(on_satis_niyeti_mi("Ön satışta şu ana kadar ne kadar satıldı?"));
+        assert!(on_satis_niyeti_mi("TGE ne zaman"));
+        assert!(!on_satis_niyeti_mi("Ön satış nasıl çalışır"));
+    }
+}
