@@ -18,6 +18,7 @@ mod embed;       // semantik gömme (embedding) — anlam-bazlı retrieval
 mod hesap;       // deterministik hesap makinesi aracı (araç-kullanımı)
 mod zincir;      // deterministik zincir sorgu araci (arac-kullanimi)
 mod stream;      // SSE streaming (cevabi harf harf akitir)
+mod resmi;       // AIDAG/KUBRA resmi kaynak katmani (grounding onceligi)
 
 use axum::{extract::State, routing::{get, post}, response::{IntoResponse, Sse, sse::Event}, http::{StatusCode, header}, body::Body, Json, Router};
 use ed25519_dalek::SigningKey;
@@ -47,6 +48,7 @@ struct Config {
     ground: bool,            // SOULWARE_GROUND=1 → soru öncesi kaynak getir (varsayılan açık)
     knowledge_path: String,  // egemen yerel bilgi deposu (JSON)
     seed_path: String,       // küratörlü seed (ingest ezemez, temiz cevaplar korunur)
+    resmi_path: String,      // AIDAG/KUBRA resmi kaynak belgeleri (genel korpustan ÖNCE)
     wiki: bool,              // SOULWARE_WIKI=1 → canlı Wikipedia (bu sunucuda bloklu; varsayılan kapalı)
     wiki_langs: Vec<String>, // "tr,en"
     ground_k: usize,         // en fazla kaç pasaj sunulsun
@@ -79,6 +81,7 @@ impl Config {
             ground: ev("SOULWARE_GROUND", "1") == "1",
             knowledge_path: ev("SOULWARE_KNOWLEDGE_PATH", "/root/aidag-lsc/soulware-knowledge/kb.json"),
             seed_path: ev("SOULWARE_SEED_PATH", "/root/aidag-lsc/soulware-knowledge/kb.seed.json"),
+            resmi_path: ev("SOULWARE_RESMI_PATH", "/root/aidag-lsc/soulware-knowledge/kb.aidag.json"),
             wiki: ev("SOULWARE_WIKI", "0") == "1",
             wiki_langs: ev("SOULWARE_WIKI_LANGS", "tr,en").split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
             ground_k: ev("SOULWARE_GROUND_K", "3").parse().unwrap_or(3),
@@ -105,6 +108,7 @@ struct AppState {
     local_name: Option<String>,
     depo: Mutex<retrieval::Depo>, // egemen yerel bilgi deposu (grounding)
     embedder: Option<embed::Embedder>, // semantik retrieval (yoksa keyword'e düşer)
+    resmi: Vec<resmi::ResmiBelge>, // AIDAG/KUBRA resmi kaynakları
 }
 
 // ════════════════════════════ Kimlik / grounding ════════════════════════════
@@ -377,6 +381,67 @@ async fn zincire_yaz(st: &AppState, data_hash: [u8; 32], ts: u64) -> ChainProof 
             result: None, reason: Some(format!("submit isteği başarısız: {e}")),
         },
     }
+}
+
+// ════════════════════════════ Araç yönlendirme ════════════════════════════
+// Kesin cevap gereken niyetler MODELE BIRAKILMAZ; deterministik araç cevaplar.
+// Sıra önemli (spesifik → genel). /v1/ask ve /v1/ask-stream aynı yönlendirmeyi kullanır.
+async fn arac_calistir(st: &AppState, prompt: &str) -> Option<(String, &'static str)> {
+    // İSİM: sabit cevap (model yorumlamasın).
+    if resmi::isim_sorusu_mu(prompt) {
+        return Some((resmi::ISIM_CEVABI.to_string(), "kimlik"));
+    }
+    // BELGE: 64-hex hash varsa HER ZAMAN doğrula; kısaltılmışsa tam hash iste;
+    // kayıt niyeti → kayıt süreci; doğrulama niyeti → doğrulama sayfası.
+    if let Some(x) = zincir::belge_dogrula(&st.http, &st.cfg.chain_rpc, prompt).await {
+        return Some((x, "belge-dogrula"));
+    }
+    // AĞ DURUMU: /status'tan canlı özet (zincir sorgusundan ÖNCE: daha spesifik niyet).
+    if let Some(x) = zincir::ag_durumu(&st.http, &st.cfg.chain_rpc, prompt).await {
+        return Some((x, "ag-durumu"));
+    }
+    // ZİNCİR: bakiye/blok sorgusu → doğrudan zincirden kesin cevap.
+    if let Some(x) = zincir::sorgula(&st.http, &st.cfg.chain_rpc, prompt).await {
+        return Some((x, "zincir-sorgu"));
+    }
+    // HESAP: "7 çarpı 8" → 56 garantili.
+    if let Some(x) = hesap::hesapla(prompt) {
+        return Some((x, "hesap-makinesi"));
+    }
+    // AIDAG konusu ama resmi kaynak yok → uydurma YOK.
+    if resmi::aidag_konusu_mu(prompt) && resmi::sec(&st.resmi, prompt, st.cfg.ground_k).is_empty() {
+        return Some((resmi::DOGRULANMAMIS.to_string(), "resmi-kaynak"));
+    }
+    None
+}
+
+// Araç cevabını zincire yaz (etkileşim hash'i = net_id|ts|prompt|sonuç|araç).
+async fn arac_kanit(st: &AppState, prompt: &str, sonuc: &str, arac_ad: &str, ts: u64) -> ([u8; 32], ChainProof) {
+    let mut h = blake3::Hasher::new();
+    h.update(&st.cfg.net_id.to_le_bytes());
+    h.update(&ts.to_le_bytes());
+    h.update(prompt.as_bytes());
+    h.update(&[0x1e]);
+    h.update(sonuc.as_bytes());
+    h.update(&[0x1e]);
+    h.update(arac_ad.as_bytes());
+    let data_hash: [u8; 32] = *h.finalize().as_bytes();
+    let chain = zincire_yaz(st, data_hash, ts).await;
+    (data_hash, chain)
+}
+
+// AIDAG konusu → resmi kaynaklar (genel korpustan ÖNCE, onun YERİNE). Değilse None.
+fn resmi_baglam(st: &AppState, prompt: &str) -> Option<(Vec<retrieval::Pasaj>, String)> {
+    if !resmi::aidag_konusu_mu(prompt) {
+        return None;
+    }
+    let pasajlar = resmi::sec(&st.resmi, prompt, st.cfg.ground_k);
+    if pasajlar.is_empty() {
+        return None;
+    }
+    // Resmi belgeler kısa: kırpma yok (tam metin), yarım cümle modeli yanıltmasın.
+    let baglam = retrieval::baglam_yap(&pasajlar, usize::MAX);
+    Some((pasajlar, baglam))
 }
 
 // ════════════════════════════ HTTP uçları ════════════════════════════
@@ -688,33 +753,27 @@ async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) ->
             return;
         }
 
-        // 1) ARACLAR: belge/ag/zincir — varsa tek seferde akit (anlik cevap).
-        let arac = if let Some(x) = zincir::belge_dogrula(&st.http, &st.cfg.chain_rpc, &req.prompt).await { Some((x, "belge-dogrula")) }
-            else if let Some(x) = zincir::ag_durumu(&st.http, &st.cfg.chain_rpc, &req.prompt).await { Some((x, "ag-durumu")) }
-            else if let Some(x) = zincir::sorgula(&st.http, &st.cfg.chain_rpc, &req.prompt).await { Some((x, "zincir-sorgu")) }
-            else { None };
-
-        if let Some((sonuc, arac_ad)) = arac {
+        // 1) ARACLAR: isim/belge/ag/zincir/hesap — varsa tek seferde akit (anlik cevap).
+        if let Some((sonuc, arac_ad)) = arac_calistir(&st, &req.prompt).await {
             // Araci kelime kelime akit (gorsel akis butunlugu icin)
             for parca in sonuc.split_inclusive(' ') {
                 let _ = tx.send(Ok(Event::default().event("token").data(parca))).await;
                 tokio::time::sleep(std::time::Duration::from_millis(15)).await;
             }
             // Zincire yaz + proof
-            let mut h = blake3::Hasher::new();
-            h.update(&st.cfg.net_id.to_le_bytes()); h.update(&ts.to_le_bytes());
-            h.update(req.prompt.as_bytes()); h.update(&[0x1e]);
-            h.update(sonuc.as_bytes()); h.update(&[0x1e]); h.update(arac_ad.as_bytes());
-            let data_hash: [u8;32] = *h.finalize().as_bytes();
-            let chain = zincire_yaz(&st, data_hash, ts).await;
+            let (data_hash, chain) = arac_kanit(&st, &req.prompt, &sonuc, arac_ad, ts).await;
             let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "model": arac_ad, "brain": "arac", "chain": chain});
             let _ = tx.send(Ok(Event::default().event("done").data(proof.to_string()))).await;
             return;
         }
 
-        // 2) GROUNDING: kaynak getir
+        // 2) GROUNDING: AIDAG konusu → resmi kaynaklar; degilse genel depo.
         let mut kaynaklar: Vec<Kaynak> = vec![];
-        let etkin_baglam: Option<String> = if req.ground.unwrap_or(st.cfg.ground) {
+        let resmi_ctx = resmi_baglam(&st, &req.prompt);
+        let etkin_baglam: Option<String> = if let Some((pasajlar, baglam)) = &resmi_ctx {
+            for p in pasajlar { kaynaklar.push(Kaynak{ kaynak:p.kaynak.clone(), baslik:p.baslik.clone(), url:p.url.clone() }); }
+            Some(baglam.clone())
+        } else if req.ground.unwrap_or(st.cfg.ground) {
             let pasajlar = {
                 let depo = match st.depo.lock() { Ok(g)=>g, Err(p)=>p.into_inner() };
                 depo.ara(&req.prompt, st.cfg.ground_k, st.cfg.ground_min, st.cfg.ground_ratio)
@@ -731,7 +790,10 @@ async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) ->
             let _ = tx.send(Ok(Event::default().event("sources").data(ks))).await;
         }
 
-        let user_content = grounded_user(&req.prompt, etkin_baglam.as_deref());
+        let user_content = match (&resmi_ctx, &etkin_baglam) {
+            (Some(_), Some(b)) => resmi::resmi_user(&req.prompt, b),
+            _ => grounded_user(&req.prompt, etkin_baglam.as_deref()),
+        };
         let temp = if req.deterministic.unwrap_or(false) { 0.0 } else { 0.3 };
 
         // 3) BEYIN STREAM: token token akit
@@ -770,97 +832,33 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
         return Json(bos_hata("prompt boş olamaz"));
     }
 
-    // ── ARAÇ-KULLANIMI: aritmetik ise ZAYIF MODELE bırakma, KESIN hesapla ──
-    // Güçlü AI'lar araç kullanır. "7 çarpı 8" → 56 garantili (deterministik).
-    // Yalnız açık aritmetik tetikler (sayısız/operatörsüz sorgu → normal yol).
-    // AG DURUMU ARACI: ag saglik/dugum/tps sorgusu ise /status'tan canli ozet.
-    // (Zincir sorgusundan ONCE: daha spesifik niyet, zengin cevap.)
-    // BELGE DOGRULAMA ARACI: hash zincirde kayitli mi (orijinal/degistirilmis).
-    if let Some(sonuc) = zincir::belge_dogrula(&st.http, &st.cfg.chain_rpc, &req.prompt).await {
-        let mut h = blake3::Hasher::new();
-        h.update(&st.cfg.net_id.to_le_bytes());
-        h.update(&ts.to_le_bytes());
-        h.update(req.prompt.as_bytes());
-        h.update(&[0x1e]);
-        h.update(sonuc.as_bytes());
-        h.update(&[0x1e]);
-        h.update(b"belge-dogrula");
-        let data_hash: [u8; 32] = *h.finalize().as_bytes();
-        let chain = zincire_yaz(&st, data_hash, ts).await;
+    // ── ARAÇ-KULLANIMI: kesin cevap gereken niyetler ZAYIF MODELE bırakılmaz ──
+    // (isim, belge hash doğrulama/kayıt, ağ durumu, zincir sorgusu, hesap). Bkz. arac_calistir.
+    if let Some((sonuc, arac_ad)) = arac_calistir(&st, &req.prompt).await {
+        let (data_hash, chain) = arac_kanit(&st, &req.prompt, &sonuc, arac_ad, ts).await;
         return Json(AskResp {
-            ok: true, answer: sonuc, brain: "arac".into(), model: "belge-dogrula".into(),
-            grounded: false, abstained: false, sources: vec![],
-            latency_ms: t0.elapsed().as_millis(), input_tokens: None, output_tokens: None,
-            proof_hash: hex::encode(data_hash), chain, hata: None,
-        });
-    }
-
-    if let Some(sonuc) = zincir::ag_durumu(&st.http, &st.cfg.chain_rpc, &req.prompt).await {
-        let mut h = blake3::Hasher::new();
-        h.update(&st.cfg.net_id.to_le_bytes());
-        h.update(&ts.to_le_bytes());
-        h.update(req.prompt.as_bytes());
-        h.update(&[0x1e]);
-        h.update(sonuc.as_bytes());
-        h.update(&[0x1e]);
-        h.update(b"ag-durumu");
-        let data_hash: [u8; 32] = *h.finalize().as_bytes();
-        let chain = zincire_yaz(&st, data_hash, ts).await;
-        return Json(AskResp {
-            ok: true, answer: sonuc, brain: "arac".into(), model: "ag-durumu".into(),
-            grounded: false, abstained: false, sources: vec![],
-            latency_ms: t0.elapsed().as_millis(), input_tokens: None, output_tokens: None,
-            proof_hash: hex::encode(data_hash), chain, hata: None,
-        });
-    }
-
-    // ZINCIR ARACI: bakiye/blok sorgusu ise dogrudan zincirden kesin cevap.
-    if let Some(sonuc) = zincir::sorgula(&st.http, &st.cfg.chain_rpc, &req.prompt).await {
-        let mut h = blake3::Hasher::new();
-        h.update(&st.cfg.net_id.to_le_bytes());
-        h.update(&ts.to_le_bytes());
-        h.update(req.prompt.as_bytes());
-        h.update(&[0x1e]);
-        h.update(sonuc.as_bytes());
-        h.update(&[0x1e]);
-        h.update(b"zincir-sorgu");
-        let data_hash: [u8; 32] = *h.finalize().as_bytes();
-        let chain = zincire_yaz(&st, data_hash, ts).await;
-        return Json(AskResp {
-            ok: true, answer: sonuc, brain: "arac".into(), model: "zincir-sorgu".into(),
-            grounded: false, abstained: false, sources: vec![],
-            latency_ms: t0.elapsed().as_millis(), input_tokens: None, output_tokens: None,
-            proof_hash: hex::encode(data_hash), chain, hata: None,
-        });
-    }
-
-    if let Some(sonuc) = hesap::hesapla(&req.prompt) {
-        let mut h = blake3::Hasher::new();
-        h.update(&st.cfg.net_id.to_le_bytes());
-        h.update(&ts.to_le_bytes());
-        h.update(req.prompt.as_bytes());
-        h.update(&[0x1e]);
-        h.update(sonuc.as_bytes());
-        h.update(&[0x1e]);
-        h.update(b"hesap-makinesi");
-        let data_hash: [u8; 32] = *h.finalize().as_bytes();
-        let chain = zincire_yaz(&st, data_hash, ts).await;
-        return Json(AskResp {
-            ok: true, answer: sonuc, brain: "arac".into(), model: "hesap-makinesi".into(),
-            grounded: false, abstained: false, sources: vec![],
+            ok: true, answer: sonuc, brain: "arac".into(), model: arac_ad.into(),
+            grounded: false, abstained: arac_ad == "resmi-kaynak", sources: vec![],
             latency_ms: t0.elapsed().as_millis(), input_tokens: None, output_tokens: None,
             proof_hash: hex::encode(data_hash), chain, hata: None,
         });
     }
 
     // ── GROUNDING: açık bağlam yoksa ve grounding açıksa KAYNAK getir ──
-    // "En güçlü AI'ların kaynakları": önce egemen yerel depo, sonra (bloklu değilse)
-    // canlı Wikipedia. Cevap kaynaktan üretilir; kaynak yoksa model 'Bilmiyorum' der.
+    // AIDAG/KUBRA sorusu → RESMİ kaynaklar (genel korpus/Wikipedia'dan ÖNCE, onun yerine).
+    // Diğerleri: önce egemen yerel depo, sonra (bloklu değilse) canlı Wikipedia.
+    // Cevap kaynaktan üretilir; kaynak yoksa model 'Bilmiyorum' der.
     let ground_iste = req.ground.unwrap_or(st.cfg.ground);
     let acik_baglam = req.context.as_deref().map(|c| !c.trim().is_empty()).unwrap_or(false);
     let mut kaynaklar: Vec<Kaynak> = vec![];
+    let resmi_ctx = if acik_baglam { None } else { resmi_baglam(&st, &req.prompt) };
     let etkin_baglam: Option<String> = if acik_baglam {
         req.context.clone()
+    } else if let Some((pasajlar, baglam)) = &resmi_ctx {
+        for p in pasajlar {
+            kaynaklar.push(Kaynak { kaynak: p.kaynak.clone(), baslik: p.baslik.clone(), url: p.url.clone() });
+        }
+        Some(baglam.clone())
     } else if ground_iste {
         // Yerel depo. SEMANTİK (embedding) varsa anlam-bazlı; yoksa keyword (IDF).
         let mut pasajlar = {
@@ -889,7 +887,10 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
         None
     };
 
-    let user_content = grounded_user(&req.prompt, etkin_baglam.as_deref());
+    let user_content = match (&resmi_ctx, &etkin_baglam) {
+        (Some(_), Some(b)) => resmi::resmi_user(&req.prompt, b),
+        _ => grounded_user(&req.prompt, etkin_baglam.as_deref()),
+    };
 
     // BEYİN SEÇİMİ: Uzak GPU (varsa) > Egemen yerel (KUBRA) > Claude.
     let istek = req.brain.as_deref().unwrap_or(&st.cfg.brain_pref);
@@ -1087,7 +1088,9 @@ async fn main() {
             }
         }
     }
-    let state = Arc::new(AppState { cfg, http, key, key_addr, local, local_name, depo: Mutex::new(depo), embedder });
+    let resmi_belgeler = resmi::yukle(&cfg.resmi_path);
+    println!("📘 AIDAG resmi kaynak: {} belge ({})", resmi_belgeler.len(), cfg.resmi_path);
+    let state = Arc::new(AppState { cfg, http, key, key_addr, local, local_name, depo: Mutex::new(depo), embedder, resmi: resmi_belgeler });
 
     println!("──────────────────────────────────────────────");
     println!("🌀 SoulwareAI çekirdeği · yapay zeka: KUBRA (v0.1)");

@@ -1,4 +1,5 @@
 //! zincir - deterministik zincir sorgu araci
+use crate::retrieval::{anahtar_var, sade};
 use serde_json::json;
 
 fn niyet_cikar(sorgu: &str) -> Option<(&'static str, serde_json::Value, String)> {
@@ -51,14 +52,17 @@ pub async fn sorgula(http: &reqwest::Client, rpc_url: &str, sorgu: &str) -> Opti
 // kalipla eklenir: url degistir, alanlari esle, formatla.
 
 fn ag_niyeti_mi(sorgu: &str) -> bool {
-    let s = sorgu.to_lowercase();
+    // sade(): Türkçe harfler katlanır → "ağ sağlık" ile "ag saglik" aynı eşleşir.
+    let s = sade(sorgu);
     let anahtarlar = [
-        "ag durumu", "ağ durumu", "ag saglik", "ağ sağlık", "network durum",
-        "kac dugum", "kaç düğüm", "kac node", "kaç node", "dugum sayisi",
-        "tps", "ag nasil", "ağ nasıl", "zincir durum", "network status",
-        "kac vertex", "kaç vertex", "tip sayisi", "orphan",
+        "ag durumu", "ag saglik", "saglik durumu", "aidag durumu", "aidag saglik",
+        "network durum", "network status", "status", "durum raporu",
+        "zincir durum", "zincir calisiyor", "zincir ayakta", "ag calisiyor", "ag ayakta",
+        "aidag calisiyor", "mainnet calisiyor", "mainnet durum",
+        "kac dugum", "kac node", "dugum sayisi", "tps", "ag nasil",
+        "kac vertex", "tip sayisi", "orphan",
     ];
-    anahtarlar.iter().any(|a| s.contains(a))
+    anahtarlar.iter().any(|a| anahtar_var(&s, a))
 }
 
 /// /status'tan ag durumu ceker, insan-okunur ozet doner. RPC yaninda status
@@ -101,58 +105,194 @@ pub async fn ag_durumu(http: &reqwest::Client, rpc_url: &str, sorgu: &str) -> Op
 // cevap tahrif edilemez zincir kaydina dayanir. Dis-sistem adaptor sablonu.
 
 fn belge_niyeti_mi(sorgu: &str) -> bool {
-    let s = sorgu.to_lowercase();
-    let anahtarlar = [
-        "belge", "dogrula", "doğrula", "gecerli mi", "geçerli mi", "sahte mi",
-        "degistirilmis", "değiştirilmiş", "orijinal mi", "zincirde var mi",
-        "zincirde var mı", "hash", "belge sorgu", "document", "verify",
+    // Nesne + doğrulama fiili birlikte olmalı ("doğrulanmış bilgi" belge sorusu değildir).
+    let s = sade(sorgu);
+    let nesne = ["belge", "hash", "document", "dosya", "evrak", "sertifika", "diploma"];
+    let fiil = [
+        "dogrula", "gecerli", "sahte", "degistirilmis", "orijinal", "kayitli", "zincirde var",
+        "kontrol", "sorgula", "verify",
     ];
-    anahtarlar.iter().any(|a| s.contains(a))
+    nesne.iter().any(|a| anahtar_var(&s, a)) && fiil.iter().any(|a| anahtar_var(&s, a))
 }
 
-/// Sorgudan 64-hex belge hash'i cikar (0x opsiyonel).
-fn belge_hash_bul(s: &str) -> Option<String> {
-    for kelime in s.split_whitespace() {
-        let k = kelime.trim_start_matches("0x")
-            .trim_end_matches(|c: char| !c.is_ascii_alphanumeric());
-        if k.len() == 64 && k.chars().all(|c| c.is_ascii_hexdigit()) {
-            return Some(k.to_string());
+/// "Belge doğrulama nasıl çalışır / nedir" gibi AÇIKLAMA sorusu mu? Bunlar araca değil
+/// resmi kaynak belgesine gider (KUBRA süreci anlatır).
+fn aciklama_sorusu_mu(sorgu: &str) -> bool {
+    let s = sade(sorgu);
+    ["nasil calisir", "nasil isler", "nedir", "ne ise yarar", "ne demek", "mantigi"]
+        .iter()
+        .any(|a| anahtar_var(&s, a))
+}
+
+/// Kullanıcı belge KAYDETMEK/oluşturmak istiyor (doğrulamak değil).
+fn belge_kayit_niyeti_mi(sorgu: &str) -> bool {
+    let s = sade(sorgu);
+    let nesne = ["belge", "dosya", "sertifika", "diploma", "evrak", "hash"];
+    let fiil = [
+        "olustur", "kaydet", "kaydede", "kayit et", "kayit yap", "kaydini yap", "kaydolu",
+        "zincire yaz", "zincire ekle", "zincire isle", "damgala", "tescil", "belgelendir",
+    ];
+    nesne.iter().any(|a| anahtar_var(&s, a)) && fiil.iter().any(|a| anahtar_var(&s, a))
+}
+
+/// Mesajdaki hex parçaları (0x öneki atılmış) + ardından "..."/"…" gelip gelmediği.
+fn hex_parcalari(s: &str) -> Vec<(String, bool)> {
+    let cs: Vec<char> = s.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < cs.len() {
+        if !cs[i].is_ascii_alphanumeric() {
+            i += 1;
+            continue;
+        }
+        let bas = i;
+        while i < cs.len() && cs[i].is_ascii_alphanumeric() {
+            i += 1;
+        }
+        let kelime: String = cs[bas..i].iter().collect();
+        let k = kelime.strip_prefix("0x").unwrap_or(&kelime);
+        if !k.is_empty() && k.chars().all(|c| c.is_ascii_hexdigit()) {
+            let kalan: String = cs[i..].iter().take(3).collect();
+            let noktali = kalan.starts_with("...") || kalan.starts_with('…');
+            out.push((k.to_ascii_lowercase(), noktali));
         }
     }
-    None
+    out
 }
 
-/// Belge dogrulama: hash zincirde kayitli mi? /belge/:hash ucundan.
+/// Sorgudan tam 64-hex belge hash'i çıkar (0x opsiyonel, metnin herhangi bir yerinde).
+fn belge_hash_bul(s: &str) -> Option<String> {
+    hex_parcalari(s).into_iter().find(|(h, _)| h.len() == 64).map(|(h, _)| h)
+}
+
+/// Kısaltılmış hash var mı? ("0dcce43d9a70..." veya "0dcce43d...0c544f")
+fn kisaltilmis_hash_var(s: &str) -> bool {
+    // ≥8 hane + en az bir rakam: "decade..." gibi hex-harfli kelimeler hash sayılmaz.
+    hex_parcalari(s).iter().any(|(h, noktali)| {
+        *noktali && h.len() >= 8 && h.len() < 64 && h.chars().any(|c| c.is_ascii_digit())
+    })
+}
+
+/// Unix saniye → "YYYY-AA-GG SS:DD" (UTC). Takvim: Hinnant civil_from_days.
+fn utc_tarih(unix: u64) -> String {
+    let gun = (unix / 86_400) as i64;
+    let sn = unix % 86_400;
+    let z = gun + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + if m <= 2 { 1 } else { 0 };
+    format!("{y:04}-{m:02}-{d:02} {:02}:{:02}", sn / 3600, (sn % 3600) / 60)
+}
+
+const BELGE_KAYIT_SURECI: &str = "Belgeni AIDAG-Chain'e kaydetmek için:\n\
+1) https://aidag-chain.com/belge sayfasını aç ve \"1) Belge Kaydet (kurum tarafı)\" bölümünde belgeni (PDF, resim, Word) ya da metnini seç.\n\
+2) \"İşlemi Hazırla\"ya bas: tarayıcın belgenin parmak izini (64 haneli özet/hash) hesaplar. Belgenin kendisi ağa gönderilmez, yalnızca bu özet gönderilir; içerik gizli kalır.\n\
+3) Gösterilen özeti kontrol edip \"İşlemi Onayla\"ya bas: özet zincire kalıcı olarak yazılır. Onaydan önce iptal edebilirsin, onaydan sonra kayıt geri alınamaz.\n\
+4) Kayıttan sonra özeti (hash) sakla. Belgeyi daha sonra aynı sayfanın \"Belge Doğrula\" bölümünde ya da bana 64 haneli hash'i yazarak doğrulayabilirsin.\n\
+Not: Belge sayfası şu an pilot aşamasındadır; gerçek veya hassas belge yüklemeden önce bunu dikkate al.";
+
+const BELGE_DOGRULA_YONLENDIR: &str = "Belgeni doğrulamak için https://aidag-chain.com/belge sayfasındaki \"Belge Doğrula\" bölümünü kullan: dosyanı (PDF, resim, Word) seç, sistem zincirde kayıtlı mı, orijinal mi yoksa değiştirilmiş mi söyler. Belgen tarayıcından çıkmaz; yalnızca matematiksel özeti kontrol edilir. Elinde belgenin 64 haneli hash'i varsa bana doğrudan yazabilirsin, hemen doğrularım.";
+
+/// Belge aracı (deterministik, model YOK):
+///  1. Mesajda tam 64-hex hash varsa → HER ZAMAN zincirde doğrula (yanında metin olsun olmasın).
+///  2. Kısaltılmış hash ("..." ile) → tam 64 haneyi iste.
+///  3. Kayıt niyeti ("belge oluşturacağım/kaydetmek istiyorum") → kayıt süreci.
+///  4. Doğrulama niyeti (açıklama sorusu değilse) → doğrulama sayfasına yönlendir.
 pub async fn belge_dogrula(http: &reqwest::Client, rpc_url: &str, sorgu: &str) -> Option<String> {
-    if !belge_niyeti_mi(sorgu) {
-        return None;
-    }
     let hash = match belge_hash_bul(sorgu) {
         Some(h) => h,
         None => {
-            return Some(
-                "Belgeni dogrulamak icin Belge Dogrulama sayfasini kullan: https://aidag-chain.com/belge — oraya dosyani (PDF, resim, Word) yukle, sistem saniyede zincirde kayitli mi, orijinal mi yoksa degistirilmis mi soyler. Belgen tarayicindan cikmaz; yalnizca matematiksel ozeti kontrol edilir. Elinde hazir bir belge hash'i (64 hex) varsa bana dogrudan yazabilirsin, hemen dogrularim.".to_string()
-            );
+            if kisaltilmis_hash_var(sorgu) {
+                return Some("Gönderdiğin hash kısaltılmış görünüyor (\"...\" ile bitiyor). Doğrulama yapabilmem için hash'in TAMAMINI yaz: 64 haneli, yalnızca 0-9 ve a-f karakterlerinden oluşan değer.".to_string());
+            }
+            if belge_kayit_niyeti_mi(sorgu) {
+                return Some(BELGE_KAYIT_SURECI.to_string());
+            }
+            if belge_niyeti_mi(sorgu) && !aciklama_sorusu_mu(sorgu) {
+                return Some(BELGE_DOGRULA_YONLENDIR.to_string());
+            }
+            return None;
         }
     };
     let url = format!("{}/belge/{}", rpc_url.trim_end_matches('/'), hash);
-    let resp = http.get(&url).send().await.ok()?;
-    let v: serde_json::Value = resp.json().await.ok()?;
+    // Hash verildiyse modele DÜŞME: zincire ulaşılamazsa bunu dürüstçe söyle.
+    let v: serde_json::Value = match http.get(&url).send().await {
+        Ok(r) => match r.json().await {
+            Ok(v) => v,
+            Err(_) => return Some("Belge doğrulama şu an yapılamadı: zincir yanıtı çözülemedi. Lütfen biraz sonra tekrar dene.".to_string()),
+        },
+        Err(_) => return Some("Belge doğrulama şu an yapılamadı: zincire ulaşılamıyor. Lütfen biraz sonra tekrar dene.".to_string()),
+    };
 
-    // /belge/:hash yaniti: kayitli mi + (varsa) zaman/blok bilgisi.
+    // /belge/:hash yaniti: kayitli + (varsa) kaydeden/zaman.
     let kayitli = v.get("kayitli").and_then(|x| x.as_bool())
         .or_else(|| v.get("var").and_then(|x| x.as_bool()))
         .unwrap_or(false);
 
     if kayitli {
+        let kaydeden = v.get("kaydeden").and_then(|x| x.as_str())
+            .map(|a| format!(" Kaydeden adres: 0x{}.", a.trim_start_matches("0x")))
+            .unwrap_or_default();
+        let zaman = v.get("zaman").and_then(|x| x.as_u64())
+            .map(|z| format!(" Kayıt zamanı: {} UTC.", utc_tarih(z)))
+            .unwrap_or_default();
         Some(format!(
-            "Belge DOGRULANDI: bu hash zincirde kayitli ({}). Belge orijinal ve degistirilmemis (zincire islenen kayitla birebir eslesiyor). Denetlenebilir, tahrif edilemez.",
-            &hash[..16]
+            "Belge DOĞRULANDI: bu hash AIDAG-Chain'de kayıtlı ({hash}).{kaydeden}{zaman} Bu hash'i üreten belge, zincire kaydedilen belgeyle birebir aynıdır (değiştirilmemiştir)."
         ))
     } else {
         Some(format!(
-            "Belge BULUNAMADI: bu hash ({}...) zincirde kayitli DEGIL. Ya hic kaydedilmemis ya da belge degistirilmis (hash tutmuyor). Orijinal belgenin hash'iyle tekrar dene.",
-            &hash[..16]
+            "Belge BULUNAMADI: bu hash ({hash}) AIDAG-Chain'de kayıtlı DEĞİL. Ya hiç kaydedilmemiş ya da belge değiştirilmiş (hash tutmuyor). Orijinal belgenin hash'iyle tekrar dene."
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    const H: &str = "0dcce43d9a705bcdeb481f5447a0516d319bbb8cc33031f466f828f10a0c544f";
+
+    #[test]
+    fn tek_basina_hash_bulunur() {
+        assert_eq!(belge_hash_bul(H).as_deref(), Some(H));
+        assert_eq!(belge_hash_bul(&format!("şunu kontrol et: 0x{H}, lütfen")).as_deref(), Some(H));
+        assert_eq!(belge_hash_bul(&format!("({})", H.to_uppercase())).as_deref(), Some(H));
+    }
+
+    #[test]
+    fn utc_tarih_dogru() {
+        assert_eq!(utc_tarih(0), "1970-01-01 00:00");
+        assert_eq!(utc_tarih(1_709_210_096), "2024-02-29 12:34"); // artık yıl
+    }
+
+    #[test]
+    fn kisaltilmis_hash_tespit() {
+        assert!(kisaltilmis_hash_var("0dcce43d9a705bcd..."));
+        assert!(kisaltilmis_hash_var("bu belge 0dcce43d…0c544f geçerli mi"));
+        assert!(!kisaltilmis_hash_var(H));
+        assert!(!kisaltilmis_hash_var("bekle..."));
+        assert!(!kisaltilmis_hash_var("a decade..."));
+    }
+
+    #[test]
+    fn kayit_ve_dogrulama_ayrimi() {
+        assert!(belge_kayit_niyeti_mi("Belge oluşturacağım"));
+        assert!(belge_kayit_niyeti_mi("belgemi zincire kaydetmek istiyorum"));
+        assert!(!belge_kayit_niyeti_mi("bu belge zincirde kayıtlı mı"));
+        assert!(aciklama_sorusu_mu("Belge doğrulama nasıl çalışır"));
+        assert!(belge_niyeti_mi("bu belge geçerli mi"));
+        assert!(!belge_niyeti_mi("AIDAG hakkında doğrulanmış bilgi ver"));
+    }
+
+    #[test]
+    fn ag_niyetleri() {
+        for q in ["Aidag sağlık durumu", "ağ durumu", "status", "zincir çalışıyor mu", "AIDAG durumu"] {
+            assert!(ag_niyeti_mi(q), "{q}");
+        }
+        assert!(!ag_niyeti_mi("https://aidag-chain.com nedir"));
     }
 }
