@@ -105,10 +105,13 @@ def main():
             veri = sayfa(alan, imlec.get(alan))
         except Exception as e:
             print(f"[{alan}] API hata: {e} — bekleniyor", flush=True); time.sleep(BEKLE); continue
-        imlec[alan] = veri.get("meta", {}).get("next_cursor") or "*"
         eklendi = 0
+        sayfa_bitti = True
         for w in veri.get("results", []):
             if eklendi >= batch:
+                # Sayfa yarıda kaldı: imleç İLERLEMEZ → sonraki turda aynı sayfa
+                # yeniden alınır; eklenenler `gorulen` ile atlanır, kalanlar kaybolmaz.
+                sayfa_bitti = False
                 break
             loc = w.get("best_oa_location") or w.get("primary_location") or {}
             if not serbest(loc.get("license")):
@@ -127,6 +130,8 @@ def main():
                     time.sleep(0.4)   # depo kilidini bırak → kullanıcı sorgusu araya girsin (yavaşlatma)
             except Exception as e:
                 print(f"ingest hata: {e}", flush=True); time.sleep(5)
+        if sayfa_bitti:
+            imlec[alan] = veri.get("meta", {}).get("next_cursor") or "*"
         durum_kaydet(gorulen, imlec)
         print(f"[{alan}] +{eklendi} (batch={batch}, işçi={isci}) | toplam görülen: {len(gorulen)}", flush=True)
         time.sleep(BEKLE)
