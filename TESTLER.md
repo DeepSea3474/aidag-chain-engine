@@ -1,10 +1,12 @@
 # AIDAG-Chain — Test Suite ve Audit Hazirligi
 
-Durum: Testnet asamasi, bagimsiz denetim (audit) oncesi hazirlik.
+Durum: MAINNET CANLI (26 Temmuz 2026, Chain ID 3474); bagimsiz denetim (audit) bekliyor. Guncelleme: 2026-09-22.
 Amac: Denetime hazir, seffaf ve tekrar calistirilabilir bir test tablosu sunmak.
 
 ## Tum testleri calistirma
-- cargo test --release                    (tum birim testleri, 287+)
+- CARGO_TARGET_DIR=/root/aidag-build cargo test --release   (lsc-engine 339 + lsc-net + soulware-core 19)
+  UYARI: sunucuda varsayilan target/ klasoru CANLI dugumlerin binary'sidir; -p lsc-net
+  derlemesi onu ezer. Gelistirme/test icin HER ZAMAN ayri CARGO_TARGET_DIR kullan.
 - cargo test --release -- --ignored       (agir fuzz/kalkan testleri)
 Her fuzz testi tur sayisini bir ortam degiskeniyle ayarlar (orn FUZZ_TUR=20000).
 
@@ -192,3 +194,22 @@ Hepsi geçer: sahte token, sahte belge, replay, bakiye/çift-harcama,
 - cargo test --release --lib olcek_egrisi -- --ignored --nocapture
 - TORBA_N=20000,40000,80000 cargo test --release --lib torba_stres -- --ignored --nocapture
 - cargo test --release --lib fuzz -- --ignored
+
+## CUSTODY / KONSENSUS SERTLESTIRME TESTLERI (2026-09-22)
+Her biri once ESKI kodda BASARISIZ, yeni kodda BASARILI oldugu dogrulanarak eklendi:
+- gunluk_cap_eski_tarihli_vertexle_asilamaz — gecmis tarihli satislar gunluk 100k tavanini asamaz (zincir saati)
+- tge_eski_tarihli_vertexle_geri_cekilemez — eski tarihli tip=15 TGE'yi geriye cekemez
+- reorg_tam_yeniden_hesap_gunluk_sayaci_sifirlar — reorg sonrasi durum == sifirdan yukleyen dugum
+- mainnet_bos_dugum_genesis_sonrasi_panik_yapmaz — bos veriyle acilan mainnet dugumu ilk vertex'te coker degil
+- es_sync_gelecek_tarihli_vertexi_reddeder — esten gelen gelecek tarihli vertex (kural 7) reddedilir
+- tge_gecmise_ayarlanamaz / tge_gunu_gelince_kesinlesir — 3 gun bildirim + TGE gunu kesinlik
+- on_satis_asamalar_otomatik_devam_toplam_tavan_asilamaz — 630k sonrasi satis kesilmez, 1.680.000'de durur
+- rpc::mainnet_kapisi_testleri — mainnet'te faucet/test_bakiye/lsc_test_bakiye hicbir vertex yazmaz
+
+## MAINNET REPLAY (konsensus degisikligi oncesi ZORUNLU)
+Canli veri dosyasinin KOPYASI eski ve yeni kodla oynatilir; ozet birebir ayni olmali:
+  cp /root/aidag-mainnet/aidag-data-mainnet.log /tmp/kopya.log
+  MAINNET_REPLAY_DOSYA=/tmp/kopya.log CARGO_TARGET_DIR=/root/aidag-build \
+    cargo test --release -p lsc-net --test mainnet_replay_ozet -- --ignored --nocapture | grep '^OZET'
+(on satis kayitlari, TGE, arz/hesap sayilari, tum imzalayan/alici adreslerin bakiye+nonce'u)
+

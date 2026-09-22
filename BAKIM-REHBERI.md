@@ -27,11 +27,12 @@ cd /root/aidag-lsc && cargo update --dry-run
 cd /root/aidag-lsc && cargo update
 
 ### ADIM 4: KRITIK - guncelleme bir sey bozdu mu KONTROL ET
-cd /root/aidag-lsc && cargo build --release 2>&1 | tail -3
-cd /root/aidag-lsc && cargo test --lib 2>&1 | grep "test result:"
+cd /root/aidag-lsc && CARGO_TARGET_DIR=/root/aidag-build cargo build --release 2>&1 | tail -3
+cd /root/aidag-lsc && CARGO_TARGET_DIR=/root/aidag-build cargo test --release -p lsc-engine -p lsc-net -p soulware-core 2>&1 | grep "test result:"
 
 # Test YESIL degilse (0 failed degilse) -> yedekten don:
-# cp Cargo.lock.YEDEK-TARIH Cargo.lock && cargo build --release
+# cp Cargo.lock.YEDEK-TARIH Cargo.lock && CARGO_TARGET_DIR=/root/aidag-build cargo build --release
+# (Canliya alma HER ZAMAN bolum 7'deki prosedurle.)
 
 ---
 
@@ -48,72 +49,101 @@ cd /root/aidag-lsc && cargo geiger 2>&1 | tail -30
 
 ## 4. TESTLER (motor saglikli mi)
 
-### Tum testleri calistir (279 test yesil olmali)
-cd /root/aidag-lsc && cargo test --lib 2>&1 | grep "test result:"
+### UYARI: ayri derleme klasoru kullan
+# Sunucudaki target/release/lsc-node, CANLI iki mainnet dugumunun calistirdigi dosyadir.
+# `cargo build/test --release -p lsc-net` onu EZER; dugum yeniden baslarsa onaysiz kod canliya gecer.
+# Gelistirme ve test icin HER ZAMAN:
+export CARGO_TARGET_DIR=/root/aidag-build
 
-### Tam test ciktisi (hata detayi icin)
-cd /root/aidag-lsc && cargo test --lib 2>&1 | tail -40
+### Tum testleri calistir (lsc-engine 339 + lsc-net + soulware-core 19 yesil olmali)
+cd /root/aidag-lsc && CARGO_TARGET_DIR=/root/aidag-build cargo test --release -p lsc-engine -p lsc-net -p soulware-core 2>&1 | grep "test result:"
+
+### Konsensus degisikligi varsa: MAINNET REPLAY (zorunlu) — bkz. TESTLER.md "MAINNET REPLAY"
 
 ---
 
-## 5. NODE DURUMU (calisiyor mu, saglikli mi)
+## 5. SERVIS DURUMU (calisiyor mu, saglikli mi)
 
-### Node aktif mi
-systemctl is-active lsc-node.service
+### Mainnet dugumleri (IKISI de ayni binary'yi calistirmali)
+systemctl is-active lsc-node aidag-mainnet
+curl -s http://127.0.0.1:8645/status ; echo ; curl -s http://127.0.0.1:8655/status
+# vertex_count ve genesis (b82345008ae109d8) iki dugumde AYNI olmali; orphan_count 0.
+for s in lsc-node aidag-mainnet; do sha256sum /proc/$(systemctl show -p MainPID --value $s)/exe; done
 
-### Node loglari (son 30 satir, hata var mi)
-journalctl -u lsc-node.service -n 30 --no-pager
+### KUBRA ve ogreniciler
+systemctl is-active soulware-kubra soulware-bilim soulware-learn soulware-github kubra-watchdog
+curl -s http://127.0.0.1:8646/health
+journalctl -u soulware-github -n 10 --no-pager     # GitHub ogrenici (kod calistirmaz)
 
-### Zincir durumu (vertex sayisi, tips vb.)
-curl -s http://127.0.0.1:8645/status
+### On satis izleyici (timer ile periyodik calisir)
+systemctl list-timers on-satis-izleyici.timer --no-pager
+journalctl -u on-satis-izleyici -n 20 --no-pager   # "IADE gerekir" satirlarini kontrol et
 
-### Node'u yeniden baslat (gerekirse)
-systemctl restart lsc-node.service && sleep 3 && systemctl is-active lsc-node.service
+### Web sitesi
+pm2 list | grep aidag-web
 
 ---
 
 ## 6. YEDEKLEME (onemli dosyalar)
 
-### Owner anahtari yedegi (COK ONEMLI - guvenli yere kopyala)
-# /root/faucet_anahtar.txt  --> bunu GUVENLI, OFFLINE bir yere yedekle
-# Bu anahtar kaybolursa hazine kontrolu kaybolur. Bir yedek sart.
+### Owner anahtari yedegi (COK ONEMLI - guvenli, OFFLINE yere kopyala)
+# aidag-kurucu.key -> kaybolursa on satis/TGE yonetimi kaybolur.
 
-### Kod zaten GitHub'da (git push ile yedekli)
-cd /root/aidag-lsc && git status
-cd /root/aidag-lsc && git push origin main   # degisiklikleri GitHub'a yedekle
+### Canli binary + veri yedekleri
+ls -la /root/lsc-node-canli-yedek/     # her deploy'da tarihli klasor (eski binary + iki veri dosyasi)
+
+### Kod GitHub'da — degisiklikler PR ile main'e girer (dogrudan main'e push YOK)
 
 ---
 
-## 7. BUILD (derleme)
+## 7. MAINNET'E YUKLEME (DEPLOY) — GUVENLI PROSEDUR
 
-### Release build (production icin)
-cd /root/aidag-lsc && cargo build --release 2>&1 | tail -3
+Kural: iki mainnet dugumu HER ZAMAN AYNI ANDA ayni binary'ye gecer; karisik surum
+(biri eski biri yeni) konsensus ayrismasina yol acar.
 
-### Build + restart (kod degistikten sonra)
-cd /root/aidag-lsc && cargo build --release && systemctl restart lsc-node.service
+1. Degisiklik main'de (PR birlesmis), testler yesil, konsensus degistiyse MAINNET REPLAY birebir ayni.
+2. Ayri klasorde derle:
+   cd /root/aidag-lsc && git switch main && git pull --ff-only
+   CARGO_TARGET_DIR=/root/aidag-build cargo build --release -p lsc-net
+3. Yedek al:
+   Y=/root/lsc-node-canli-yedek/deploy-$(date +%Y%m%d-%H%M%S); mkdir -p $Y
+   cp /root/aidag-mainnet/aidag-data-mainnet.log aidag-mainnet-40001.log $Y/
+   cp target/release/lsc-node $Y/lsc-node-eski
+4. Oncesi durumu kaydet: curl -s 127.0.0.1:8645/status ; curl -s 127.0.0.1:8645/on-satis-ozet
+5. Binary'yi atomik degistir ve IKI dugumu birlikte yeniden baslat:
+   cp /root/aidag-build/release/lsc-node target/release/lsc-node.yeni && mv target/release/lsc-node.yeni target/release/lsc-node
+   systemctl restart lsc-node aidag-mainnet
+6. Dogrula: iki /status ayni (vertex_count, genesis), on satis ozeti ve TGE oncesiyle ayni, loglarda panic yok.
+7. Geri donus (gerekirse): cp $Y/lsc-node-eski target/release/lsc-node && systemctl restart lsc-node aidag-mainnet
+
+### KUBRA (soulware-core) — zincire dokunmaz, tek servis
+cd /root/aidag-lsc && cargo build --release -p soulware-core && systemctl restart soulware-kubra
+
+### Web sitesi
+cd /var/www/aidag-chain && npm run build && pm2 restart aidag-web
 
 ---
 
 ## DUZENLI BAKIM RUTINI (onerilen)
 
 HAFTALIK:
-  1. cargo audit           (yeni guvenlik acigi var mi)
-  2. cargo test --lib      (279 test hala yesil mi)
-  3. systemctl is-active lsc-node.service  (node ayakta mi)
+  1. cargo audit                         (yeni guvenlik acigi var mi)
+  2. testler (bolum 4)                   (hepsi yesil mi)
+  3. servis durumu (bolum 5)             (iki dugum ayni binary + ayni durum mu)
+  4. on satis izleyici loglari           ("IADE gerekir" var mi)
 
 GUNCELLEME YAPARKEN (her zaman bu sirayla):
   1. Yedek al (Cargo.lock)
   2. cargo update --dry-run (gor)
   3. cargo update (yap)
-  4. cargo build + cargo test (DOGRULA)
+  4. build + test (DOGRULA; ayri CARGO_TARGET_DIR)
   5. Test yesil degilse yedekten don
 
-MAINNET ONCESI (ileride):
-  - Profesyonel audit (Rust L1 bilen firma)
-  - Cok-node yuk testi
+ACIK KALAN:
+  - Profesyonel bagimsiz audit (Rust L1 bilen firma)
+  - Farkli sunucu/konumlarda dagitik cok-dugumlu ag
   - Owner anahtari donanim cuzdanina
-  - Gercek genesis (21M pinli, tek-sefer)
 
 ---
-Not: Her guncelleme sonrasi MUTLAKA cargo test calistir.
+Not: Her guncelleme sonrasi MUTLAKA test calistir.
 "Once kanit, sonra vaat" — test yesil gormeden hicbir degisikligi kabul etme.
