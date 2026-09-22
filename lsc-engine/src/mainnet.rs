@@ -295,9 +295,18 @@ mod tests {
 // uygular -> deterministik.
 // ===================================================================
 
-/// Faz-1 on satis KUMULATIF TAVAN: 630.000 AIDAG (arzin %3'u).
-/// on_satis_registry.toplam_aidag() + yeni dagitim bu tavani asamaz.
-pub const ON_SATIS_FAZ1_TAVAN: u128 = 630_000 * crate::genesis::ONDALIK;
+/// Faz-1 on satis miktari: 630.000 AIDAG (arzin %3'u; 3 kademe x 210k @ $0,20/0,25/0,30).
+/// ARTIK TAVAN DEGIL (bilgi amacli): Faz-1 dolunca satis KESILMEZ, Faz-2 (Rezerv)
+/// otomatik devam eder. Kademe/fiyat gecisi zincir-disinda (izleyici + site) yapilir;
+/// zincir yalnizca toplam tavani uygular.
+pub const ON_SATIS_FAZ1_MIKTAR: u128 = 630_000 * crate::genesis::ONDALIK;
+
+/// ON SATIS TOPLAM KUMULATIF TAVAN: 1.680.000 AIDAG = on satis (escrow) diliminin
+/// TAMAMI (%8). Kurucu karari (2026-09-22): bir asama bitince digeri otomatik devam
+/// eder — Faz-1 (630k) + Faz-2/Rezerv (1.050k: 5 x 210k @ $0,35/0,40/0,45/0,50/0,55).
+/// on_satis_registry.toplam_aidag() (test tahsisleri dahil) + yeni dagitim bunu asamaz;
+/// escrow bakiyesi de tam bu kadar oldugundan dilim disina tasma imkansiz.
+pub const ON_SATIS_TOPLAM_TAVAN: u128 = 1_680_000 * crate::genesis::ONDALIK;
 
 /// Islem basina ust sinir: tek bir tip=10 dagitimi en fazla bu kadar
 /// AIDAG dagitabilir. Tek hamlede buyuk bosaltmayi engeller.
