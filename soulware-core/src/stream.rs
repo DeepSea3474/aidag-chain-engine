@@ -12,18 +12,14 @@ pub async fn beyin_stream(
     http: &reqwest::Client,
     remote_url: &str,
     model: &str,
-    system_prompt: &str,
-    user_content: &str,
+    messages: serde_json::Value, // sistem + örnek turlar + kullanıcı (main::mesajlar)
     temp: f64,
     max_tokens: usize,
     tx: &tokio::sync::mpsc::Sender<Result<Event, Infallible>>,
 ) -> Result<String, String> {
     let body = serde_json::json!({
         "model": model,
-        "messages": [
-            { "role": "system", "content": system_prompt },
-            { "role": "user", "content": user_content }
-        ],
+        "messages": messages,
         "max_tokens": max_tokens,
         "temperature": temp,
         "stream": true,
