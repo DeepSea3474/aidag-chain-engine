@@ -91,7 +91,23 @@ Dal: `rwa-oracle-kyc` · Durum: GELISTIRME (mainnet'te KAPALI, `RWA_MAINNET_AKTI
 - `GET /kyc/:adres` — onayli + kurum bazli kayitlar.
 - `GET /kurum/:adres` — mevcut yanita `roller` eklendi.
 
+## AVM precompile (2. asama) — `lsc-engine/src/rwa_precompile.rs`
+- SALT OKUNUR: hicbir durum yazmaz; deger gonderen cagri REVERT (aktarim geri alinir).
+- Oracle (Chainlink AggregatorV3 uyumlu), akis basina adres:
+  `0x000000000000000000000000A1DA0C1E` + akis_no (4 bayt). Fonksiyonlar: `decimals()`,
+  `description()`, `version()` (=1), `latestRoundData()`, `getRoundData(uint80)`.
+  `latestRoundData` durmus / bayat / verisiz akista `Error(string)` ile REVERT eder
+  (bayatlik ZINCIR saatiyle). `getRoundData` gecmis yayinlanmis turu dondurur.
+- KYC: `isApproved(address) -> bool`, adres `0x000000000000000000000000A1DA4B5900000001`.
+- Ethereum precompile'lari (0x01..0x11, 0x100) ile CAKISMA YOK: tum spec'ler icin test edilir.
+- GAZ: her cagri sabit 2600 (revert dahil); eksik gazda OOG. RWA adresleri soguk erisim oder.
+- MAINNET'TE KAPALI: `rwa_aktif()` degilse saglayici Ethereum ile birebir ayni; RWA adresleri
+  siradan bos hesap (cagri basarili, veri yok). Mainnet replay main ile birebir.
+- Solidity notu: bu adreslerde bytecode yok; donus degeri bekleyen yuksek seviye cagrilar
+  (>=0.8.10) extcodesize kontrolu yapmaz, sorunsuz calisir.
+- Kalan: tip=9/12 islemlerinde EVM `block.timestamp` = vertex zamani (konsensus, degismedi);
+  kontratlar bayatlik icin `block.timestamp` yerine precompile'in kendi kontrolune guvenmeli.
+
 ## Sonraki asamalar
-- 2. asama: AVM precompile (`PrecompileProvider`), Chainlink `latestRoundData/getRoundData/decimals/description/version`,
-  KYC `isApproved(address)`; `eth_call` yoluna zincir saati.
+- 2. asama: TAMAMLANDI (yukari). `eth_call` blok zamani hala ayarlanmiyor (precompile bayatligi etkilenmez).
 - 3. asama: kurum imzalama araci (offline), EVM (secp256k1) imzali kardes tipler.

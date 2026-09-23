@@ -102,4 +102,14 @@ fn mainnet_replay_ozet() {
     for a in &kurum_adresleri {
         println!("OZET kurum adres=0x{} {:?}", hex::encode(a), st.kurum_sorgula(a));
     }
+    // AVM: deploy edilmis kontratlar ve bakiyeleri (precompile/AVM yolu degisikliklerinde).
+    let mut kontratlar = st.avm_kontrat_adresleri();
+    kontratlar.sort();
+    println!("OZET avm_kontrat_sayisi={}", kontratlar.len());
+    for a in &kontratlar {
+        println!(
+            "OZET avm_kontrat=0x{} aidag={} lsc={}",
+            hex::encode(a), st.bakiye(a), st.lsc_bakiye(a)
+        );
+    }
 }

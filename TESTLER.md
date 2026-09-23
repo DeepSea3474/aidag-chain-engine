@@ -214,6 +214,9 @@ Her biri once ESKI kodda BASARISIZ, yeni kodda BASARILI oldugu dogrulanarak ekle
 - node::rwa_tests::rwa_mainnet_genesis_ve_mevcut_vertexler_kurum_dogrulamadan_etkilenmez — pinli genesis + mevcut tip vertex'ler; dogrulama denemesi kayitlari degistirmez
 - node::rwa_tests::rwa_gercek_kubra_adresi_yasakli_rol_alamaz — gercek KUBRA adresi sabit yasak listesinde; rol alamaz
 - node::rwa_tests::rwa_olcum_zamani_ileri_veya_eskiyse_rapor_reddedilir / rwa::tests::olcum_zamani_ileride_veya_pencereden_eskiyse_reddedilir — olcum zamani penceresi
+- rwa_precompile::tests — secici keccak, Ethereum precompile cakismasi (tum spec), Chainlink ABI, int256 isaret, bayat/durmus/hatali cagri revert, KYC isApproved, RWA kapaliyken Ethereum ile ayni, kontrat STATICCALL, sabit gaz (2599 OOG / 2600 basari, revert ayni gaz), deger reddi
+- node::rwa_tests::rwa_precompile_* — eth_call ile zincir durumunu okur; mainnet'te kapali
+- soulware-core imza_dosyasi::tests — anahtar fail-closed: yok/bozuk red, --yeni-anahtar-uret var olan dosyanin uzerine yazmaz, 0600, mesaj sizdirmaz
 - tx::rwa_tx_tests — tip 17..20 kodlama: gidis-donus, eksik/fazla bayt, yanlis tip, gecersiz alan, tip numarasi cakismasi
 - oracle_hesap::tests — alt medyan, sapma siniri, i128 sinirlarinda tasmasiz 256-bit karsilastirma, eleme, girdi sirasindan bagimsizlik, kesici, bayatlik
 - rwa::tests — tur kapanisi, tekrar rapor, yanlis tur, bayat acik tur, devre kesici durdur/ac, rolu iptal edilenin raporu, tur gecmisi budama, KYC onay/iptal

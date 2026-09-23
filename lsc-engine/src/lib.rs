@@ -22,6 +22,7 @@ pub mod node;
 pub mod oracle_hesap;
 pub mod registry;
 pub mod rwa;
+pub mod rwa_precompile;
 pub mod tx;
 
 pub use consensus::finality::{

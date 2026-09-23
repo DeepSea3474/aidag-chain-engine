@@ -310,6 +310,20 @@ pub fn avm_calistir(
     data: &[u8],
     zaman: u64,
 ) -> Result<AvmSonuc, &'static str> {
+    avm_calistir_rwa(db, gonderen, hedef, deger, data, zaman, None)
+}
+
+/// `avm_calistir` + RWA precompile gorunumu. `rwa = None` -> yalniz Ethereum
+/// precompile'lari (mainnet'te RWA kapaliyken HER ZAMAN None).
+pub fn avm_calistir_rwa(
+    db: &mut AidagDatabase,
+    gonderen: &[u8; 20],
+    hedef: &[u8; 20],
+    deger: crate::registry::Tutar,
+    data: &[u8],
+    zaman: u64,
+    rwa: Option<crate::rwa_precompile::RwaGorunum<'_>>,
+) -> Result<AvmSonuc, &'static str> {
     use revm::context::TxEnv;
     use revm::primitives::{Bytes, TxKind};
     use revm::{Context, ExecuteCommitEvm, MainBuilder, MainContext};
@@ -332,7 +346,10 @@ pub fn avm_calistir(
     ctx.modify_block(|b| {
         b.timestamp = U256::from(zaman);
     });
-    let mut evm = ctx.build_mainnet();
+    let evm = ctx.build_mainnet();
+    let eth = evm.precompiles.clone();
+    let mut evm =
+        evm.with_precompiles(crate::rwa_precompile::AidagPrecompiles::new(eth, rwa));
 
     let tx = TxEnv::builder()
         .caller(adres_to_evm(gonderen))
@@ -379,6 +396,17 @@ pub fn avm_call_oku(
     hedef: &[u8; 20],
     data: &[u8],
 ) -> Result<Vec<u8>, &'static str> {
+    avm_call_oku_rwa(db, gonderen, hedef, data, None)
+}
+
+/// `avm_call_oku` + RWA precompile gorunumu (eth_call ile oracle/KYC okunabilsin).
+pub fn avm_call_oku_rwa(
+    db: &AidagDatabase,
+    gonderen: &[u8; 20],
+    hedef: &[u8; 20],
+    data: &[u8],
+    rwa: Option<crate::rwa_precompile::RwaGorunum<'_>>,
+) -> Result<Vec<u8>, &'static str> {
     use revm::context::TxEnv;
     use revm::primitives::{Bytes, TxKind};
     use revm::{Context, ExecuteEvm, MainBuilder, MainContext};
@@ -386,7 +414,10 @@ pub fn avm_call_oku(
     // OKUMA-ONLY: db'nin KOPYASI uzerinde calis (gercek state degismez).
     let db_kopya = db.clone();
     let ctx = Context::mainnet().with_db(db_kopya);
-    let mut evm = ctx.build_mainnet();
+    let evm = ctx.build_mainnet();
+    let eth = evm.precompiles.clone();
+    let mut evm =
+        evm.with_precompiles(crate::rwa_precompile::AidagPrecompiles::new(eth, rwa));
 
     let tx = TxEnv::builder()
         .caller(adres_to_evm(gonderen))
@@ -466,6 +497,16 @@ pub fn ham_eth_tx_isle(
     raw: &[u8],
     zaman: u64,
 ) -> Result<([u8; 32], AvmSonuc), &'static str> {
+    ham_eth_tx_isle_rwa(db, raw, zaman, None)
+}
+
+/// `ham_eth_tx_isle` + RWA precompile gorunumu.
+pub fn ham_eth_tx_isle_rwa(
+    db: &mut AidagDatabase,
+    raw: &[u8],
+    zaman: u64,
+    rwa: Option<crate::rwa_precompile::RwaGorunum<'_>>,
+) -> Result<([u8; 32], AvmSonuc), &'static str> {
     use revm::primitives::keccak256;
 
     // 1) Coz + gonderen kurtar (imzadan)
@@ -476,7 +517,8 @@ pub fn ham_eth_tx_isle(
 
     // 3) AVM'de calistir: hedef None -> deploy, dolu -> call
     let hedef = islem.hedef.unwrap_or([0u8; 20]);
-    let sonuc = avm_calistir(db, &islem.gonderen, &hedef, islem.deger, &islem.veri, zaman)?;
+    let sonuc =
+        avm_calistir_rwa(db, &islem.gonderen, &hedef, islem.deger, &islem.veri, zaman, rwa)?;
 
     Ok((tx_hash, sonuc))
 }

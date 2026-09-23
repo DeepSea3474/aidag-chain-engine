@@ -390,7 +390,14 @@ impl NodeState {
         hedef: &[u8; 20],
         data: &[u8],
     ) -> Result<Vec<u8>, &'static str> {
-        crate::avm::avm_call_oku(&self.avm_db, gonderen, hedef, data)
+        let rwa = rwa_gorunum(
+            self.rwa_aktif(),
+            &self.oracle_registry,
+            &self.kurum_registry,
+            &self.kyc_registry,
+            self.zincir_saati,
+        );
+        crate::avm::avm_call_oku_rwa(&self.avm_db, gonderen, hedef, data, rwa)
     }
 
     /// Kac farkli adresin LSC bakiyesi var.
@@ -1313,13 +1320,22 @@ impl NodeState {
                                 self.avm_db.nonce_koy(gonderen, c.nonce);
                                 // KONTRAT calistir: deploy (hedef=sifir) ya da call. deger EVM'e
                                 // verilir ki kontrat mantigi (payable vb.) dogru tetiklensin.
-                                let sonuc = crate::avm::avm_calistir(
+                                // RWA precompile: yalniz RWA etkinken (mainnet'te KAPALI).
+                                let rwa = rwa_gorunum(
+                                    self.rwa_aktif(),
+                                    &self.oracle_registry,
+                                    &self.kurum_registry,
+                                    &self.kyc_registry,
+                                    self.zincir_saati,
+                                );
+                                let sonuc = crate::avm::avm_calistir_rwa(
                                     &mut self.avm_db,
                                     &gonderen,
                                     &c.hedef,
                                     c.deger,
                                     &c.data,
                                     zaman,
+                                    rwa,
                                 );
                                 if let Ok(r) = sonuc {
                                     // GERCEK gas_used'dan ucret (basari/basarisiz FARK ETMEZ).
@@ -1560,9 +1576,19 @@ impl NodeState {
                                 // (islem.nonce == beklenen). CREATE adresi eth_getTransactionCount
                                 // ile tutarli olur -> MetaMask/arac adres tahmini dogru.
                                 self.avm_db.nonce_koy(gonderen, islem.nonce);
-                                if let Ok((_h, r)) =
-                                    crate::avm::ham_eth_tx_isle(&mut self.avm_db, raw, zaman)
-                                {
+                                let rwa = rwa_gorunum(
+                                    self.rwa_aktif(),
+                                    &self.oracle_registry,
+                                    &self.kurum_registry,
+                                    &self.kyc_registry,
+                                    self.zincir_saati,
+                                );
+                                if let Ok((_h, r)) = crate::avm::ham_eth_tx_isle_rwa(
+                                    &mut self.avm_db,
+                                    raw,
+                                    zaman,
+                                    rwa,
+                                ) {
                                     // B2: GERCEK gas_used (basari/basarisiz FARK ETMEZ) -> LSC.
                                     let ucret_ger = crate::avm::gas_ucreti_hesapla(r.gas_used);
                                     let (yak_g, gel_g) = crate::avm::gas_ucreti_bol(ucret_ger);
@@ -1698,6 +1724,19 @@ impl NodeState {
             }
         }
     }
+}
+
+/// RWA precompile gorunumu: yalniz `aktif` (rwa_aktif) iken Some. Alanlar ayri
+/// verilir ki `&mut self.avm_db` ile ayni anda odunc alinabilsin (ayrik alanlar).
+/// Zaman = ZINCIR saati (bayatlik vertex/blok zamaniyla atlatilamaz).
+fn rwa_gorunum<'a>(
+    aktif: bool,
+    oracle: &'a crate::rwa::OracleRegistry,
+    kurumlar: &'a crate::registry::KurumRegistry,
+    kyc: &'a crate::rwa::KycRegistry,
+    zincir_saati: u64,
+) -> Option<crate::rwa_precompile::RwaGorunum<'a>> {
+    aktif.then_some(crate::rwa_precompile::RwaGorunum { oracle, kurumlar, kyc, zincir_saati })
 }
 
 /// `ingest_networked` sonucu. Her durum acikca ayrilir (sahte/sessiz yok).
@@ -6226,6 +6265,53 @@ mod rwa_tests {
         k.ilerle(BILDIRIM);
         assert!(k.node.kurum_rolleri(&kubra).is_empty(), "KUBRA'ya rol verilemez");
         assert_eq!(k.nonce(), 2, "yonetim islemleri yetkili ama eylem etkisiz");
+    }
+
+    // ===== RWA PRECOMPILE (2. asama): salt-okunur AVM arayuzu =====
+
+    #[test]
+    fn rwa_precompile_eth_call_ile_zincir_durumunu_okur() {
+        use crate::rwa_precompile::{oracle_adresi, KYC_ADRESI, SEC_IS_APPROVED, SEC_LATEST_ROUND_DATA};
+        let mut k = Kurulum::yeni();
+        k.owner(akis_tanimi(1).encode());
+        let r = anahtar(0xD1);
+        k.yetkili_kurum(&r, ROL_ORACLE_RAPORLAYICI, AKIS);
+        k.yetkili_kurum(&r, ROL_KYC_ONAYLAYICI, 0);
+        let p = k.rapor(1, 2_500);
+        k.gonder(&r, p);
+        k.gonder(&r, KycKayit { adres: [0xC5; 20], onay: true, kanit_hash: [0; 32] }.encode());
+        let o = k.node.avm_call(&[0; 20], &oracle_adresi(AKIS), &SEC_LATEST_ROUND_DATA).expect("latestRoundData");
+        assert_eq!(o.len(), 160);
+        assert_eq!(o[31], 1, "roundId");
+        assert_eq!(u128::from_be_bytes(o[48..64].try_into().unwrap()), 2_500, "answer");
+        let mut kyc = SEC_IS_APPROVED.to_vec();
+        kyc.extend_from_slice(&[0u8; 12]);
+        kyc.extend_from_slice(&[0xC5; 20]);
+        assert_eq!(k.node.avm_call(&[0; 20], &KYC_ADRESI, &kyc).unwrap()[31], 1);
+        // Salt okunur: cagrilar durumu degistirmez; zincir saati ilerleyince veri bayatlar.
+        k.ilerle(3_601);
+        assert!(k.node.avm_call(&[0; 20], &oracle_adresi(AKIS), &SEC_LATEST_ROUND_DATA).is_err());
+        assert_eq!(k.node.oracle_tur(AKIS, 1).unwrap().deger, 2_500);
+    }
+
+    #[test]
+    fn rwa_precompile_mainnette_kapali() {
+        use crate::rwa_precompile::{oracle_adresi, KYC_ADRESI, SEC_DECIMALS, SEC_LATEST_ROUND_DATA};
+        let mut m = NodeState::new_mainnet();
+        m.ingest(&crate::mainnet::genesis_wire(), crate::mainnet::ON_SATIS_BASLANGIC).unwrap();
+        assert!(!m.rwa_aktif());
+        // RWA adresleri mainnet'te siradan bos hesap: veri DONMEZ (Ethereum ile ayni).
+        assert_eq!(m.avm_call(&[0; 20], &oracle_adresi(1), &SEC_LATEST_ROUND_DATA), Ok(vec![]));
+        assert_eq!(m.avm_call(&[0; 20], &oracle_adresi(1), &SEC_DECIMALS), Ok(vec![]));
+        assert_eq!(m.avm_call(&[0; 20], &KYC_ADRESI, &[0x67, 0x34, 0x48, 0xdd]), Ok(vec![]));
+        assert!(rwa_gorunum(
+            m.rwa_aktif(),
+            &m.oracle_registry,
+            &m.kurum_registry,
+            &m.kyc_registry,
+            m.zincir_saati
+        )
+        .is_none());
     }
 
     #[test]
