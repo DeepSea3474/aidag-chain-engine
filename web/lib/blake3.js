@@ -32,7 +32,41 @@
     for(let i=0;i<16;i++){const o=i*4;w[i]=(bytes[o]|(bytes[o+1]<<8)|(bytes[o+2]<<16)|(bytes[o+3]<<24))>>>0;}
     return w;
   }
+  // STANDART BLAKE3 (1024 baytlik parcalar + ikili agac). Rust/Python blake3 ile ayni.
+  const PARENT=4, CHUNK_LEN=1024;
+  function cvBayt(cv){const out=new Uint8Array(32);for(let i=0;i<8;i++){out[i*4]=cv[i]&0xff;out[i*4+1]=(cv[i]>>>8)&0xff;out[i*4+2]=(cv[i]>>>16)&0xff;out[i*4+3]=(cv[i]>>>24)&0xff;}return out;}
+  // Bir parcayi (<=1024 bayt) isle; son blogun (cv, blok, uzunluk, bayraklar) bilgisini dondur (ROOT karari cagirana ait).
+  function parca(input,bas,son,sayac){
+    let cv=Uint32Array.from(IV);
+    const n=son-bas; let nBlocks=Math.ceil(n/64); if(nBlocks===0) nBlocks=1;
+    for(let b=0;b<nBlocks;b++){
+      const blk=new Uint8Array(64), len=Math.min(64,n-b*64);
+      if(len>0) blk.set(input.subarray(bas+b*64,bas+b*64+len));
+      let flags=0; if(b===0) flags|=CHUNK_START;
+      if(b===nBlocks-1) return {cv, m:wordsFromLE(blk), sayac, len:Math.max(len,0), flags:flags|CHUNK_END};
+      cv=compress(cv,wordsFromLE(blk),sayac,64,flags);
+    }
+  }
+  function ciktiCv(o){return compress(o.cv,o.m,o.sayac,o.len,o.flags);}
+  function ebeveyn(sol,sag){const m=new Uint32Array(16);m.set(sol,0);m.set(sag,8);return {cv:Uint32Array.from(IV),m,sayac:0,len:64,flags:PARENT};}
   function hash(input){
+    const n=input.length, parcaSay=Math.max(1,Math.ceil(n/CHUNK_LEN));
+    const yigin=[]; let o=null;
+    for(let c=0;c<parcaSay;c++){
+      o=parca(input,c*CHUNK_LEN,Math.min(n,(c+1)*CHUNK_LEN),c);
+      if(c<parcaSay-1){
+        let cv=ciktiCv(o), toplam=c+1;
+        while((toplam&1)===0){cv=ciktiCv(ebeveyn(yigin.pop(),cv)); toplam>>=1;}
+        yigin.push(cv);
+      }
+    }
+    while(yigin.length) o=ebeveyn(yigin.pop(),ciktiCv(o));
+    o.flags|=ROOT;
+    return cvBayt(ciktiCv(o));
+  }
+  // ESKI (standart DISI) ozet: tum girdiyi tek parca sayar. <=1024 baytta standartla ayni.
+  // YALNIZ geriye uyumlu DOGRULAMA icin: bu sayfadan 1 KB'tan buyuk kaydedilmis eski belgeler.
+  function hashEski(input){
     let cv=Uint32Array.from(IV);
     const n=input.length;
     let nBlocks=Math.ceil(n/64); if(nBlocks===0) nBlocks=1;
@@ -52,4 +86,5 @@
     return out;
   }
   global.blake3hash=hash;
+  global.blake3hashEski=hashEski;
 })(typeof window!=='undefined'?window:globalThis);

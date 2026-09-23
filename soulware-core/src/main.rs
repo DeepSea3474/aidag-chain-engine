@@ -20,6 +20,7 @@ mod zincir;      // deterministik zincir sorgu araci (arac-kullanimi)
 mod stream;      // SSE streaming (cevabi harf harf akitir)
 mod resmi;       // AIDAG/KUBRA resmi kaynak katmani (grounding onceligi)
 mod kanit;       // zincir kaniti: etkilesim hash'i (tuzlu v1 + eski tuzsuz dogrulama)
+mod belge_arac;  // belge kayit TALEBI hazirlama (KUBRA imzalamaz)
 
 use axum::{extract::State, routing::{get, post}, response::{IntoResponse, Sse, sse::Event}, http::{StatusCode, header}, body::Body, Json, Router};
 use ed25519_dalek::SigningKey;
@@ -436,6 +437,12 @@ async fn arac_calistir(st: &AppState, prompt: &str) -> Option<(String, &'static 
     if resmi::isim_sorusu_mu(prompt) {
         return Some((resmi::ISIM_CEVABI.to_string(), "kimlik"));
     }
+    // BELGE KAYIT TALEBİ: kayıt niyeti + tam hash → imzasız talep (KUBRA İMZALAMAZ).
+    if zincir::belge_kayit_niyeti_mi(prompt) {
+        if let Some(h) = zincir::belge_hash_bul(prompt) {
+            return Some((belge_talep_sohbet(st, &h).await, belge_arac::ARAC_AD));
+        }
+    }
     // BELGE: 64-hex hash varsa HER ZAMAN doğrula; kısaltılmışsa tam hash iste;
     // kayıt niyeti → kayıt süreci; doğrulama niyeti → doğrulama sayfası.
     if let Some(x) = zincir::belge_dogrula(&st.http, &st.cfg.chain_rpc, prompt).await {
@@ -462,6 +469,62 @@ async fn arac_calistir(st: &AppState, prompt: &str) -> Option<(String, &'static 
         return Some((resmi::DOGRULANMAMIS.to_string(), "resmi-kaynak"));
     }
     None
+}
+
+// ── BELGE KAYIT TALEBİ (arac = belge-kayit-hazirla) ──
+// Zincirden OKUR (/belge, /kurum, /tips); anahtar KULLANMAZ, /submit ÇAĞIRMAZ.
+async fn rpc_json(st: &AppState, yol: &str) -> Result<Value, String> {
+    let url = format!("{}{}", st.cfg.chain_rpc.trim_end_matches('/'), yol);
+    let r = st.http.get(&url).send().await.map_err(|e| format!("zincire ulaşılamıyor: {e}"))?;
+    r.json::<Value>().await.map_err(|e| format!("zincir yanıtı çözülemedi: {e}"))
+}
+
+async fn belge_talebi(st: &AppState, hash: [u8; 32], imzalayan_pk: Option<[u8; 32]>) -> Result<Value, String> {
+    let zincir = belge_arac::belge_durumu_coz(&rpc_json(st, &format!("/belge/{}", hex::encode(hash))).await?);
+    let kurum = match imzalayan_pk {
+        Some(pk) => {
+            let adres = hex::encode(public_key_to_adres(&pk));
+            Some(belge_arac::kurum_durumu_coz(&rpc_json(st, &format!("/kurum/{adres}")).await?))
+        }
+        None => None,
+    };
+    let tips = uclari_cek(&st.http, &st.cfg.chain_rpc).await;
+    belge_arac::talep_kur(st.cfg.net_id, hash, tips, now_secs(), &zincir, imzalayan_pk.zip(kurum.as_ref()))
+}
+
+async fn belge_talep_sohbet(st: &AppState, hash_hex: &str) -> String {
+    let hash = match belge_arac::hex32(hash_hex) { Ok(h) => h, Err(e) => return format!("Kayıt talebi hazırlanamadı: {e}") };
+    match belge_talebi(st, hash, None).await {
+        Ok(t) => belge_arac::sohbet_metni(&t),
+        Err(e) => format!("Kayıt talebi şu an hazırlanamadı: {e}. Lütfen biraz sonra tekrar dene."),
+    }
+}
+
+#[derive(Deserialize)]
+struct BelgeHazirlaReq {
+    /// Tarayıcıda hesaplanmış belge özeti (64 hex). Dosya GÖNDERİLMEZ.
+    hash: String,
+    /// Kurum personelinin ed25519 açık anahtarı (64 hex, ops.). Gizli anahtar ASLA gönderilmez.
+    #[serde(default)]
+    imzalayan_pubkey: Option<String>,
+}
+
+async fn belge_hazirla(State(st): State<Arc<AppState>>, Json(req): Json<BelgeHazirlaReq>) -> (StatusCode, Json<Value>) {
+    let hash = match belge_arac::hex32(&req.hash) {
+        Ok(h) => h,
+        Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({ "ok": false, "hata": format!("hash: {e}") }))),
+    };
+    let pk = match req.imzalayan_pubkey.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        None => None,
+        Some(s) => match belge_arac::hex32(s) {
+            Ok(p) if ed25519_dalek::VerifyingKey::from_bytes(&p).is_ok() => Some(p),
+            _ => return (StatusCode::BAD_REQUEST, Json(json!({ "ok": false, "hata": "imzalayan_pubkey geçersiz ed25519 açık anahtarı" }))),
+        },
+    };
+    match belge_talebi(&st, hash, pk).await {
+        Ok(t) => (StatusCode::OK, Json(json!({ "ok": true, "talep": t }))),
+        Err(e) => (StatusCode::BAD_GATEWAY, Json(json!({ "ok": false, "hata": e }))),
+    }
 }
 
 // Araç cevabını zincire yaz (tuzlu etkileşim hash'i = net_id|ts|prompt|sonuç|araç).
@@ -1194,6 +1257,8 @@ async fn main() {
         .route("/v1/ask", post(ask))
         .route("/v1/ask-stream", post(ask_stream))
         .route("/v1/verify", post(dogrula))
+        // Belge dosyası bu uca GELMEZ: yalnız hash + (ops.) açık anahtar → küçük gövde sınırı.
+        .route("/v1/belge/hazirla", post(belge_hazirla).layer(axum::extract::DefaultBodyLimit::max(1024)))
         .route("/v1/image", post(gorsel))
         .route("/v1/video", post(video_uret))
         .route("/kb/ingest", post(kb_ingest))

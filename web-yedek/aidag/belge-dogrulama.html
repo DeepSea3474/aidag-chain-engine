@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Belge Dogrulama - AIDAG-Chain (Mainnet)</title>
+<title>Belge Doğrulama - AIDAG-Chain (Mainnet)</title>
 <style>
   :root{--lacivert:#0f2747;--lacivert2:#1a3a63;--altin:#c8a44d;--kagit:#f7f5f0;
     --metin:#1c2530;--gri:#5d6b7a;--cizgi:#d9d4c8;--yesil:#1f7a4d;--kirmizi:#a8341f;--uyari:#8a6d1f}
@@ -45,253 +45,321 @@
   .sonuc .detay{font-family:ui-monospace,monospace;font-size:12px;margin-top:6px;color:var(--gri);word-break:break-all}
   footer{border-top:1px solid var(--cizgi);padding:22px 0;font-size:12px;color:var(--gri);text-align:center}
   .rozet{display:inline-block;background:#eef3fa;color:var(--lacivert);font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;margin-left:8px}
+  .iz{margin-top:14px;border:1px dashed var(--cizgi);border-radius:8px;padding:12px 14px;font-size:12.5px;background:#fcfbf8;display:none}
+  .iz .bas{font-weight:700;color:var(--lacivert);font-size:12px;letter-spacing:.3px;text-transform:uppercase;margin-bottom:6px}
+  .iz .s{margin:3px 0;word-break:break-all}
+  .iz .s b{display:inline-block;min-width:118px;color:var(--gri);font-weight:600}
+  .iz code{font-family:ui-monospace,monospace;font-size:12px}
+  .btn-ikincil{background:#fff;color:var(--lacivert);border:1px solid var(--lacivert2);margin-top:12px;margin-right:8px}
+  .kucuk{font-size:12.5px;color:var(--gri);margin-top:8px}
+  .sablonlar{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:10px}
+  @media (max-width:560px){.sablonlar{grid-template-columns:1fr}}
+  .sablon{border:1px solid var(--cizgi);border-radius:8px;padding:14px;background:#fcfbf8}
+  .sablon h3{font-size:14px;color:var(--lacivert);margin-bottom:4px}
+  .sablon .onizle{background:#fff;border:1px solid var(--cizgi);border-radius:4px;margin:10px 0;display:flex;justify-content:center;align-items:center;min-height:120px;overflow:hidden}
+  .sablon .onizle svg{max-width:100%;height:auto;max-height:260px}
+  .sablon .btn{margin-top:0;margin-right:6px;padding:8px 14px;font-size:13px}
+  #baskiAlani{display:none}
+  @media print{
+    body>*:not(#baskiAlani){display:none!important}
+    #baskiAlani{display:block!important}
+    #baskiAlani svg{display:block;width:100%;height:auto}
+  }
 </style>
+<style id="sayfaBoyutu"></style>
 </head>
 <body>
-<div class="uyari-bar">MAINNET - Kayit KALICIDIR ve geri alinamaz. Dosyaniz tarayicinizdan cikmaz; zincire yalnizca dosyanin ozeti (hash), tarayicinizda uretilen bir anahtarla yazilir. Herkese acik zaman damgasi istemediginiz belgeleri kaydetmeyin.</div>
+<div class="uyari-bar">MAINNET — Kayıt KALICIDIR ve geri alınamaz. Belge dosyanız tarayıcınızdan çıkmaz; yalnızca özeti (hash) kullanılır. Kayıt yalnızca kurum personelinin KENDİ anahtarıyla onaylanır; KUBRA imzalamaz.</div>
 <header><div class="wrap">
   <div class="kurum"><div class="arma">*</div><div>
-    <h1>Belge Dogrulama Sistemi <span class="rozet">PILOT</span></h1>
-    <div class="alt">AIDAG-Chain blok zinciri uzerinde belge butunlugu dogrulama denemesi</div>
+    <h1>Belge Doğrulama Sistemi <span class="rozet">PILOT</span></h1>
+    <div class="alt">AIDAG-Chain blok zinciri üzerinde belge bütünlüğü doğrulama</div>
   </div></div>
-  <div class="net"><span class="dot" id="netdot"></span><span id="netstat">aga baglaniliyor...</span></div>
+  <div class="net"><span class="dot" id="netdot"></span><span id="netstat">ağa bağlanılıyor...</span></div>
 </div></header>
 <main class="wrap">
   <div class="kart">
-    <h2>1) Belge Kaydet <span style="font-weight:400;font-size:13px;color:var(--gri)">(kurum tarafi)</span></h2>
-    <div class="aciklama">Bir belgenin degismez parmak izini (ozet/hash) zincire yazar. Belgenin kendisi <b>asla</b> aga gonderilmez - yalnizca matematiksel ozeti. Icerik gizli kalir, butunluk kanitlanir.</div>
-    <label for="belgeMetin">Belge icerigi (ornek metin)</label>
-    <textarea id="belgeMetin" placeholder="Orn: Diploma No 2026-12345 - Ad Soyad - Bilgisayar Muhendisligi - 2026"></textarea>
-    <div style="margin-top:10px;font-size:13px;color:var(--gri)">veya bir dosya secin (PDF, resim, Word — icerik tarayicidan cikmaz):</div>
-    <input type="file" id="belgeDosya" style="margin-top:6px;font-size:13px">
-    <div id="belgeDosyaBilgi" style="font-size:12.5px;color:var(--gri);margin-top:5px"></div>
-    <button class="btn btn-ana" id="hazirlaBtn">Islemi Hazirla</button>
+    <h2>1) Kayıt Talebi Hazırla <span style="font-weight:400;font-size:13px;color:var(--gri)">(kurum tarafı)</span></h2>
+    <div class="aciklama">Belgenin özeti (hash) tarayıcınızda hesaplanır; dosya hiçbir sunucuya gönderilmez. KUBRA zincir durumunu kontrol edip <b>imzasız</b> bir kayıt talebi hazırlar. Kayıt ancak yetkili kurum personeli talebi <b>kendi anahtarıyla</b> onaylarsa zincire gider.</div>
+    <label for="belgeDosya">Belge dosyası (PDF, resim, Word — tarayıcıdan çıkmaz)</label>
+    <input type="file" id="belgeDosya" style="font-size:13px">
+    <div id="belgeDosyaBilgi" class="kucuk"></div>
+    <label for="belgeMetin">veya belge metni</label>
+    <textarea id="belgeMetin" placeholder="Örn: Diploma No 2026-12345 - Ad Soyad - Bilgisayar Mühendisliği - 2026"></textarea>
+    <button class="btn btn-ana" id="hazirlaBtn">Kayıt Talebi Hazırla</button>
+    <div class="iz" id="talepIz"></div>
+    <div id="talepAksiyon" style="display:none">
+      <button class="btn btn-ikincil" id="talepIndirBtn">Talebi indir (JSON)</button>
+      <button class="btn btn-ikincil" id="onayAcBtn">Kurum anahtarımla onayla…</button>
+      <div class="kucuk">Çevrimdışı imza: indirdiğiniz talebi kendi bilgisayarınızda <code>belge-imzala &lt;anahtar_dosyası&gt; &lt;talep.json&gt;</code> ile imzalayıp çıkan hex'i zincire gönderebilirsiniz.</div>
+    </div>
     <div class="onay-kutu" id="onayKutu">
-      <div class="baslik">Onayiniz bekleniyor - ne olacagini inceleyin</div>
-      <div class="satir"><b>Islem:</b> Belgenin parmak izi zincire kalici olarak kaydedilecek.</div>
-      <div class="satir"><b>Gizlilik:</b> Belge metni gonderilmez; yalnizca asagidaki ozet gonderilir.</div>
-      <div class="satir"><b>Geri alma:</b> Onaylamadan iptal edebilirsiniz. Onay sonrasi kayit kalicidir.</div>
-      <label style="margin-top:12px">Zincire gidecek ozet (hash):</label>
-      <div class="ozet" id="ozetGoster">-</div>
+      <div class="baslik">Kurum personeli onayı</div>
+      <div class="satir"><b>Anahtar:</b> Kendi anahtar dosyanızı seçin ([1][32 bayt seed], 33 bayt). Anahtar tarayıcınızdan çıkmaz, imzadan sonra bellekten silinir.</div>
+      <input type="file" id="anahtarDosya" style="margin-top:6px;font-size:13px">
+      <div class="iz" id="imzalayanIz"></div>
+      <div class="satir"><b>İşlem:</b> Yukarıdaki özet, sizin adresinizle zincire kalıcı olarak kaydedilecek. Onaydan önce iptal edebilirsiniz.</div>
       <div class="onay-btns">
-        <button class="btn btn-onay" id="onaylaBtn">Islemi Onayla</button>
-        <button class="btn btn-iptal" id="iptalBtn">Iptal Et</button>
+        <button class="btn btn-onay" id="onaylaBtn" disabled>İmzala ve Zincire Gönder</button>
+        <button class="btn btn-iptal" id="iptalBtn">İptal Et</button>
       </div>
     </div>
     <div class="sonuc" id="kayitSonuc"></div>
   </div>
+
   <div class="kart">
-    <h2>2) Belge Dogrula <span style="font-weight:400;font-size:13px;color:var(--gri)">(herkes)</span></h2>
-    <div class="aciklama">Bir belgenin daha once zincire kaydedilip kaydedilmedigini kontrol eder. Belge bir harf bile degismisse parmak izi tutmaz ve dogrulama basarisiz olur (sahtecilik tespiti).</div>
-    <label for="dogrulaMetin">Dogrulanacak belge icerigi</label>
-    <textarea id="dogrulaMetin" placeholder="Dogrulamak istediginiz belgeyi buraya yapistirin"></textarea>
-    <div style="margin-top:10px;font-size:13px;color:var(--gri)">veya dogrulanacak dosyayi secin:</div>
-    <input type="file" id="dogrulaDosya" style="margin-top:6px;font-size:13px">
-    <div id="dogrulaDosyaBilgi" style="font-size:12.5px;color:var(--gri);margin-top:5px"></div>
-    <button class="btn btn-ana" id="dogrulaBtn">Zincirde Dogrula</button>
+    <h2>2) Belge Doğrula <span style="font-weight:400;font-size:13px;color:var(--gri)">(herkes)</span></h2>
+    <div class="aciklama">Bir belgenin zincire kaydedilip kaydedilmediğini kontrol eder. Belge bir harf bile değişmişse özet tutmaz ve doğrulama başarısız olur.</div>
+    <label for="dogrulaDosya">Doğrulanacak dosya</label>
+    <input type="file" id="dogrulaDosya" style="font-size:13px">
+    <div id="dogrulaDosyaBilgi" class="kucuk"></div>
+    <label for="dogrulaMetin">veya belge metni / 64 haneli özet</label>
+    <textarea id="dogrulaMetin" placeholder="Doğrulamak istediğiniz metni ya da 64 haneli özeti yapıştırın"></textarea>
+    <button class="btn btn-ana" id="dogrulaBtn">Zincirde Doğrula</button>
     <div class="sonuc" id="dogrulaSonuc"></div>
+    <div class="iz" id="dogrulaIz"></div>
+  </div>
+
+  <div class="kart" id="ciktiKart" style="display:none">
+    <h2>3) Yazdırılabilir Çıktı</h2>
+    <div class="aciklama">Zincirde kayıtlı bu belge için doğrulama QR'lı çıktı. Her şey tarayıcınızda üretilir; sunucu hiçbir yazıcıya erişmez. <b>Yazdır</b> tarayıcınızın kendi yazdırma penceresini açar.</div>
+    <div class="iz" id="ciktiIz" style="display:block"></div>
+    <div class="sablonlar">
+      <div class="sablon">
+        <h3>Belge kapağı / sertifika (A4)</h3>
+        <div class="kucuk">Tam özet, kayıt zamanı, kaydeden, büyük QR.</div>
+        <div class="onizle" id="onizle_kapak">önizleme hazırlanıyor…</div>
+        <button class="btn btn-ana" data-sablon="kapak" data-is="yazdir">Yazdır</button>
+        <button class="btn btn-ikincil" data-sablon="kapak" data-is="pdf">PDF indir</button>
+      </div>
+      <div class="sablon">
+        <h3>Parça etiketi (70×40 mm)</h3>
+        <div class="kucuk">QR + DataMatrix (doğrulama) ve Code128 kısa referans (eşleştirme).</div>
+        <div class="onizle" id="onizle_etiket">önizleme hazırlanıyor…</div>
+        <button class="btn btn-ana" data-sablon="etiket" data-is="yazdir">Yazdır</button>
+        <button class="btn btn-ikincil" data-sablon="etiket" data-is="pdf">PDF indir</button>
+      </div>
+    </div>
+    <div class="kucuk">Code128 kısa referans (özetin ilk 16 hanesi) yalnızca eşleştirme içindir; doğrulama QR/DataMatrix'teki tam özetle yapılır.</div>
+    <div class="sonuc" id="ciktiSonuc"></div>
   </div>
 </main>
+<div id="baskiAlani"></div>
 <footer class="wrap">
-  AIDAG-Chain - Belge Dogrulama - Mainnet (Chain ID 3474) - bagimsiz guvenlik denetimi bekliyor.<br>
-  Belge icerikleri tarayicinizdan cikmaz; zincire yalnizca geri dondurulemez ozet (hash) yazilir.
+  AIDAG-Chain · Belge Doğrulama · Mainnet (Chain ID 3474) · bağımsız güvenlik denetimi bekliyor.<br>
+  Belge içerikleri tarayıcınızdan çıkmaz; zincire yalnızca geri döndürülemez özet (hash) yazılır. Kurum kaydı zincirde beyana dayanır.
 </footer>
 <script src="/lib/blake3.js"></script>
 <script src="/lib/nacl.min.js"></script>
-<script src="/lib/qrcode.min.js"></script>
+<script src="/lib/belge-kayit.js?v=1"></script>
+<script src="/lib/belge-cikti.js?v=1"></script>
 <script>
-const RPC=location.origin+"/rpc", NETWORK_ID=3474;
-const DOMAIN_TAG=new TextEncoder().encode("AIDAG-vertex-v1\u0000");
-const FORMAT_VERSION=1,WIRE_VERSION=1,TX_RECORD=1;
-let SEED=null,PK=null,SK64=null,ADDR=null,bekleyenHash=null;
-const hex=b=>[...b].map(x=>x.toString(16).padStart(2,"0")).join("");
-const unhex=s=>{s=s.replace(/^0x/,"").trim();const a=new Uint8Array(s.length/2);for(let i=0;i<a.length;i++)a[i]=parseInt(s.substr(i*2,2),16);return a;};
-function leU32(n){const b=new Uint8Array(4);new DataView(b.buffer).setUint32(0,n,true);return b;}
-function leU64(n){const b=new Uint8Array(8);new DataView(b.buffer).setBigUint64(0,BigInt(n),true);return b;}
-function cat(...a){let n=0;for(const x of a)n+=x.length;const o=new Uint8Array(n);let i=0;for(const x of a){o.set(x,i);i+=x.length;}return o;}
-const enc=s=>new TextEncoder().encode(s);
-function hashId(parents,ts,payload){
-  const parts=[DOMAIN_TAG,new Uint8Array([FORMAT_VERSION]),leU32(NETWORK_ID),PK,leU64(parents.length)];
-  for(const p of parents)parts.push(p);
-  parts.push(leU64(ts),leU64(payload.length),payload);
-  return blake3hash(cat(...parts));
+const RPC = location.origin + "/rpc", KUBRA = location.origin + "/kubra-brain", NETWORK_ID = 3474;
+const BK = window.BelgeKayit, BC = window.BelgeCikti;
+const $ = id => document.getElementById(id);
+const enc = s => new TextEncoder().encode(s);
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+async function rpcGet(p){ const r = await fetch(RPC + p); return r.json(); }
+async function rpcSubmit(bytes){ const r = await fetch(RPC + "/submit", { method:"POST", body: BK.hex(bytes) }); return r.json(); }
+function utcYerel(sn){ return new Date(Number(sn)*1000).toLocaleString("tr-TR") + " (" + BC.utc(sn) + ")"; }
+function izYaz(el, baslik, satirlar){
+  el.innerHTML = '<div class="bas">Kanıt izi · ' + esc(baslik) + '</div>' +
+    satirlar.map(([k,v]) => '<div class="s"><b>' + esc(k) + '</b> ' + v + '</div>').join("");
+  el.style.display = "block";
 }
-function vertexOlustur(parents,payload,ts){
-  parents=parents.slice().sort((a,b)=>hex(a)<hex(b)?-1:1);
-  const vid=hashId(parents,ts,payload);
-  const sig=nacl.sign.detached(vid,SK64);
-  const parts=[new Uint8Array([WIRE_VERSION]),leU32(NETWORK_ID),leU64(parents.length)];
-  for(const p of parents)parts.push(p);
-  parts.push(leU64(ts),leU64(payload.length),PK,sig,payload);
-  return cat(...parts);
-}
-function recordPayload(hash32){return cat(new Uint8Array([TX_RECORD]),hash32);}
-async function rpcGet(p){const r=await fetch(RPC+p);return r.json();}
-async function rpcPost(p,b){const r=await fetch(RPC+p,{method:"POST",body:hex(b)});return r.json();}
 async function ping(){
-  try{const s=await rpcGet("/status");
-    document.getElementById("netdot").classList.add("ok");
-    document.getElementById("netstat").textContent="zincire bagli - "+s.vertex_count+" blok";
-  }catch(e){document.getElementById("netstat").textContent="aga baglanilamadi";}
+  try { const s = await rpcGet("/status"); $("netdot").classList.add("ok"); $("netstat").textContent = "zincire bağlı - " + s.vertex_count + " blok"; }
+  catch(e){ $("netstat").textContent = "ağa bağlanılamadı"; }
 }
-function demoWallet(){
-  let seed;const saved=(()=>{try{return localStorage.getItem("aidag_demo_seed")}catch(e){return null}})();
-  if(saved){seed=unhex(saved);}else{seed=nacl.randomBytes(32);try{localStorage.setItem("aidag_demo_seed",hex(seed))}catch(e){}}
-  SEED=seed;const kp=nacl.sign.keyPair.fromSeed(SEED);PK=kp.publicKey;SK64=kp.secretKey;ADDR=blake3hash(PK).slice(0,20);
+function dosyaOku(file){
+  return new Promise((ok, red) => { const r = new FileReader(); r.onload = () => ok(new Uint8Array(r.result)); r.onerror = () => red(new Error("dosya okunamadı")); r.readAsArrayBuffer(file); });
 }
-document.getElementById("hazirlaBtn").onclick=()=>{
-  const metin=document.getElementById("belgeMetin").value.trim();
-  const sonuc=document.getElementById("kayitSonuc");sonuc.className="sonuc";
-  // Once dosya (secildiyse), yoksa metin.
-  if(kayitDosyaHash){
-    bekleyenHash=kayitDosyaHash;
-  }else if(metin){
-    bekleyenHash=blake3hash(enc(metin));
-  }else{
-    sonuc.className="sonuc yok";sonuc.innerHTML="<b>Belge bos</b>Lutfen bir dosya secin ya da icerik girin.";return;
+
+// ── 1) KAYIT TALEBİ ──
+let kayitHash = null, kayitBayt = null, aktifTalep = null, imzalayici = null;
+// Eski sayfa 1 KB'tan buyuk girdilerde STANDART DISI ozet uretiyordu (blake3hashEski).
+// Yeni kayitlar standart ozetle yapilir; eski ozet yalniz bilgi/dogrulama icin denenir.
+function eskiOzet(b){ if (!b) return null; const e = BK.ozetAdaylari(b, blake3hash, window.blake3hashEski).find(x => x.yontem === "eski"); return e ? e.hash : null; }
+$("belgeDosya").onchange = async e => {
+  const f = e.target.files[0]; const b = $("belgeDosyaBilgi"); kayitHash = null; kayitBayt = null;
+  if (!f) { b.textContent = ""; return; }
+  b.textContent = "özet hesaplanıyor…";
+  try { kayitBayt = await dosyaOku(f); kayitHash = BK.hex(blake3hash(kayitBayt)); $("belgeMetin").value = "";
+    b.innerHTML = "seçildi: <b>" + esc(f.name) + "</b> (" + (f.size/1024).toFixed(1) + " KB) — özet hazır, dosya gönderilmedi"; }
+  catch(err){ b.textContent = "dosya okunamadı: " + err; }
+};
+async function talepAl(hash, pubkeyHex){
+  const r = await fetch(KUBRA + "/v1/belge/hazirla", { method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify(pubkeyHex ? { hash, imzalayan_pubkey: pubkeyHex } : { hash }) });
+  const j = await r.json();
+  if (!j.ok) throw new Error(j.hata || ("HTTP " + r.status));
+  return j.talep;
+}
+function talepIzi(t){
+  const z = t.zincir.kayitli ? ("kayıtlı · " + utcYerel(t.zincir.zaman) + " · kaydeden <code>" + esc(t.zincir.kaydeden) + "</code>") : "kayıtlı değil";
+  const s = [["araç", "<code>" + esc(t.arac) + "</code> (KUBRA — imzalamaz, göndermez)"], ["özet (hash)", "<code>" + esc(t.belge_hash) + "</code>"],
+    ["zincir durumu", z], ["talep durumu", "<code>" + esc(t.durum) + "</code>"]];
+  if (t.imzalayan) {
+    const k = t.imzalayan.kurum;
+    s.push(["imzalayan", "<code>" + esc(t.imzalayan.adres) + "</code>"]);
+    s.push(["kurum", k.kayitli ? esc(k.ad || "?") + (k.dogrulanmis === true ? " — doğrulanmış kurum" : " — beyan (doğrulanmamış)") : "bu adres zincirde kurum olarak kayıtlı değil"]);
   }
-  document.getElementById("ozetGoster").textContent=hex(bekleyenHash);
-  document.getElementById("onayKutu").style.display="block";
+  s.push(["not", esc(t.sonraki_adim)]);
+  return s;
+}
+$("hazirlaBtn").onclick = async () => {
+  const sonuc = $("kayitSonuc"); sonuc.className = "sonuc"; $("onayKutu").style.display = "none"; $("talepAksiyon").style.display = "none";
+  const metin = $("belgeMetin").value.trim();
+  const bayt = kayitHash ? kayitBayt : (metin ? enc(metin) : null);
+  const hash = kayitHash || (metin ? BK.hex(blake3hash(bayt)) : null);
+  if (!hash) { sonuc.className = "sonuc yok"; sonuc.innerHTML = "<b>Belge boş</b>Bir dosya seçin ya da metin girin."; return; }
+  $("hazirlaBtn").disabled = true;
+  try {
+    aktifTalep = await talepAl(hash);
+    const iz = talepIzi(aktifTalep), eski = eskiOzet(bayt);
+    if (eski) { try { const e = await rpcGet("/belge/" + eski); if (e.kayitli) iz.push(["eski kayıt", "Bu belge eski (standart dışı) özetle de kayıtlı: <code>" + eski + "</code> · " + utcYerel(e.zaman) + ". Yeni kayıt standart özetle yapılır."]); } catch(_) {} }
+    izYaz($("talepIz"), "kayıt talebi", iz);
+    if (aktifTalep.durum === "zaten-kayitli") { ciktiGoster(hash, aktifTalep.zincir); }
+    else { $("talepAksiyon").style.display = "block"; }
+  } catch(e) { sonuc.className = "sonuc yok"; sonuc.innerHTML = "<b>Talep hazırlanamadı</b>" + esc(e.message || e); }
+  finally { $("hazirlaBtn").disabled = false; }
 };
-document.getElementById("iptalBtn").onclick=()=>{
-  bekleyenHash=null;document.getElementById("onayKutu").style.display="none";
-  const sonuc=document.getElementById("kayitSonuc");sonuc.className="sonuc bilgi";
-  sonuc.innerHTML="<b>Islem iptal edildi</b>Zincire hicbir sey yazilmadi.";
+$("talepIndirBtn").onclick = () => {
+  if (!aktifTalep) return;
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(aktifTalep, null, 2)], { type:"application/json" }));
+  a.download = "aidag-kayit-talebi-" + aktifTalep.belge_hash.slice(0,16) + ".json";
+  document.body.appendChild(a); a.click(); a.remove();
 };
-document.getElementById("onaylaBtn").onclick=async()=>{
-  if(!bekleyenHash)return;const sonuc=document.getElementById("kayitSonuc");
-  document.getElementById("onaylaBtn").disabled=true;
-  try{
-    const tipsR=await rpcGet("/tips");const tips=(tipsR.tips||[]).map(unhex);
-    const ts=Math.floor(Date.now()/1000);
-    const wire=vertexOlustur(tips,recordPayload(bekleyenHash),ts);
-    const cevap=await rpcPost("/submit",wire);
-    document.getElementById("onayKutu").style.display="none";
-    if(cevap && cevap.sonuc && String(cevap.sonuc).indexOf("Integrated")>=0){
-      sonuc.className="sonuc ok";
-      sonuc.innerHTML="<b>Belge zincire kaydedildi</b>Parmak izi kalici olarak yazildi. Artik dogrulanabilir.<div class='detay'>ozet: "+hex(bekleyenHash)+"</div>";
-      qrGoster(hex(bekleyenHash),"kayitSonuc");
+$("onayAcBtn").onclick = () => { $("onayKutu").style.display = "block"; $("onaylaBtn").disabled = true; $("imzalayanIz").style.display = "none"; $("anahtarDosya").value = ""; };
+function imzalayiciSil(){ if (imzalayici && imzalayici.sil) imzalayici.sil(); imzalayici = null; $("anahtarDosya").value = ""; }
+$("anahtarDosya").onchange = async e => {
+  imzalayiciSil(); $("onaylaBtn").disabled = true;
+  const f = e.target.files[0]; if (!f || !aktifTalep) return;
+  try {
+    const bytes = await dosyaOku(f);
+    imzalayici = BK.anahtarDosyasiImzalayici(bytes, nacl); bytes.fill(0);
+    // Talep bu imzalayıcı için yeniden hazırlanır: kurum kaydı zincirden kontrol edilir.
+    aktifTalep = await talepAl(aktifTalep.belge_hash, BK.hex(imzalayici.pubkey));
+    izYaz($("imzalayanIz"), "imzalayan", talepIzi(aktifTalep));
+    izYaz($("talepIz"), "kayıt talebi", talepIzi(aktifTalep));
+    $("onaylaBtn").disabled = aktifTalep.durum !== "imza-bekliyor";
+  } catch(err) { imzalayiciSil(); izYaz($("imzalayanIz"), "imzalayan", [["hata", esc(err.message || err)]]); }
+};
+$("iptalBtn").onclick = () => {
+  imzalayiciSil(); $("onayKutu").style.display = "none";
+  const s = $("kayitSonuc"); s.className = "sonuc bilgi"; s.innerHTML = "<b>İşlem iptal edildi</b>Zincire hiçbir şey yazılmadı.";
+};
+$("onaylaBtn").onclick = async () => {
+  if (!imzalayici || !aktifTalep) return;
+  const sonuc = $("kayitSonuc"); $("onaylaBtn").disabled = true;
+  try {
+    const ts = Math.floor(Date.now()/1000); // kayıt zamanı = onay anı
+    const { wire, id } = BK.imzaliVertex(aktifTalep, imzalayici, ts, { blake3hash }, aktifTalep.belge_hash, NETWORK_ID);
+    const adres = BK.adres(imzalayici.pubkey, blake3hash);
+    imzalayiciSil();
+    const cevap = await rpcSubmit(wire);
+    const b = await rpcGet("/belge/" + aktifTalep.belge_hash);
+    $("onayKutu").style.display = "none";
+    if (b.kayitli && ("0x" + String(b.kaydeden).replace(/^0x/,"")) === adres) {
+      sonuc.className = "sonuc ok";
+      sonuc.innerHTML = "<b>Belge zincire kaydedildi</b>Kaydeden: sizin adresiniz. Doğrulama adresi: <a href='/belge/" + aktifTalep.belge_hash + "'>/belge/" + aktifTalep.belge_hash.slice(0,16) + "…</a><div class='detay'>vertex: " + id + "</div>";
+      ciktiGoster(aktifTalep.belge_hash, { kayitli:true, kaydeden: adres, zaman: b.zaman });
     } else {
-      sonuc.className="sonuc yok";
-      sonuc.innerHTML="<b>Kayit basarisiz</b>Vertex zincire entegre edilemedi.<div class='detay'>"+JSON.stringify(cevap)+"</div>";
+      sonuc.className = "sonuc yok";
+      sonuc.innerHTML = "<b>Kayıt doğrulanamadı</b>Zincir yanıtı:<div class='detay'>" + esc(JSON.stringify(cevap)) + "</div>";
     }
-    bekleyenHash=null;
-  }catch(e){sonuc.className="sonuc yok";sonuc.innerHTML="<b>Kayit basarisiz</b>"+String(e);}
-  finally{document.getElementById("onaylaBtn").disabled=false;}
+  } catch(e) { imzalayiciSil(); sonuc.className = "sonuc yok"; sonuc.innerHTML = "<b>Kayıt başarısız</b>" + esc(e.message || e); }
   ping();
 };
-document.getElementById("dogrulaBtn").onclick=async()=>{
-  const metin=document.getElementById("dogrulaMetin").value.trim();
-  const sonuc=document.getElementById("dogrulaSonuc");sonuc.className="sonuc";
-  if(!metin){sonuc.className="sonuc yok";sonuc.innerHTML="<b>Belge bos</b>Dogrulanacak icerigi girin.";return;}
-  const h=hex(blake3hash(enc(metin)));
-  try{
-    const r=await rpcGet("/belge/"+h);
-    if(r.kayitli){
-      const tarih=new Date(Number(r.zaman)*1000).toLocaleString("tr-TR");
-      sonuc.className="sonuc ok";
-      sonuc.innerHTML="<b>Belge dogrulandi - zincirde kayitli</b>Bu belge daha once kaydedilmis ve degistirilmemis.<div class='detay'>kayit zamani: "+tarih+"<br>ozet: "+h+"</div>";
-      qrGoster(h,"dogrulaSonuc");
-    }else{
-      sonuc.className="sonuc yok";
-      sonuc.innerHTML="<b>Belge bulunamadi</b>Bu icerik zincirde kayitli degil - ya hic kaydedilmedi ya da icerik degistirildi.";
+
+// ── 2) DOĞRULA ──
+async function dogrula(h, kaynak, bayt){
+  const sonuc = $("dogrulaSonuc"); sonuc.className = "sonuc bilgi"; sonuc.innerHTML = "<b>" + esc(kaynak) + "</b>Zincirde sorgulanıyor…";
+  try {
+    let r = await rpcGet("/belge/" + h), eskiNot = null;
+    const eski = r.kayitli ? null : eskiOzet(bayt);
+    if (eski) { const re = await rpcGet("/belge/" + eski); if (re.kayitli) { r = re; eskiNot = h; h = eski; } }
+    if (r.kayitli) {
+      const z = { kayitli:true, kaydeden: "0x" + String(r.kaydeden).replace(/^0x/,""), zaman: r.zaman };
+      sonuc.className = "sonuc ok";
+      sonuc.innerHTML = "<b>Belge doğrulandı — zincirde kayıtlı</b>Bu özete sahip belge kaydedilmiş ve değiştirilmemiş.";
+      izYaz($("dogrulaIz"), "doğrulama", [["araç", "<code>zincir /belge sorgusu</code>"], ["özet (hash)", "<code>" + h + "</code>"],
+        ["zincir durumu", "kayıtlı · " + utcYerel(r.zaman)], ["kaydeden", "<code>" + esc(z.kaydeden) + "</code>"]]
+        .concat(eskiNot ? [["özet yöntemi", "eski (standart dışı) özetle kayıtlı; standart özet <code>" + eskiNot + "</code> zincirde yok. Kayıt geçerli; KUBRA/harici araçlar standart özeti kullanır."]] : []));
+      ciktiGoster(h, z);
+    } else {
+      sonuc.className = "sonuc yok";
+      sonuc.innerHTML = "<b>Belge bulunamadı</b>Bu özet zincirde kayıtlı değil — hiç kaydedilmemiş ya da belge değiştirilmiş.<div class='detay'>özet: " + h + "</div>";
+      $("dogrulaIz").style.display = "none"; $("ciktiKart").style.display = "none";
     }
-  }catch(e){sonuc.className="sonuc yok";sonuc.innerHTML="<b>Sorgu basarisiz</b>"+String(e);}
-};
-// ── DOSYA YUKLEME: secilen dosyanin byte'larini blake3'le (zincir de boyle yapar) ──
-function dosyaOku(file){
-  return new Promise((resolve,reject)=>{
-    const r=new FileReader();
-    r.onload=()=>resolve(new Uint8Array(r.result));
-    r.onerror=()=>reject(new Error("dosya okunamadi"));
-    r.readAsArrayBuffer(file);
-  });
+  } catch(e) { sonuc.className = "sonuc yok"; sonuc.innerHTML = "<b>Sorgu başarısız</b>" + esc(e.message || e); }
 }
-// KAYDET tarafi: dosya secilince hash'i hesapla, onay kutusunu hazirla.
-let kayitDosyaHash=null;
-document.getElementById("belgeDosya").onchange=async(e)=>{
-  const f=e.target.files[0]; const bilgi=document.getElementById("belgeDosyaBilgi");
-  if(!f){kayitDosyaHash=null;bilgi.textContent="";return;}
-  bilgi.textContent="hash hesaplaniyor...";
-  try{
-    const bytes=await dosyaOku(f);
-    kayitDosyaHash=blake3hash(bytes);
-    bilgi.innerHTML="secildi: <b>"+f.name+"</b> ("+(f.size/1024).toFixed(1)+" KB) — ozet hazir";
-    // dosya secilince metin kutusunu pasiflestir (karisiklik olmasin)
-    document.getElementById("belgeMetin").value="";
-  }catch(err){bilgi.textContent="dosya okunamadi: "+err;kayitDosyaHash=null;}
+$("dogrulaDosya").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  $("dogrulaDosyaBilgi").textContent = "özet hesaplanıyor…";
+  try { const b = await dosyaOku(f); const h = BK.hex(blake3hash(b)); $("dogrulaDosyaBilgi").innerHTML = "seçildi: <b>" + esc(f.name) + "</b>"; dogrula(h, "Dosya doğrulama", b); }
+  catch(err){ $("dogrulaDosyaBilgi").textContent = "hata: " + err; }
 };
-// DOGRULA tarafi: dosya secilince hash'i hesapla, direkt dogrula.
-document.getElementById("dogrulaDosya").onchange=async(e)=>{
-  const f=e.target.files[0]; const bilgi=document.getElementById("dogrulaDosyaBilgi");
-  const sonuc=document.getElementById("dogrulaSonuc");
-  if(!f){bilgi.textContent="";return;}
-  bilgi.textContent="hash hesaplaniyor...";
-  try{
-    const bytes=await dosyaOku(f);
-    const h=hex(blake3hash(bytes));
-    bilgi.innerHTML="secildi: <b>"+f.name+"</b> — dogrulaniyor...";
-    const r=await rpcGet("/belge/"+h);
-    sonuc.className="sonuc";
-    if(r.kayitli){
-      const tarih=new Date(Number(r.zaman)*1000).toLocaleString("tr-TR");
-      sonuc.className="sonuc ok";
-      sonuc.innerHTML="<b>Belge dogrulandi - zincirde kayitli</b>Bu dosya daha once kaydedilmis ve bir bayt bile degismemis.<div class='detay'>kayit zamani: "+tarih+"<br>ozet: "+h+"</div>";
-      qrGoster(h,"dogrulaSonuc");
-    }else{
-      sonuc.className="sonuc yok";
-      sonuc.innerHTML="<b>Belge bulunamadi</b>Bu dosya zincirde kayitli degil - ya hic kaydedilmedi ya da icerik degistirildi.<div class='detay'>ozet: "+h+"</div>";
-    }
-    bilgi.innerHTML="secildi: <b>"+f.name+"</b>";
-  }catch(err){bilgi.textContent="hata: "+err;}
+$("dogrulaBtn").onclick = () => {
+  const m = $("dogrulaMetin").value.trim();
+  if (!m) { const s = $("dogrulaSonuc"); s.className = "sonuc yok"; s.innerHTML = "<b>Belge boş</b>Doğrulanacak içeriği girin."; return; }
+  if (/^(0x)?[0-9a-fA-F]{64}$/.test(m)) { dogrula(m.replace(/^0x/,"").toLowerCase(), "Özet doğrulama"); return; }
+  const b = enc(m); dogrula(BK.hex(blake3hash(b)), "Metin doğrulama", b);
 };
 
-// ── QR: dogrulanan belgenin dogrulama-linkini QR'a cevir ──
-function qrGoster(hash, hedefEl){
-  const link="https://aidag-chain.com/belge?hash="+hash;
-  let kutu=document.getElementById("qrKutu_"+hedefEl);
-  if(kutu){ kutu.remove(); }
-  kutu=document.createElement("div");
-  kutu.id="qrKutu_"+hedefEl;
-  kutu.style.cssText="margin-top:14px;text-align:center";
-  const qrDiv=document.createElement("div");
-  qrDiv.style.cssText="display:inline-block;padding:10px;background:#fff;border-radius:8px";
-  kutu.appendChild(qrDiv);
-  const etiket=document.createElement("div");
-  etiket.style.cssText="font-size:12px;color:#5d6b7a;margin-top:8px;font-weight:600";
-  etiket.innerHTML="AIDAG-Chain · Belge Dogrulama<br><span style='font-weight:400'>Bu QR'i belgeye ekleyin — okutan kisi gercekligini gorur</span>";
-  kutu.appendChild(etiket);
-  document.getElementById(hedefEl).appendChild(kutu);
-  try{
-    new QRCode(qrDiv, { text: link, width: 200, height: 200,
-      colorDark: "#0f2747", colorLight: "#ffffff",
-      correctLevel: QRCode.CorrectLevel.H });
-  }catch(e){ kutu.style.display="none"; }
+// ── 3) ÇIKTI (yalnız zincirde kayıtlı özet için) ──
+let ciktiVeri = null, kutuphane = null;
+function betikYukle(src){ return new Promise((ok, red) => { const s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = () => red(new Error(src + " yüklenemedi")); document.head.appendChild(s); }); }
+async function b64(url){ const b = new Uint8Array(await (await fetch(url)).arrayBuffer()); let s = ""; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(s); }
+async function kutuphaneler(){
+  if (kutuphane) return kutuphane;
+  await Promise.all([betikYukle("/lib/bwip-js-4.11.4.min.js"), betikYukle("/lib/jspdf-4.2.1.umd.min.js")]);
+  const [normal, kalin] = await Promise.all([b64("/lib/fonts/DejaVuSans-tr.ttf"), b64("/lib/fonts/DejaVuSans-Bold-tr.ttf")]);
+  kutuphane = { bwip: window.bwipjs, jsPDF: window.jspdf.jsPDF, fontlar: { normal, kalin } };
+  return kutuphane;
 }
-
-// ── OTOMATIK DOGRULAMA: sayfa ?hash=... ile acilirsa (QR okutuldu) hemen dogrula ──
-async function otoDogrula(){
-  const params=new URLSearchParams(location.search);
-  const h=(params.get("hash")||"").trim().toLowerCase();
-  if(!/^[0-9a-f]{64}$/.test(h)) return;
-  const sonuc=document.getElementById("dogrulaSonuc");
-  sonuc.className="sonuc bilgi";sonuc.innerHTML="<b>QR ile dogrulama</b>Zincirde sorgulaniyor...";
-  try{
-    const r=await rpcGet("/belge/"+h);
-    if(r.kayitli){
-      const tarih=new Date(Number(r.zaman)*1000).toLocaleString("tr-TR");
-      sonuc.className="sonuc ok";
-      sonuc.innerHTML="<b>Belge dogrulandi - zincirde kayitli</b>Bu belge gercek ve degistirilmemis.<div class='detay'>kayit zamani: "+tarih+"<br>ozet: "+h+"</div>";
-    }else{
-      sonuc.className="sonuc yok";
-      sonuc.innerHTML="<b>Belge bulunamadi</b>Bu ozet zincirde kayitli degil - sahte ya da degistirilmis olabilir.<div class='detay'>ozet: "+h+"</div>";
+async function ciktiGoster(hash, zincir){
+  $("ciktiKart").style.display = "block";
+  let kurum = null;
+  try { if (zincir.kaydeden) kurum = await rpcGet("/kurum/" + zincir.kaydeden.replace(/^0x/,"")); } catch(e) {}
+  ciktiVeri = { hash, zincir, kurum: kurum && kurum.kayitli ? { kayitli:true, ad:kurum.ad, kategori:kurum.kategori, dogrulanmis: kurum.dogrulanmis } : null,
+    olusturma: Math.floor(Date.now()/1000) };
+  izYaz($("ciktiIz"), "çıktı", [["araç", "<code>belge-cikti</code> (tarayıcıda)"], ["özet (hash)", "<code>" + hash + "</code>"],
+    ["zincir durumu", "kayıtlı · " + utcYerel(zincir.zaman)], ["kaydeden", "<code>" + esc(zincir.kaydeden) + "</code>"],
+    ["kurum", ciktiVeri.kurum ? esc(ciktiVeri.kurum.ad) + (ciktiVeri.kurum.dogrulanmis === true ? " — doğrulanmış kurum" : " — beyan (doğrulanmamış)") : "kurum kaydı yok"],
+    ["doğrulama adresi", "<code>" + BC.dogrulamaUrl(hash) + "</code>"], ["kısa referans", "<code>" + BC.kisaRefGoster(hash) + "</code>"]]);
+  try {
+    const k = await kutuphaneler();
+    for (const t of ["kapak","etiket"]) $("onizle_" + t).innerHTML = BC.svg(BC.sema(t, ciktiVeri, k.bwip));
+  } catch(e) { for (const t of ["kapak","etiket"]) $("onizle_" + t).textContent = "önizleme üretilemedi: " + (e.message || e); }
+}
+document.querySelectorAll("[data-sablon]").forEach(b => b.onclick = async () => {
+  const s = $("ciktiSonuc"); s.className = "sonuc";
+  try {
+    if (!ciktiVeri) throw new Error("önce zincirde kayıtlı bir belgeyi doğrulayın");
+    const k = await kutuphaneler(), sema = BC.sema(b.dataset.sablon, ciktiVeri, k.bwip);
+    if (b.dataset.is === "pdf") {
+      BC.pdf(sema, k.jsPDF, k.fontlar).save(BC.dosyaAdi(sema, ciktiVeri.hash));
+    } else {
+      // Tarayıcının kendi yazdırma penceresi; sayfa boyutu şablona göre.
+      $("sayfaBoyutu").textContent = "@page{size:" + sema.w + "mm " + sema.h + "mm;margin:0}";
+      $("baskiAlani").innerHTML = BC.svg(sema);
+      const temizle = () => { $("baskiAlani").innerHTML = ""; $("sayfaBoyutu").textContent = ""; window.removeEventListener("afterprint", temizle); };
+      window.addEventListener("afterprint", temizle);
+      window.print();
     }
-  }catch(e){sonuc.className="sonuc yok";sonuc.innerHTML="<b>Sorgu basarisiz</b>"+String(e);}
-  document.getElementById("dogrulaSonuc").scrollIntoView({behavior:"smooth",block:"center"});
-}
+  } catch(e) { s.className = "sonuc yok"; s.innerHTML = "<b>Çıktı üretilemedi</b>" + esc(e.message || e); }
+});
 
-demoWallet();ping();setInterval(ping,15000);
-otoDogrula();
+// ── Adresten gelen özet: /belge/<hash> (QR) veya eski ?hash=... ──
+(function(){
+  const m = location.pathname.match(/^\/belge\/([0-9a-fA-F]{64})\/?$/);
+  const q = (new URLSearchParams(location.search).get("hash") || "").trim();
+  const h = (m ? m[1] : (/^[0-9a-fA-F]{64}$/.test(q) ? q : "")).toLowerCase();
+  if (h) { dogrula(h, "QR / bağlantı ile doğrulama"); setTimeout(() => $("dogrulaSonuc").scrollIntoView({ behavior:"smooth", block:"center" }), 300); }
+})();
+ping(); setInterval(ping, 15000);
 </script>
 </body>
 </html>

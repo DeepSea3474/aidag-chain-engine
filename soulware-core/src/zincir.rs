@@ -125,7 +125,7 @@ fn aciklama_sorusu_mu(sorgu: &str) -> bool {
 }
 
 /// Kullanıcı belge KAYDETMEK/oluşturmak istiyor (doğrulamak değil).
-fn belge_kayit_niyeti_mi(sorgu: &str) -> bool {
+pub fn belge_kayit_niyeti_mi(sorgu: &str) -> bool {
     let s = sade(sorgu);
     let nesne = ["belge", "dosya", "sertifika", "diploma", "evrak", "hash"];
     let fiil = [
@@ -161,7 +161,7 @@ fn hex_parcalari(s: &str) -> Vec<(String, bool)> {
 }
 
 /// Sorgudan tam 64-hex belge hash'i çıkar (0x opsiyonel, metnin herhangi bir yerinde).
-fn belge_hash_bul(s: &str) -> Option<String> {
+pub fn belge_hash_bul(s: &str) -> Option<String> {
     hex_parcalari(s).into_iter().find(|(h, _)| h.len() == 64).map(|(h, _)| h)
 }
 
@@ -189,12 +189,12 @@ fn utc_tarih(unix: u64) -> String {
     format!("{y:04}-{m:02}-{d:02} {:02}:{:02}", sn / 3600, (sn % 3600) / 60)
 }
 
-const BELGE_KAYIT_SURECI: &str = "Belgeni AIDAG-Chain'e kaydetmek için:\n\
-1) https://aidag-chain.com/belge sayfasını aç ve \"1) Belge Kaydet (kurum tarafı)\" bölümünde belgeni (PDF, resim, Word) ya da metnini seç.\n\
-2) \"İşlemi Hazırla\"ya bas: tarayıcın belgenin parmak izini (64 haneli özet/hash) hesaplar. Belgenin kendisi ağa gönderilmez, yalnızca bu özet gönderilir; içerik gizli kalır.\n\
-3) Gösterilen özeti kontrol edip \"İşlemi Onayla\"ya bas: özet zincire kalıcı olarak yazılır. Onaydan önce iptal edebilirsin, onaydan sonra kayıt geri alınamaz.\n\
-4) Kayıttan sonra özeti (hash) sakla. Belgeyi daha sonra aynı sayfanın \"Belge Doğrula\" bölümünde ya da bana 64 haneli hash'i yazarak doğrulayabilirsin.\n\
-Not: Belge sayfası şu an pilot aşamasındadır; gerçek veya hassas belge yüklemeden önce bunu dikkate al.";
+const BELGE_KAYIT_SURECI: &str = "Belge kaydını kurum personeli yapar; ben (KUBRA) kayıt talebini hazırlarım ama İMZALAMAM ve zincire göndermem:\n\
+1) https://aidag-chain.com/belge sayfasında belgeni seç: tarayıcın belgenin özetini (64 haneli hash) hesaplar. Dosya sunucuya gönderilmez.\n\
+2) \"Kayıt Talebi Hazırla\"ya bas: zincir durumu kontrol edilir ve imzasız bir talep oluşur. 64 haneli hash'i bana yazıp \"kaydet\" dersen talebi ben de hazırlarım.\n\
+3) Kurum personeli kendi anahtar dosyasını seçip talebi onaylar (anahtar tarayıcıdan çıkmaz) ya da talep dosyasını indirip çevrimdışı belge-imzala aracıyla imzalar. Kayıt yalnızca bu onayla zincire gider ve geri alınamaz.\n\
+4) Kayıttan sonra https://aidag-chain.com/belge/<hash> sayfasından doğrulayabilir, QR'lı belge kapağı veya parça etiketi yazdırabilirsin.\n\
+Not: Kurum kaydı zincirde beyana dayanır; kurum kimliği henüz bağımsız olarak doğrulanmamıştır.";
 
 const BELGE_DOGRULA_YONLENDIR: &str = "Belgeni doğrulamak için https://aidag-chain.com/belge sayfasındaki \"Belge Doğrula\" bölümünü kullan: dosyanı (PDF, resim, Word) seç, sistem zincirde kayıtlı mı, orijinal mi yoksa değiştirilmiş mi söyler. Belgen tarayıcından çıkmaz; yalnızca matematiksel özeti kontrol edilir. Elinde belgenin 64 haneli hash'i varsa bana doğrudan yazabilirsin, hemen doğrularım.";
 

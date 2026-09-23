@@ -14,6 +14,7 @@
 //!   - güvenli deserialize girişi (`from_parts`)
 
 pub mod avm;
+pub mod belge_talep;
 pub mod consensus;
 pub mod dag;
 pub mod genesis;
