@@ -15,6 +15,10 @@ Kullanim:
 import json
 import re
 import urllib.request
+import os
+# Yonetim ucu (/kb/ingest) Bearer token'i: YALNIZ KUBRA'ya gonderilir (GitHub/OpenAlex'e DEGIL).
+YONETIM = ({"Authorization": "Bearer " + os.environ["SOULWARE_YONETIM_TOKEN"]}
+           if os.environ.get("SOULWARE_YONETIM_TOKEN") else {})
 
 KB_URL = "http://127.0.0.1:8646/kb/ingest"
 
@@ -52,7 +56,7 @@ def bolumle(dosya_adi, metin):
 def ingest(baslik, metin):
     body = json.dumps({"baslik": baslik, "metin": metin}).encode("utf-8")
     req = urllib.request.Request(
-        KB_URL, data=body, headers={"Content-Type": "application/json"}, method="POST"
+        KB_URL, data=body, headers={"Content-Type": "application/json", **YONETIM}, method="POST"
     )
     with urllib.request.urlopen(req, timeout=30) as resp:
         return json.loads(resp.read().decode("utf-8"))

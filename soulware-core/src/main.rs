@@ -22,7 +22,9 @@ mod resmi;       // AIDAG/KUBRA resmi kaynak katmani (grounding onceligi)
 mod kanit;       // zincir kaniti: etkilesim hash'i (tuzlu v1 + eski tuzsuz dogrulama)
 mod belge_arac;  // belge kayit TALEBI hazirlama (KUBRA imzalamaz)
 mod imza_dosyasi; // zincir imza anahtari: FAIL-CLOSED yukleme (sessiz uretim YOK)
+mod yonetim;     // yonetim uclari: Bearer token (sabit-zamanli) + govde/esz. sinirlari
 
+use axum::extract::DefaultBodyLimit;
 use axum::{extract::State, routing::{get, post}, response::{IntoResponse, Sse, sse::Event}, http::{StatusCode, header}, body::Body, Json, Router};
 use ed25519_dalek::SigningKey;
 use lsc_engine::dag::wire;
@@ -65,6 +67,14 @@ struct Config {
     remote_model: String,       // SOULWARE_REMOTE_MODEL (görüntü adı)
     image_url: Option<String>,  // SOULWARE_IMAGE_URL → uzak GPU görsel servisi (POST {prompt} → PNG)
     video_url: Option<String>,  // SOULWARE_VIDEO_URL → uzak GPU video servisi (POST {prompt} → MP4)
+    // ── Güvenlik ──
+    /// SOULWARE_YONETIM_TOKEN: yönetim uçları (/kb/*, /retrieve, /models) için Bearer
+    /// token. Ayarlı değilse (ya da 16 karakterden kısaysa) bu uçlar KAPALI (403).
+    yonetim_token: Option<String>,
+    /// SOULWARE_BEYIN_ESZAMAN: aynı anda en fazla kaç /v1/ask(-stream) (varsayılan 4).
+    beyin_eszaman: usize,
+    /// SOULWARE_MEDYA_ESZAMAN: aynı anda en fazla kaç /v1/image|video (varsayılan 2).
+    medya_eszaman: usize,
 }
 
 impl Config {
@@ -98,6 +108,9 @@ impl Config {
             remote_model: ev("SOULWARE_REMOTE_MODEL", "qwen2.5-72b"),
             image_url: std::env::var("SOULWARE_IMAGE_URL").ok().filter(|s| !s.is_empty()),
             video_url: std::env::var("SOULWARE_VIDEO_URL").ok().filter(|s| !s.is_empty()),
+            yonetim_token: yonetim::token_coz(std::env::var("SOULWARE_YONETIM_TOKEN").ok()),
+            beyin_eszaman: ev("SOULWARE_BEYIN_ESZAMAN", "4").parse().unwrap_or(4).max(1),
+            medya_eszaman: ev("SOULWARE_MEDYA_ESZAMAN", "2").parse().unwrap_or(2).max(1),
         }
     }
 }
@@ -112,6 +125,10 @@ struct AppState {
     depo: Mutex<retrieval::Depo>, // egemen yerel bilgi deposu (grounding)
     embedder: Option<embed::Embedder>, // semantik retrieval (yoksa keyword'e düşer)
     resmi: Vec<resmi::ResmiBelge>, // AIDAG/KUBRA resmi kaynakları
+    /// Eşzamanlı beyin isteği sınırı (DoS/spam): dolarsa 429.
+    beyin_sem: Arc<tokio::sync::Semaphore>,
+    /// Eşzamanlı görsel/video üretim sınırı: dolarsa 429.
+    medya_sem: Arc<tokio::sync::Semaphore>,
 }
 
 // ════════════════════════════ Kimlik / grounding ════════════════════════════
@@ -190,6 +207,44 @@ mod tests {
             assert!(!kanit_gerektiren_mi(q), "{q}");
         }
         assert!(kanit_gerektiren_mi("Türkiye'nin başkenti neresi"));
+    }
+
+    // BULGU 5: istemci "claude" (ücretli beyin) seçemez; yalnız local/remote.
+    #[test]
+    fn istemci_claude_secemez() {
+        use super::beyin_secimi;
+        assert_eq!(beyin_secimi(Some("claude"), "local"), "local");
+        assert_eq!(beyin_secimi(Some(" claude "), "remote"), "remote");
+        assert_eq!(beyin_secimi(Some("auto"), "local"), "local");
+        assert_eq!(beyin_secimi(Some("CLAUDE"), "local"), "local");
+        assert_eq!(beyin_secimi(None, "local"), "local");
+        assert_eq!(beyin_secimi(Some("remote"), "local"), "remote");
+        assert_eq!(beyin_secimi(Some("local"), "remote"), "local");
+        // Sunucu tercihi claude ise o korunur (yalnız sunucu karar verir).
+        assert_eq!(beyin_secimi(Some("xyz"), "claude"), "claude");
+    }
+
+    // BULGU 7: içerik denetimi FAIL-CLOSED.
+    #[test]
+    fn icerik_denetimi_fail_closed() {
+        use super::{denetim_karari, sert_yasak_mi};
+        use serde_json::json;
+        let yan = |t: &str| json!({ "choices": [ { "message": { "content": t } } ] });
+        assert!(denetim_karari(true, Some(&yan("IZIN"))));
+        assert!(denetim_karari(true, Some(&yan(" İZİN.\n"))));
+        assert!(denetim_karari(true, Some(&yan("izin"))));
+        // Hata / çözülemeyen / belirsiz yanıt → RED
+        assert!(!denetim_karari(false, Some(&yan("IZIN"))), "HTTP hatası");
+        assert!(!denetim_karari(true, None), "JSON çözülemedi");
+        assert!(!denetim_karari(true, Some(&json!({ "error": "x" }))), "choices yok");
+        assert!(!denetim_karari(true, Some(&yan(""))), "boş");
+        assert!(!denetim_karari(true, Some(&yan("ENGEL"))));
+        assert!(!denetim_karari(true, Some(&yan("IZIN degil ENGEL"))));
+        assert!(!denetim_karari(true, Some(&yan("Bilmiyorum"))));
+        // Sert blok: Türkçe büyük harf / aksan varyantları
+        assert!(sert_yasak_mi("ÇOCUK PORNO"));
+        assert!(sert_yasak_mi("Child Porn"));
+        assert!(!sert_yasak_mi("kedi resmi"));
     }
 }
 
@@ -425,7 +480,7 @@ async fn arac_calistir(st: &AppState, prompt: &str) -> Option<(String, &'static 
     }
     // BELGE: 64-hex hash varsa HER ZAMAN doğrula; kısaltılmışsa tam hash iste;
     // kayıt niyeti → kayıt süreci; doğrulama niyeti → doğrulama sayfası.
-    if let Some(x) = zincir::belge_dogrula(&st.http, &st.cfg.chain_rpc, prompt).await {
+    if let Some(x) = zincir::belge_dogrula(&st.http, &st.cfg.chain_rpc, &st.key_addr, prompt).await {
         return Some((x, "belge-dogrula"));
     }
     // ÖN SATIŞ / TGE: satılan, aktif kademe, TGE durumu zincirden CANLI (belge eskir, bu eskimez).
@@ -507,11 +562,11 @@ async fn belge_hazirla(State(st): State<Arc<AppState>>, Json(req): Json<BelgeHaz
     }
 }
 
-// Araç cevabını zincire yaz (tuzlu etkileşim hash'i = net_id|ts|prompt|sonuç|araç).
+// Araç cevabını zincire yaz (tuzlu-v2 sohbet hash'i: prompt|sonuç|araç|istemci bağlamı).
 // Tuz zincire YAZILMAZ; yalnız kullanıcıya döner (bkz. kanit.rs).
-async fn arac_kanit(st: &AppState, prompt: &str, sonuc: &str, arac_ad: &str, ts: u64) -> ([u8; 32], ChainProof, [u8; 32]) {
+async fn arac_kanit(st: &AppState, prompt: &str, sonuc: &str, arac_ad: &str, context: &str, ts: u64) -> ([u8; 32], ChainProof, [u8; 32]) {
     let tuz = kanit::yeni_tuz();
-    let data_hash = kanit::kanit_hash(st.cfg.net_id, ts, &[prompt.as_bytes(), sonuc.as_bytes(), arac_ad.as_bytes()], Some(&tuz));
+    let data_hash = kanit::sohbet_hash_v2(&tuz, st.cfg.net_id, ts, prompt, sonuc, arac_ad, context);
     let chain = zincire_yaz(st, data_hash, ts).await;
     (data_hash, chain, tuz)
 }
@@ -536,8 +591,10 @@ struct AskReq {
     prompt: String,
     #[serde(default)]
     context: Option<String>,
+    /// Yalnız "local" | "remote" dikkate alınır; diğerleri ("claude", "auto" ...)
+    /// YOK SAYILIR ve sunucu tercihi kullanılır (istemci ücretli beyni seçemez).
     #[serde(default)]
-    brain: Option<String>, // "local" | "claude" — istek başına geçersiz kılma
+    brain: Option<String>,
     #[serde(default)]
     deterministic: Option<bool>, // true → greedy (ağ doğrulaması için birebir tekrar)
     #[serde(default)]
@@ -572,6 +629,11 @@ struct AskResp {
     /// Tuz (64 hex). Zincire YAZILMAZ; yalnız burada döner. Kaybolursa kayıt doğrulanamaz.
     #[serde(skip_serializing_if = "Option::is_none")]
     salt: Option<String>,
+    /// Kanıt şeması (yeni kayıtlar: "tuzlu-v2").
+    #[serde(skip_serializing_if = "str::is_empty")]
+    sema: &'static str,
+    /// true → istemcinin verdiği `context` kanıt hash'ine girdi (/v1/verify'a aynen verilmeli).
+    istemci_baglami: bool,
     chain: ChainProof,
     #[serde(skip_serializing_if = "Option::is_none")]
     hata: Option<String>,
@@ -584,7 +646,8 @@ fn now_secs() -> u64 {
 // KUBRA'nın kullanabileceği AÇIK gelişmiş modeller + hangisi yüklü. Beyin pluggable:
 // qwen2 mimarisi 0.5B..72B aynı yükleyiciyle (büyükler GPU ister); llama/mistral için
 // yükleyici eklenecek. DÜRÜST: kapalı modeller (GPT/Claude) YOK — egemenlik/ToS.
-async fn models(State(st): State<Arc<AppState>>) -> Json<Value> {
+async fn models(State(st): State<Arc<AppState>>, h: axum::http::HeaderMap) -> axum::response::Response {
+    if let Err(r) = yonetim::yetki(&h, st.cfg.yonetim_token.as_deref()) { return r; }
     let reg: Value = std::fs::read(&st.cfg.model_registry)
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
@@ -606,7 +669,7 @@ async fn models(State(st): State<Arc<AppState>>) -> Json<Value> {
         "beyin_pluggable": true,
         "not": reg.get("not").cloned().unwrap_or(Value::Null),
         "modeller": modeller,
-    }))
+    })).into_response()
 }
 
 // /retrieve — HIZLI retrieval testi (üretim YOK): bir sorgu için getirilen kaynakları
@@ -614,7 +677,8 @@ async fn models(State(st): State<Arc<AppState>>) -> Json<Value> {
 #[derive(Deserialize)]
 struct RetrieveReq { prompt: String }
 
-async fn retrieve(State(st): State<Arc<AppState>>, Json(req): Json<RetrieveReq>) -> Json<Value> {
+async fn retrieve(State(st): State<Arc<AppState>>, h: axum::http::HeaderMap, Json(req): Json<RetrieveReq>) -> axum::response::Response {
+    if let Err(r) = yonetim::yetki(&h, st.cfg.yonetim_token.as_deref()) { return r; }
     let qemb = st.embedder.as_ref().and_then(|e| e.embed(&req.prompt).ok());
     let depo = match st.depo.lock() { Ok(g) => g, Err(p) => p.into_inner() };
     let (mod_, pasajlar) = match qemb {
@@ -629,44 +693,41 @@ async fn retrieve(State(st): State<Arc<AppState>>, Json(req): Json<RetrieveReq>)
             "metin": p.metin.chars().take(500).collect::<String>(),  // tarayıcı grounding için kaynak metni
             "url": p.url,                                             // kaynak/DOI — cevapta gösterilebilir (doğrulanabilir)
         })).collect::<Vec<_>>(),
-    }))
-}
-
-// GEÇİCİ: semantik embedding doğrulama — anlam ayrımı yapıyor mu?
-async fn embed_test(State(st): State<Arc<AppState>>) -> Json<Value> {
-    let e = match &st.embedder { Some(e) => e, None => return Json(json!({ "ok": false, "hata": "embedder yok" })) };
-    let q = "Türkiye'nin başkenti neresidir";
-    let dogru = "Ankara, Türkiye'nin başkenti ve İç Anadolu'da bir şehirdir";
-    let gurultu = "Türkiye'deki siyasi partiler listesi ve tarihçesi";
-    let (qv, dv, gv) = match (e.embed(q), e.embed(dogru), e.embed(gurultu)) {
-        (Ok(a), Ok(b), Ok(c)) => (a, b, c),
-        _ => return Json(json!({ "ok": false, "hata": "embed başarısız" })),
-    };
-    let s_dogru = embed::kosinus(&qv, &dv);
-    let s_gurultu = embed::kosinus(&qv, &gv);
-    Json(json!({
-        "ok": true, "boyut": e.boyut,
-        "soru": q,
-        "dogru_belge_benzerlik": s_dogru,
-        "gurultu_belge_benzerlik": s_gurultu,
-        "anlam_ayrimi_dogru": s_dogru > s_gurultu,
-        "not": "dogru > gurultu ise semantik retrieval keyword gürültüsünü çözer",
-    }))
+    })).into_response()
 }
 
 // ═══ İÇERİK KORUMA KALKANI: üretimden önce zararlı istemi yakala ═══
 // true = güvenli/izin, false = engelle. Katmanlı: (1) sabit anahtar-kelime sert-blok,
-// (2) KUBRA beyni (72B) niyet yargıcı. Beyin erişilemezse anahtar-kelime bloku yine korur.
-async fn icerik_denetle(st: &AppState, prompt: &str) -> bool {
+// (2) KUBRA beyni (uzak) niyet yargıcı. FAIL-CLOSED: yargıç yapılandırılmamışsa,
+// erişilemezse, HTTP hatası verirse ya da yanıtı açıkça "IZIN" değilse → REDDET.
+const SERT_YASAK: &[&str] = &[
+    "child porn", "cp porn", "çocuk porno", "cocuk porno", "minor sex", "underage sex",
+    "child sexual", "çocuk cinsel", "cocuk cinsel", "pedophil",
+];
+
+fn sert_yasak_mi(prompt: &str) -> bool {
     let p = prompt.to_lowercase();
-    // Bariz/tartışmasız yasak (sert blok — beyin gerekmez)
-    const SERT_YASAK: &[&str] = &[
-        "child porn", "cp porn", "çocuk porno", "cocuk porno", "minor sex", "underage sex",
-        "child sexual", "çocuk cinsel", "cocuk cinsel", "pedophil",
-    ];
-    if SERT_YASAK.iter().any(|k| p.contains(k)) { return false; }
-    // Beyin yargıcı (nüans). Beyin yoksa → sert-blok geçtiyse izin ver.
-    let Some(url) = st.cfg.remote_url.as_ref() else { return true; };
+    let sade = retrieval::sade(prompt);
+    SERT_YASAK.iter().any(|k| p.contains(k) || sade.contains(&retrieval::sade(k)))
+}
+
+/// Yargıç yanıtından karar (saf). Yalnız başarılı HTTP + tek kelime IZIN/İZİN → izin.
+fn denetim_karari(http_ok: bool, v: Option<&Value>) -> bool {
+    if !http_ok {
+        return false;
+    }
+    let Some(v) = v else { return false };
+    let ans = v.get("choices").and_then(|c| c.as_array()).and_then(|a| a.first())
+        .and_then(|c| c.get("message")).and_then(|m| m.get("content"))
+        .and_then(|t| t.as_str()).unwrap_or("");
+    let sade = retrieval::sade(ans);
+    sade == "izin"
+}
+
+async fn icerik_denetle(st: &AppState, prompt: &str) -> bool {
+    if sert_yasak_mi(prompt) { return false; }
+    // Yargıç yoksa → REDDET (fail-closed).
+    let Some(url) = st.cfg.remote_url.as_ref() else { return false; };
     let sys = "Sen bir GÖRSEL ÜRETİM güvenlik denetleyicisisin. Kullanıcının istemini incele. \
         Şu kategorilerden BİRİNİ içeriyorsa yalnızca 'ENGEL' yaz: reşit olmayanların cinsel/müstehcen \
         tasviri veya istismarı; pornografik/cinsel açık içerik; aşırı şiddet/gore; gerçek bir kişinin \
@@ -678,16 +739,12 @@ async fn icerik_denetle(st: &AppState, prompt: &str) -> bool {
         "max_tokens": 4, "temperature": 0.0, "stream": false,
     });
     match st.http.post(url).json(&body).send().await {
-        Ok(r) => match r.json::<Value>().await {
-            Ok(v) => {
-                let ans = v.get("choices").and_then(|c| c.as_array()).and_then(|a| a.first())
-                    .and_then(|c| c.get("message")).and_then(|m| m.get("content"))
-                    .and_then(|t| t.as_str()).unwrap_or("").to_uppercase();
-                !ans.contains("ENGEL")
-            }
-            Err(_) => true, // denetim yanıtı çözülemedi → sert-blok geçtiyse izin (servisi kırma)
-        },
-        Err(_) => true,
+        Ok(r) => {
+            let ok = r.status().is_success();
+            let v = r.json::<Value>().await.ok();
+            denetim_karari(ok, v.as_ref())
+        }
+        Err(_) => false, // yargıç erişilemez → REDDET
     }
 }
 
@@ -724,6 +781,9 @@ struct GorselReq { prompt: String, #[serde(default)] wallet: Option<String> }
 
 // KUBRA görsel üretimi: istem → uzak GPU görsel servisi (SDXL-Turbo) → PNG.
 async fn gorsel(State(st): State<Arc<AppState>>, Json(req): Json<GorselReq>) -> axum::response::Response {
+    let Ok(_izin) = st.medya_sem.clone().try_acquire_owned() else {
+        return (StatusCode::TOO_MANY_REQUESTS, "sunucu meşgul, lütfen biraz sonra tekrar dene").into_response();
+    };
     let url = match st.cfg.image_url.as_ref() {
         Some(u) => u,
         None => return (StatusCode::SERVICE_UNAVAILABLE, "görsel servisi yapılandırılmadı").into_response(),
@@ -751,12 +811,10 @@ async fn gorsel(State(st): State<Arc<AppState>>, Json(req): Json<GorselReq>) -> 
     };
     // ── KORUMA KALKANI (2): KÖKEN LİSANSI — içeriği zincire yaz (sahiplik/telif kanıtı) ──
     let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    // Tuzlu köken hash'i: prompt|[cüzdan]|içerik. Tuz zincire yazılmaz, başlıkta döner.
+    // Tuzlu-v2 köken hash'i: prompt|cüzdan (yoksa boş)|içerik. Tuz zincire yazılmaz, başlıkta döner.
     let tuz = kanit::yeni_tuz();
-    let mut alanlar: Vec<&[u8]> = vec![prompt.as_bytes()];
-    if let Some(w) = req.wallet.as_deref() { alanlar.push(w.as_bytes()); }
-    alanlar.push(&bytes);
-    let data_hash = kanit::kanit_hash(st.cfg.net_id, ts, &alanlar, Some(&tuz));
+    let wallet = req.wallet.as_deref().map(str::trim).filter(|w| !w.is_empty());
+    let data_hash = kanit::medya_hash_v2(&tuz, st.cfg.net_id, ts, prompt, wallet, &bytes);
     let _ = zincire_yaz(&st, data_hash, ts).await;
     let proof = hex::encode(data_hash);
     axum::response::Response::builder()
@@ -765,12 +823,16 @@ async fn gorsel(State(st): State<Arc<AppState>>, Json(req): Json<GorselReq>) -> 
         .header("x-kubra-verify", format!("/belge/{proof}"))
         .header("x-kubra-salt", hex::encode(tuz))
         .header("x-kubra-ts", ts.to_string())
+        .header("x-kubra-sema", kanit::SEMA_V2)
         .body(Body::from(bytes))
         .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "yanıt oluşturulamadı").into_response())
 }
 
 // KUBRA video üretimi: istem → uzak GPU video servisi (LTX) → MP4. Güvenlik kapısı + köken lisansı.
 async fn video_uret(State(st): State<Arc<AppState>>, Json(req): Json<GorselReq>) -> axum::response::Response {
+    let Ok(_izin) = st.medya_sem.clone().try_acquire_owned() else {
+        return (StatusCode::TOO_MANY_REQUESTS, "sunucu meşgul, lütfen biraz sonra tekrar dene").into_response();
+    };
     let url = match st.cfg.video_url.as_ref() {
         Some(u) => u,
         None => return (StatusCode::SERVICE_UNAVAILABLE, "video servisi yapılandırılmadı").into_response(),
@@ -792,12 +854,10 @@ async fn video_uret(State(st): State<Arc<AppState>>, Json(req): Json<GorselReq>)
         Err(e) => return (StatusCode::BAD_GATEWAY, format!("video servis erişilemez: {e}")).into_response(),
     };
     let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    // Tuzlu köken hash'i: prompt|[cüzdan]|içerik. Tuz zincire yazılmaz, başlıkta döner.
+    // Tuzlu-v2 köken hash'i: prompt|cüzdan (yoksa boş)|içerik. Tuz zincire yazılmaz, başlıkta döner.
     let tuz = kanit::yeni_tuz();
-    let mut alanlar: Vec<&[u8]> = vec![prompt.as_bytes()];
-    if let Some(w) = req.wallet.as_deref() { alanlar.push(w.as_bytes()); }
-    alanlar.push(&bytes);
-    let data_hash = kanit::kanit_hash(st.cfg.net_id, ts, &alanlar, Some(&tuz));
+    let wallet = req.wallet.as_deref().map(str::trim).filter(|w| !w.is_empty());
+    let data_hash = kanit::medya_hash_v2(&tuz, st.cfg.net_id, ts, prompt, wallet, &bytes);
     let _ = zincire_yaz(&st, data_hash, ts).await;
     let proof = hex::encode(data_hash);
     axum::response::Response::builder()
@@ -806,42 +866,34 @@ async fn video_uret(State(st): State<Arc<AppState>>, Json(req): Json<GorselReq>)
         .header("x-kubra-verify", format!("/belge/{proof}"))
         .header("x-kubra-salt", hex::encode(tuz))
         .header("x-kubra-ts", ts.to_string())
+        .header("x-kubra-sema", kanit::SEMA_V2)
         .body(Body::from(bytes))
         .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "yanıt oluşturulamadı").into_response())
 }
 
-// DOĞRULAMA: içerik (+ varsa tuz) → hash'i yeniden hesapla → zincirde var mı?
-// Tuz yoksa ESKİ (tuzsuz) şema: eski kayıtlar aynen doğrulanır. Tuz hiçbir yere kaydedilmez.
+// DOĞRULAMA: içerik (+ varsa tuz) → aday hash(ler) → zincirde var mı?
+// Tuz varsa önce tuzlu-v2, sonra tuzlu-v1; yoksa eski (tuzsuz). v1/eski'de alanlardan
+// biri 0x1e içeriyorsa sonuç "belirsiz" (dogrulandi=false). Tuz hiçbir yere kaydedilmez.
 async fn dogrula(State(st): State<Arc<AppState>>, Json(req): Json<kanit::DogrulaIstek>) -> (StatusCode, Json<Value>) {
-    let (hash, tuzlu) = match kanit::dogrulama_hash(st.cfg.net_id, &req) {
+    let adaylar = match kanit::dogrulama_adaylari(st.cfg.net_id, &req) {
         Ok(x) => x,
         Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({ "ok": false, "hata": e }))),
     };
-    let hash_hex = hex::encode(hash);
-    let proof_eslesir = req.proof_hash.as_deref()
-        .map(|p| p.trim().trim_start_matches("0x").eq_ignore_ascii_case(&hash_hex));
-    let url = format!("{}/belge/{hash_hex}", st.cfg.chain_rpc.trim_end_matches('/'));
-    let v: Value = match st.http.get(&url).send().await {
-        Ok(r) => match r.json().await {
-            Ok(v) => v,
-            Err(e) => return (StatusCode::BAD_GATEWAY, Json(json!({ "ok": false, "hata": format!("zincir yanıtı çözülemedi: {e}") }))),
-        },
-        Err(e) => return (StatusCode::BAD_GATEWAY, Json(json!({ "ok": false, "hata": format!("zincire ulaşılamıyor: {e}") }))),
-    };
-    let zincirde = v.get("kayitli").and_then(|x| x.as_bool()).unwrap_or(false);
-    let kaydeden = v.get("kaydeden").and_then(|x| x.as_str()).map(|a| a.trim_start_matches("0x").to_lowercase());
-    let kubra_imzali = kaydeden.as_deref().map(|a| a == hex::encode(st.key_addr));
-    (StatusCode::OK, Json(json!({
-        "ok": true,
-        "proof_hash": hash_hex,
-        "sema": if tuzlu { "tuzlu-v1" } else { "eski-tuzsuz" },
-        "proof_eslesir": proof_eslesir,
-        "zincirde": zincirde,
-        "kaydeden": kaydeden.map(|a| format!("0x{a}")),
-        "kubra_imzali": kubra_imzali,
-        "zaman": v.get("zaman").cloned(),
-        "dogrulandi": zincirde && kubra_imzali == Some(true) && proof_eslesir != Some(false),
-    })))
+    let mut sonuclar = Vec::with_capacity(adaylar.len());
+    for a in adaylar {
+        let url = format!("{}/belge/{}", st.cfg.chain_rpc.trim_end_matches('/'), hex::encode(a.hash));
+        let v: Value = match st.http.get(&url).send().await {
+            Ok(r) => match r.json().await {
+                Ok(v) => v,
+                Err(e) => return (StatusCode::BAD_GATEWAY, Json(json!({ "ok": false, "hata": format!("zincir yanıtı çözülemedi: {e}") }))),
+            },
+            Err(e) => return (StatusCode::BAD_GATEWAY, Json(json!({ "ok": false, "hata": format!("zincire ulaşılamıyor: {e}") }))),
+        };
+        sonuclar.push((a, kanit::ZincirBilgi::coz(&v)));
+    }
+    let context_verildi = req.context.as_deref().is_some_and(|c| !c.is_empty());
+    let karar = kanit::dogrulama_karari(&sonuclar, &hex::encode(st.key_addr), req.proof_hash.as_deref(), context_verildi);
+    (StatusCode::OK, Json(karar))
 }
 
 async fn health() -> Json<Value> {
@@ -853,14 +905,12 @@ async fn info(State(st): State<Arc<AppState>>) -> Json<Value> {
         "sistem": "SoulwareAI",
         "yapay_zeka": "KUBRA",
         "surum": "0.1.0",
-        "beyin_tercihi": st.cfg.brain_pref,
         "yerel_beyin": st.local_name.clone().unwrap_or_else(|| "yüklenmedi".into()),
-        "claude": if st.cfg.anthropic_key.is_some() { "yapılandırıldı (hibrit)" } else { "yok" },
-        "zincir_rpc": st.cfg.chain_rpc,
         "net_id": st.cfg.net_id,
         "imzalayan": format!("0x{}", hex::encode(st.key_addr)),
-        "uc": "POST /v1/ask {\"prompt\":\"...\",\"context\":\"(ops.)\",\"brain\":\"local|claude (ops.)\"}",
-        "dogrulama": "POST /v1/verify {\"ts\":..,\"prompt\":\"..\",\"answer\":\"..\",\"model\":\"..\",\"salt\":\"(64 hex; eski kayitta yok)\"}",
+        "uc": "POST /v1/ask {\"prompt\":\"...\",\"context\":\"(ops.)\"}",
+        "kanit_semasi": kanit::SEMA_V2,
+        "dogrulama": "POST /v1/verify {\"ts\":..,\"prompt\":\"..\",\"answer\":\"..\",\"model\":\"..\",\"salt\":\"(64 hex; eski kayitta yok)\",\"context\":\"(ops.)\",\"sema\":\"(ops.)\"}",
     }))
 }
 
@@ -868,12 +918,18 @@ async fn info(State(st): State<Arc<AppState>>) -> Json<Value> {
 // ── SSE STREAMING ENDPOINT: cevabi harf harf (token token) akitir ──
 // Arac (belge/ag/zincir) varsa tek seferde akitir (zaten anlik).
 // Yoksa: grounding + beyin stream:true -> token'lar akar -> bitince zincire yaz.
-async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> impl IntoResponse {
+async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> axum::response::Response {
     use tokio::sync::mpsc;
+    // Eşzamanlılık sınırı: izin görev bitene kadar tutulur; dolu → 429.
+    let Ok(izin) = st.beyin_sem.clone().try_acquire_owned() else {
+        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({ "ok": false, "hata": "sunucu meşgul, lütfen biraz sonra tekrar dene" }))).into_response();
+    };
     let (tx, rx) = mpsc::channel::<Result<Event, std::convert::Infallible>>(64);
     let ts = now_secs();
 
     tokio::spawn(async move {
+        let _izin = izin;
+        let baglam = req.context.clone().unwrap_or_default();
         if req.prompt.trim().is_empty() {
             let _ = tx.send(Ok(Event::default().event("error").data("prompt bos"))).await;
             return;
@@ -887,10 +943,10 @@ async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) ->
                 tokio::time::sleep(std::time::Duration::from_millis(15)).await;
             }
             // Zincire yaz + proof
-            let (data_hash, chain, tuz) = arac_kanit(&st, &req.prompt, &sonuc, arac_ad, ts).await;
+            let (data_hash, chain, tuz) = arac_kanit(&st, &req.prompt, &sonuc, arac_ad, &baglam, ts).await;
             // prompt/answer: hash'e giren metnin BIREBIR kopyasi (SSE parcalarindan yeniden kurmak
             // satir sonlarini kaybedebilir; kanit dosyasi bunu kullanir).
-            let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "prompt": req.prompt, "answer": sonuc, "model": arac_ad, "brain": "arac", "chain": chain});
+            let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "prompt": req.prompt, "answer": sonuc, "model": arac_ad, "brain": "arac", "sema": kanit::SEMA_V2, "istemci_baglami": !baglam.is_empty(), "chain": chain});
             let _ = tx.send(Ok(Event::default().event("done").data(proof.to_string()))).await;
             return;
         }
@@ -935,12 +991,11 @@ async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) ->
 
         match tam {
             Ok(metin) => {
-                // Zincire yaz + proof (tuzlu: prompt|metin|model; tuz zincire yazılmaz)
+                // Zincire yaz + proof (tuzlu-v2: prompt|metin|model|istemci bağlamı; tuz zincire yazılmaz)
                 let tuz = kanit::yeni_tuz();
-                let data_hash = kanit::kanit_hash(st.cfg.net_id, ts,
-                    &[req.prompt.as_bytes(), metin.as_bytes(), st.cfg.remote_model.as_bytes()], Some(&tuz));
+                let data_hash = kanit::sohbet_hash_v2(&tuz, st.cfg.net_id, ts, &req.prompt, &metin, &st.cfg.remote_model, &baglam);
                 let chain = zincire_yaz(&st, data_hash, ts).await;
-                let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "prompt": req.prompt, "answer": metin, "model": st.cfg.remote_model, "brain": "kubra-gpu", "grounded": !kaynaklar.is_empty(), "chain": chain});
+                let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "prompt": req.prompt, "answer": metin, "model": st.cfg.remote_model, "brain": "kubra-gpu", "grounded": !kaynaklar.is_empty(), "sema": kanit::SEMA_V2, "istemci_baglami": !baglam.is_empty(), "chain": chain});
                 let _ = tx.send(Ok(Event::default().event("done").data(proof.to_string()))).await;
             }
             Err(e) => { let _ = tx.send(Ok(Event::default().event("error").data(e))).await; }
@@ -948,25 +1003,45 @@ async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) ->
     });
 
     let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-    Sse::new(stream)
+    Sse::new(stream).into_response()
 }
 
-async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<AskResp> {
+/// İstemcinin beyin seçimi: yalnız "local" | "remote" kabul; diğer her şey (özellikle
+/// "claude") yok sayılır ve sunucu tercihi kullanılır.
+fn beyin_secimi<'a>(istemci: Option<&'a str>, sunucu: &'a str) -> &'a str {
+    match istemci.map(str::trim) {
+        Some(b @ ("local" | "remote")) => b,
+        _ => sunucu,
+    }
+}
+
+async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> axum::response::Response {
+    // Eşzamanlılık sınırı (DoS/spam): dolu → 429. İzin cevap dönene kadar tutulur.
+    let Ok(_izin) = st.beyin_sem.clone().try_acquire_owned() else {
+        return (StatusCode::TOO_MANY_REQUESTS, Json(bos_hata("sunucu meşgul, lütfen biraz sonra tekrar dene"))).into_response();
+    };
+    ask_ic(st, req).await.into_response()
+}
+
+async fn ask_ic(st: Arc<AppState>, req: AskReq) -> Json<AskResp> {
     let t0 = std::time::Instant::now();
     let ts = now_secs();
     if req.prompt.trim().is_empty() {
         return Json(bos_hata("prompt boş olamaz"));
     }
+    // İstemci bağlamı (verildiyse) kanıt hash'ine AYNEN girer (tuzlu-v2).
+    let baglam_ham = req.context.clone().unwrap_or_default();
 
     // ── ARAÇ-KULLANIMI: kesin cevap gereken niyetler ZAYIF MODELE bırakılmaz ──
     // (isim, belge hash doğrulama/kayıt, ağ durumu, zincir sorgusu, hesap). Bkz. arac_calistir.
     if let Some((sonuc, arac_ad)) = arac_calistir(&st, &req.prompt).await {
-        let (data_hash, chain, tuz) = arac_kanit(&st, &req.prompt, &sonuc, arac_ad, ts).await;
+        let (data_hash, chain, tuz) = arac_kanit(&st, &req.prompt, &sonuc, arac_ad, &baglam_ham, ts).await;
         return Json(AskResp {
             ok: true, answer: sonuc, brain: "arac".into(), model: arac_ad.into(),
             grounded: false, abstained: arac_ad == "resmi-kaynak", sources: vec![],
             latency_ms: t0.elapsed().as_millis(), input_tokens: None, output_tokens: None,
-            proof_hash: hex::encode(data_hash), ts, salt: Some(hex::encode(tuz)), chain, hata: None,
+            proof_hash: hex::encode(data_hash), ts, salt: Some(hex::encode(tuz)),
+            sema: kanit::SEMA_V2, istemci_baglami: !baglam_ham.is_empty(), chain, hata: None,
         });
     }
 
@@ -1020,7 +1095,7 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
     };
 
     // BEYİN SEÇİMİ: Uzak GPU (varsa) > Egemen yerel (KUBRA) > Claude.
-    let istek = req.brain.as_deref().unwrap_or(&st.cfg.brain_pref);
+    let istek = beyin_secimi(req.brain.as_deref(), &st.cfg.brain_pref);
     // Doğrulanabilirlik için: deterministic → greedy (temp 0), yoksa hafif örnekleme.
     let temp = if req.deterministic.unwrap_or(false) { 0.0 } else { 0.3 };
     let yerel_kullan = st.local.is_some() && istek != "claude";
@@ -1072,10 +1147,10 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
     let grounded = etkin_baglam.as_deref().map(|c| !c.trim().is_empty()).unwrap_or(false);
     let is_abstained = abstained(&answer);
 
-    // ZİNCİR: tuzlu etkileşim hash'i imzalı Record olarak GERÇEK zincire (tuz zincire yazılmaz).
+    // ZİNCİR: tuzlu-v2 etkileşim hash'i (istemci bağlamı dahil) imzalı Record olarak
+    // GERÇEK zincire (tuz zincire yazılmaz).
     let tuz = kanit::yeni_tuz();
-    let data_hash = kanit::kanit_hash(st.cfg.net_id, ts,
-        &[req.prompt.as_bytes(), answer.as_bytes(), model.as_bytes()], Some(&tuz));
+    let data_hash = kanit::sohbet_hash_v2(&tuz, st.cfg.net_id, ts, &req.prompt, &answer, &model, &baglam_ham);
 
     let chain = zincire_yaz(&st, data_hash, ts).await;
 
@@ -1093,6 +1168,8 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
         proof_hash: hex::encode(data_hash),
         ts,
         salt: Some(hex::encode(tuz)),
+        sema: kanit::SEMA_V2,
+        istemci_baglami: !baglam_ham.is_empty(),
         chain,
         hata: None,
     })
@@ -1105,6 +1182,8 @@ fn bos_hata(mesaj: &str) -> AskResp {
         proof_hash: String::new(),
         ts: 0,
         salt: None,
+        sema: "",
+        istemci_baglami: false,
         chain: ChainProof {
             submitted: false, data_hash: String::new(), verify_path: String::new(),
             signer: String::new(), result: None, reason: Some("beyin başarısız — zincire yazılmadı".into()),
@@ -1123,26 +1202,35 @@ struct IngestReq {
     url: Option<String>,
 }
 
-async fn kb_ingest(State(st): State<Arc<AppState>>, Json(req): Json<IngestReq>) -> Json<Value> {
-    if req.baslik.trim().is_empty() || req.metin.trim().len() < 10 {
-        return Json(json!({ "ok": false, "hata": "baslik ve en az 10 karakter metin gerekli" }));
+async fn kb_ingest(State(st): State<Arc<AppState>>, h: axum::http::HeaderMap, Json(req): Json<IngestReq>) -> axum::response::Response {
+    if let Err(r) = yonetim::yetki(&h, st.cfg.yonetim_token.as_deref()) { return r; }
+    if let Err(e) = yonetim::ingest_sinir(&req.baslik, &req.metin, req.url.as_deref()) {
+        return (StatusCode::PAYLOAD_TOO_LARGE, Json(json!({ "ok": false, "hata": e }))).into_response();
     }
-    let n = {
+    if req.baslik.trim().is_empty() || req.metin.trim().len() < 10 {
+        return Json(json!({ "ok": false, "hata": "baslik ve en az 10 karakter metin gerekli" })).into_response();
+    }
+    let (n, eklendi) = {
         let mut depo = match st.depo.lock() { Ok(g) => g, Err(p) => p.into_inner() };
         // ekle_embed: embedder varsa embedding'i SENKRON tut (semantik retrieval güncel kalır).
-        depo.ekle_embed(
+        let eklendi = depo.ekle_embed(
             retrieval::Belge { baslik: req.baslik.trim().to_string(), metin: req.metin.trim().to_string(), url: req.url },
             st.embedder.as_ref(),
         );
-        depo.belgeler.len()
+        (depo.belgeler.len(), eklendi)
     };
-    Json(json!({ "ok": true, "belge_sayisi": n, "not": "korpus büyüdü; grounding bu belgeyi kullanabilir" }))
+    if !eklendi {
+        return (StatusCode::CONFLICT, Json(json!({ "ok": false, "belge_sayisi": n,
+            "hata": "bu başlık küratörlü (korumalı) bir belgeye ait; ingest ile değiştirilemez" }))).into_response();
+    }
+    Json(json!({ "ok": true, "belge_sayisi": n, "not": "korpus büyüdü; grounding bu belgeyi kullanabilir" })).into_response()
 }
 
-async fn kb_stats(State(st): State<Arc<AppState>>) -> Json<Value> {
+async fn kb_stats(State(st): State<Arc<AppState>>, h: axum::http::HeaderMap) -> axum::response::Response {
+    if let Err(r) = yonetim::yetki(&h, st.cfg.yonetim_token.as_deref()) { return r; }
     let depo = match st.depo.lock() { Ok(g) => g, Err(p) => p.into_inner() };
     let basliklar: Vec<&str> = depo.belgeler.iter().take(50).map(|b| b.baslik.as_str()).collect();
-    Json(json!({ "ok": true, "belge_sayisi": depo.belgeler.len(), "yol": depo.yol, "basliklar": basliklar }))
+    Json(json!({ "ok": true, "belge_sayisi": depo.belgeler.len(), "basliklar": basliklar })).into_response()
 }
 
 #[tokio::main]
@@ -1247,7 +1335,10 @@ async fn main() {
     }
     let resmi_belgeler = resmi::yukle(&cfg.resmi_path);
     println!("📘 AIDAG resmi kaynak: {} belge ({})", resmi_belgeler.len(), cfg.resmi_path);
-    let state = Arc::new(AppState { cfg, http, key, key_addr, local, local_name, depo: Mutex::new(depo), embedder, resmi: resmi_belgeler });
+    let beyin_sem = Arc::new(tokio::sync::Semaphore::new(cfg.beyin_eszaman));
+    let medya_sem = Arc::new(tokio::sync::Semaphore::new(cfg.medya_eszaman));
+    let yonetim_acik = cfg.yonetim_token.is_some();
+    let state = Arc::new(AppState { cfg, http, key, key_addr, local, local_name, depo: Mutex::new(depo), embedder, resmi: resmi_belgeler, beyin_sem, medya_sem });
 
     println!("──────────────────────────────────────────────");
     println!("🌀 SoulwareAI çekirdeği · yapay zeka: KUBRA (v0.1)");
@@ -1261,23 +1352,25 @@ async fn main() {
     println!("   zincir RPC  : {}", state.cfg.chain_rpc);
     println!("   imzalayan   : 0x{}", hex::encode(state.key_addr));
     println!("   dinleme     : http://{listen}");
+    println!("   yönetim     : {}", if yonetim_acik { "Bearer token ile AÇIK" } else { "KAPALI (SOULWARE_YONETIM_TOKEN yok → 403)" });
+    println!("   eşzamanlılık: beyin {} · medya {}", state.cfg.beyin_eszaman, state.cfg.medya_eszaman);
     println!("──────────────────────────────────────────────");
 
     let app = Router::new()
         .route("/health", get(health))
         .route("/", get(info))
-        .route("/v1/ask", post(ask))
-        .route("/v1/ask-stream", post(ask_stream))
-        .route("/v1/verify", post(dogrula))
+        .route("/v1/ask", post(ask).layer(DefaultBodyLimit::max(yonetim::ASK_GOVDE_SINIRI)))
+        .route("/v1/ask-stream", post(ask_stream).layer(DefaultBodyLimit::max(yonetim::ASK_GOVDE_SINIRI)))
+        .route("/v1/verify", post(dogrula).layer(DefaultBodyLimit::max(yonetim::VERIFY_GOVDE_SINIRI)))
         // Belge dosyası bu uca GELMEZ: yalnız hash + (ops.) açık anahtar → küçük gövde sınırı.
-        .route("/v1/belge/hazirla", post(belge_hazirla).layer(axum::extract::DefaultBodyLimit::max(1024)))
-        .route("/v1/image", post(gorsel))
-        .route("/v1/video", post(video_uret))
-        .route("/kb/ingest", post(kb_ingest))
+        .route("/v1/belge/hazirla", post(belge_hazirla).layer(DefaultBodyLimit::max(1024)))
+        .route("/v1/image", post(gorsel).layer(DefaultBodyLimit::max(yonetim::MEDYA_GOVDE_SINIRI)))
+        .route("/v1/video", post(video_uret).layer(DefaultBodyLimit::max(yonetim::MEDYA_GOVDE_SINIRI)))
+        // YÖNETİM uçları: SOULWARE_YONETIM_TOKEN (Bearer) ister; yoksa 403. /embed-test kaldırıldı.
+        .route("/kb/ingest", post(kb_ingest).layer(DefaultBodyLimit::max(yonetim::INGEST_GOVDE_SINIRI)))
         .route("/kb/stats", get(kb_stats))
         .route("/models", get(models))
-        .route("/embed-test", get(embed_test))
-        .route("/retrieve", post(retrieve))
+        .route("/retrieve", post(retrieve).layer(DefaultBodyLimit::max(yonetim::ASK_GOVDE_SINIRI)))
         .with_state(state);
 
     let addr: SocketAddr = listen.parse().expect("SOULWARE_LISTEN geçersiz");

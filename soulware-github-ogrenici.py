@@ -28,6 +28,9 @@ KONTROL_BASI = int(os.environ.get("SOULWARE_GITHUB_KONTROL", "4"))  # tur başı
 TUR_BASI = int(os.environ.get("SOULWARE_GITHUB_TUR_BASI", "4"))    # tur başına en fazla yeni proje
 MIN_YILDIZ = int(os.environ.get("SOULWARE_GITHUB_MIN_YILDIZ", "500"))
 UA = {"User-Agent": "SoulwareAI-KUBRA-learner/0.1", "Accept": "application/vnd.github+json"}
+# Yonetim ucu (/kb/ingest) Bearer token'i: YALNIZ KUBRA'ya gonderilir (GitHub/OpenAlex'e DEGIL).
+YONETIM = ({"Authorization": "Bearer " + os.environ["SOULWARE_YONETIM_TOKEN"]}
+           if os.environ.get("SOULWARE_YONETIM_TOKEN") else {})
 
 LISANSLAR = ["mit", "apache-2.0", "bsd-3-clause", "bsd-2-clause", "isc", "0bsd", "unlicense"]
 
@@ -171,7 +174,7 @@ def main():
             lis = ((r.get("license") or {}).get("spdx_id") or lisans).upper()
             kunye = f"Kaynak: GitHub {ad} · lisans {lis} · ★{r.get('stargazers_count', 0)} · {neden} · son güncelleme {str(r.get('pushed_at', ''))[:10]}."
             try:
-                cevap = json.loads(istek(BRAIN + "/kb/ingest", timeout=120, data={
+                cevap = json.loads(istek(BRAIN + "/kb/ingest", timeout=120, hdr={**UA, **YONETIM}, data={
                     "baslik": f"GitHub: {ad}"[:220],
                     "metin": f"{ad}: {aciklama}. {kunye} {metin}"[:2200],
                     "url": r.get("html_url"),

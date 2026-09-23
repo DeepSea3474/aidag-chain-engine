@@ -2,6 +2,7 @@
 name = "soulware-core"
 version = "0.1.0"
 edition = "2021"
+license-file = "../LICENSE"
 description = "SoulwareAI cekirdegi — Beyin-Router (Claude bugun) + halusinasyon savunmasi + gercek AIDAG-Chain'e imzali kayit."
 
 [[bin]]

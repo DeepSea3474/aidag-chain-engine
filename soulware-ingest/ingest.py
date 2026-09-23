@@ -18,7 +18,10 @@ Kullanım:
   python3 soulware-ingest/ingest.py --config 20231101.tr --count 200
   python3 soulware-ingest/ingest.py --kb http://127.0.0.1:8646 --config 20231101.en --count 100 --offset 0
 """
-import argparse, json, time, urllib.request, urllib.parse, urllib.error
+import argparse, json, os, time, urllib.request, urllib.parse, urllib.error
+# Yonetim ucu (/kb/ingest) Bearer token'i: YALNIZ KUBRA'ya gonderilir (GitHub/OpenAlex'e DEGIL).
+YONETIM = ({"Authorization": "Bearer " + os.environ["SOULWARE_YONETIM_TOKEN"]}
+           if os.environ.get("SOULWARE_YONETIM_TOKEN") else {})
 
 UA = "SoulwareAI-KUBRA/0.1 (grounding ingest; CC BY-SA)"
 HF = "https://datasets-server.huggingface.co/rows"
@@ -42,7 +45,7 @@ def ozet(text, max_len):
 def kb_ingest(kb, baslik, metin, url):
     body = json.dumps({"baslik": baslik, "metin": metin, "url": url}).encode()
     req = urllib.request.Request(kb.rstrip("/") + "/kb/ingest", data=body,
-                                 headers={"Content-Type": "application/json"})
+                                 headers={"Content-Type": "application/json", **YONETIM})
     try:
         with urllib.request.urlopen(req, timeout=20) as r:
             v = json.loads(r.read().decode())

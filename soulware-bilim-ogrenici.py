@@ -18,6 +18,9 @@ import json, os, time, urllib.parse, urllib.request
 
 MAILTO   = "akyuzaydin7434@gmail.com"
 BRAIN    = os.environ.get("SOULWARE_BRAIN_URL", "http://127.0.0.1:8646")
+# Yonetim ucu (/kb/ingest) Bearer token'i: YALNIZ KUBRA'ya gonderilir (GitHub/OpenAlex'e DEGIL).
+YONETIM = ({"Authorization": "Bearer " + os.environ["SOULWARE_YONETIM_TOKEN"]}
+           if os.environ.get("SOULWARE_YONETIM_TOKEN") else {})
 COORD    = os.environ.get("SOULWARE_COORD_URL", "http://127.0.0.1:8647")
 DURUM    = os.environ.get("SOULWARE_BILIM_DURUM", "/root/aidag-lsc/soulware-knowledge/bilim-durum.json")
 BEKLE    = int(os.environ.get("SOULWARE_BILIM_BEKLE", "240"))       # batch arası saniye (nazik)
@@ -54,8 +57,8 @@ def abs_coz(inv):
             k[y] = w
     return " ".join(k[i] for i in sorted(k))
 
-def get_json(url, timeout=40, data=None):
-    hdr = {"User-Agent": f"SoulwareAI-KUBRA/0.1 (mailto:{MAILTO})"}
+def get_json(url, timeout=40, data=None, ek_hdr=None):
+    hdr = {"User-Agent": f"SoulwareAI-KUBRA/0.1 (mailto:{MAILTO})", **(ek_hdr or {})}
     if data is not None:
         data = json.dumps(data).encode(); hdr["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, headers=hdr)
@@ -123,7 +126,7 @@ def main():
             if not bas or len(ab) < 200:
                 continue
             try:
-                r = get_json(BRAIN + "/kb/ingest", timeout=90,
+                r = get_json(BRAIN + "/kb/ingest", timeout=90, ek_hdr=YONETIM,
                              data={"baslik": bas[:220], "metin": f"{bas}. {ab}"[:2200], "url": doi})
                 if r.get("ok"):
                     gorulen.add(doi); eklendi += 1
