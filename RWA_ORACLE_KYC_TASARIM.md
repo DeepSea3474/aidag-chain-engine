@@ -71,6 +71,17 @@ Dal: `rwa-oracle-kyc` · Durum: GELISTIRME (mainnet'te KAPALI, `RWA_MAINNET_AKTI
 - Kayit anahtari (adres, kurum): her kurum yalniz KENDI onayini verir/iptal eder.
 - `isApproved(adres)` = rolu HALA AKTIF en az bir kurumun onayi var.
 
+## KUBRA anahtar rotasyonu
+- `RWA_YASAKLI_ADRESLER` KUBRA'nin ADRESINI pinler (`KUBRA_IMZA_ADRESI`). KUBRA imza anahtari
+  degisirse (rotasyon, kayip, sizinti) liste MUTLAKA guncellenmelidir; aksi halde yeni KUBRA
+  adresi yasak listesinde olmaz (M-of-N rol vermedikce yazamaz, ama ikinci savunma katmani kaybolur).
+- Yeni adres EKLENIR; eski adres listeden CIKARILMAZ (konsensus sabiti: gecmisin replay'i + ele
+  gecmis eski anahtar riski). Liste degisikligi konsensus degisikligidir (PR + replay + esgudumlu deploy).
+- Yeni anahtar, yeni adres listeye girip deploy edilmeden imza atmaya BASLAMAMALI
+  (soulware-core anahtar dosyasi yoksa ya da bicimi gecersizse acilista yeni anahtar uretip
+  dosyanin uzerine yazar -> servis her acilista loglanan "imzalayan" adresi listeyle karsilastirilmali).
+- Adim adim prosedur: `BAKIM-REHBERI.md` bolum 8 "KUBRA IMZA ANAHTARI ROTASYONU".
+
 ## Aktivasyon
 - Devnet/testnet: acik. Mainnet: `zincir_saati >= RWA_MAINNET_AKTIVASYON` (bugun None = kapali).
   Aktivasyon tarihi ayri PR + mainnet replay kaniti + onay ile ayarlanir.

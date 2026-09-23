@@ -124,6 +124,49 @@ cd /var/www/aidag-chain && npm run build && pm2 restart aidag-web
 
 ---
 
+## 8. KUBRA IMZA ANAHTARI ROTASYONU (soulware-core / soulware-kubra)
+
+KUBRA'nin zincir imza adresi konsensusteki RWA yasak listesinde PINLIDIR
+(lsc-engine/src/mainnet.rs: KUBRA_IMZA_ADRESI + RWA_YASAKLI_ADRESLER). Anahtar
+degisirse adres degisir; liste GUNCELLENMEZSE yeni KUBRA adresi yasak listesinde
+OLMAZ. (Yeni adrese rol M-of-N verilmedikce yazamaz; ama ikinci koruma katmani
+kaybolur.) Ayrinti: RWA_ORACLE_KYC_TASARIM.md "KUBRA anahtar rotasyonu".
+
+KURALLAR:
+- ESKI adres listeden CIKARILMAZ. Liste konsensus sabitidir: cikarmak gecmisin
+  yeniden oynatilmasini degistirebilir; eski anahtar ele gecmis de olabilir.
+  Yeni adres EKLENIR (liste yalniz buyur).
+- Liste degisikligi KONSENSUS degisikligidir: PR + testler + MAINNET REPLAY +
+  iki mainnet dugumu AYNI ANDA ayni binary (bolum 7). Mainnet'te etkinlestirme onay ister.
+- Ozel anahtar ASLA ekrana, log'a, PR'a, sohbete yazilmaz. Yalniz ACIK adres kullanilir.
+
+ADIMLAR:
+1. Yeni anahtari uret ve ACIK adresini ogren (ozel anahtari gostermeden).
+   Adres = public_key_to_adres(ed25519 acik anahtar). soulware-core acilista
+   "imzalayan : 0x..." satirini basar; bu satir tek guvenli kaynaktir.
+   UYARI: SOULWARE_KEY_PATH'teki dosya (varsayilan /root/aidag-lsc/.soulware.key)
+   YOKSA ya da BICIMI GECERSIZSE soulware-core acilista YENI anahtar URETIR ve
+   dosyanin UZERINE YAZAR (soulware-core/src/main.rs anahtar_yukle_veya_uret).
+   Rotasyonu "dosyayi silip yeniden baslat" ile yapmak, yeni adres listeye
+   girmeden imza atmaya baslar -> once 2-4. adimlar. Bozuk dosya da ayni
+   etkiyi yapar: servis beklenmedik adresle acilirsa 5. adimdaki kontrol yakalar.
+2. mainnet.rs: KUBRA_IMZA_ADRESI'ni yeni adresle degistir; ESKI degeri ayri bir
+   sabit olarak (orn. KUBRA_IMZA_ADRESI_ESKI_1) RWA_YASAKLI_ADRESLER'de BIRAK.
+3. Testi guncelle: node.rs rwa_gercek_kubra_adresi_yasakli_rol_alamaz icindeki
+   hex'i yeni adrese cevir; eski adresin de yasakli kaldigini dogrulayan assert ekle.
+4. Testler yesil + MAINNET REPLAY birebir (TESTLER.md) -> PR -> main -> bolum 7 deploy.
+5. ANCAK deploy sonrasi soulware-kubra'yi yeni anahtarla baslat ve dogrula:
+     journalctl -u soulware-kubra -n 50 --no-pager | grep 'imzalayan'
+   Basilan adres mainnet.rs'teki KUBRA_IMZA_ADRESI ile AYNI olmali.
+6. Yeni adrese rol verilmedigini kontrol et (bos olmali):
+     curl -s http://127.0.0.1:8645/kurum/<yeni_adres_hex_0xsiz> | grep roller
+7. Eski anahtar dosyasini guvenli sekilde imha et/arsivle (OFFLINE); adresi listede kalir.
+
+Not: mainnet'te RWA kapaliyken (RWA_MAINNET_AKTIVASYON = None) liste davranisi
+etkilemez; yine de rotasyonda liste HER ZAMAN guncellenir ki aktivasyonda eksik kalmasin.
+
+---
+
 ## DUZENLI BAKIM RUTINI (onerilen)
 
 HAFTALIK:
