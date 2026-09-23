@@ -8,7 +8,8 @@ Dal: `rwa-oracle-kyc` · Durum: GELISTIRME (mainnet'te KAPALI, `RWA_MAINNET_AKTI
 - Kurum imzasi = vertex'in ed25519 imzasi (kaydeden = imzalayan).
 - Onay/rapor yetkisi KURUMDA. Rol verme/iptal M-of-N YONETIM imzasiyla (owner tek anahtarla rol VEREMEZ).
   Owner yalniz akis tanimlar (tip=18); deger/onay YAZAMAZ, rol ALAMAZ.
-- Yapay zeka (KUBRA) imza/yazma yetkisine SAHIP DEGIL: `mainnet::RWA_YASAKLI_ADRESLER`.
+- Yapay zeka (KUBRA) imza/yazma yetkisine SAHIP DEGIL: `mainnet::RWA_YASAKLI_ADRESLER` =
+  [`KUBRA_IMZA_ADRESI` 0x1f4b6bc66533f80f76c0823d5553b1456653d747] (servis gunlugundeki acik adres).
 - Tum zaman kurallari ZINCIR SAATIYLE (vertex zamani geriye tarihlenebilir).
 
 ## Islem tipleri
@@ -48,6 +49,11 @@ Dal: `rwa-oracle-kyc` · Durum: GELISTIRME (mainnet'te KAPALI, `RWA_MAINNET_AKTI
   Float yok, i128 + 256-bit karsilastirma; `(deger, adres)` tam siralamasi -> girdi sirasindan bagimsiz.
 - Devre kesici: onceki yayina gore `kesici_bps` asilirsa akis DURUR (deger aday, yayinlanmaz).
   Durmus akis, ardisik bir tur adayi `kesici_bps` icinde dogrularsa yeniden acilir (owner mudahalesi yok).
+- OLCUM ZAMANI PENCERESI: `olcum_zamani > zincir_saati` (ileri tarihli) ya da
+  `olcum_zamani + bayat_sn < zincir_saati` (pencereden eski) olan rapor REDDEDILIR.
+  NOT: `olcum_zamani` kurumun kendi beyanidir. Bu kontrol yalan soyleyen kurumu DEGIL,
+  gecikmeli aktarimi (bayat olcumun taze gibi islenmesini) yakalar. Asil koruma
+  M-of-N rol yonetimi + medyan/asiri sapma elemesidir.
 - Okuma (`latestRoundData` karsiligi): durmus ya da `zincir_saati - guncelleme > bayat_sn` ise HATA.
 - Akis basina son 1024 tur saklanir.
 

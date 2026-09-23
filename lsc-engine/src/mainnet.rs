@@ -393,7 +393,16 @@ pub const RWA_ROL_BILDIRIM_SURESI: u64 = 3 * 86_400;
 /// (node.rs). Buraya KUBRA (soulware-core) imza adresi eklenmelidir: yapay zeka bu
 /// modullerde imza/yazma yetkisine SAHIP DEGILDIR. Adres ACIK bilgidir
 /// (soulware-core acilisinda "imzalayan : 0x..." satiri) — ozel anahtar gerekmez.
-pub const RWA_YASAKLI_ADRESLER: &[[u8; 20]] = &[];
+pub const RWA_YASAKLI_ADRESLER: &[[u8; 20]] = &[KUBRA_IMZA_ADRESI];
+
+/// KUBRA (soulware-core / soulware-kubra servisi) zincir imza adresi:
+/// 0x1f4b6bc66533f80f76c0823d5553b1456653d747. Kaynak: servis gunlugundeki
+/// "imzalayan : 0x..." satiri (soulware-core main.rs: public_key_to_adres ile
+/// turetilir, konsensusle AYNI turetim). Yalniz ACIK adres; ozel anahtar DEGIL.
+pub const KUBRA_IMZA_ADRESI: [u8; 20] = [
+    0x1f, 0x4b, 0x6b, 0xc6, 0x65, 0x33, 0xf8, 0x0f, 0x76, 0xc0, 0x82, 0x3d, 0x55, 0x53, 0xb1, 0x45,
+    0x66, 0x53, 0xd7, 0x47,
+];
 
 /// RWA YONETIM (M-of-N) MAINNET IMZACILARI: ed25519 ACIK anahtarlari (32 bayt).
 /// Rol verme/iptal, imzaci ve esik degisikligi YALNIZ bu kumenin esik kadar

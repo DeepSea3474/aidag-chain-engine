@@ -85,6 +85,8 @@ pub struct Akis {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RaporSonuc {
     AkisYok,
+    /// `olcum_zamani` zincir saatinden ileride ya da `bayat_sn` penceresinden eski.
+    OlcumZamaniGecersiz,
     YanlisTur { acik: u64 },
     Tekrar,
     /// Eklendi, tur henuz kapanmadi.
@@ -160,6 +162,15 @@ impl OracleRegistry {
         let Some(akis) = self.akislar.get_mut(&rapor.akis_no) else {
             return RaporSonuc::AkisYok;
         };
+        // OLCUM ZAMANI PENCERESI (zincir saatine gore): ileri tarihli ya da
+        // `bayat_sn`'den eski olcum reddedilir. NOT: bu, kurumun beyanidir; yalan
+        // soyleyen kurumu DEGIL, gecikmeli aktarimi (bayat olcumun "taze" gibi
+        // islenmesini) yakalar. Asil koruma M-of-N rol yonetimi + medyan/elemedir.
+        if rapor.olcum_zamani > simdi
+            || rapor.olcum_zamani.saturating_add(u64::from(akis.tanim.bayat_sn)) < simdi
+        {
+            return RaporSonuc::OlcumZamaniGecersiz;
+        }
         if rapor.tur_no != akis.acik_tur {
             return RaporSonuc::YanlisTur { acik: akis.acik_tur };
         }
@@ -515,8 +526,9 @@ mod tests {
         }
     }
 
-    fn rapor(tur: u64, deger: i128) -> OracleRapor {
-        OracleRapor { akis_no: 1, tur_no: tur, deger, olcum_zamani: 0, veri_hash: [deger as u8; 32] }
+    /// Olcum zamani = islem ani (gecerli pencere icinde).
+    fn rapor(tur: u64, deger: i128, olcum: u64) -> OracleRapor {
+        OracleRapor { akis_no: 1, tur_no: tur, deger, olcum_zamani: olcum, veri_hash: [deger as u8; 32] }
     }
 
     fn k(n: u8) -> Adres {
@@ -531,7 +543,7 @@ mod tests {
     fn tur_kapat(o: &mut OracleRegistry, tur: u64, degerler: &[i128], t: u64) -> RaporSonuc {
         let mut son = RaporSonuc::Eklendi;
         for (i, d) in degerler.iter().enumerate() {
-            son = o.rapor_isle(k(i as u8 + 1), &rapor(tur, *d), t, herkes);
+            son = o.rapor_isle(k(i as u8 + 1), &rapor(tur, *d, t), t, herkes);
         }
         son
     }
@@ -548,11 +560,11 @@ mod tests {
     fn m_rapor_gelince_medyan_yayinlanir() {
         let mut o = OracleRegistry::yeni();
         o.tanimla(tanim(3), 0);
-        assert_eq!(o.rapor_isle(k(1), &rapor(1, 1000), 100, herkes), RaporSonuc::Eklendi);
-        assert_eq!(o.rapor_isle(k(2), &rapor(1, 1010), 101, herkes), RaporSonuc::Eklendi);
+        assert_eq!(o.rapor_isle(k(1), &rapor(1, 1000, 100), 100, herkes), RaporSonuc::Eklendi);
+        assert_eq!(o.rapor_isle(k(2), &rapor(1, 1010, 101), 101, herkes), RaporSonuc::Eklendi);
         assert_eq!(o.son_veri(1, 101), Err(OkumaHatasi::VeriYok));
         assert_eq!(
-            o.rapor_isle(k(3), &rapor(1, 1005), 102, herkes),
+            o.rapor_isle(k(3), &rapor(1, 1005, 102), 102, herkes),
             RaporSonuc::Yayinlandi { tur: 1, deger: 1005 }
         );
         let t = o.son_veri(1, 102).unwrap();
@@ -564,18 +576,18 @@ mod tests {
     fn ayni_kurum_ayni_tura_iki_kez_sayilmaz() {
         let mut o = OracleRegistry::yeni();
         o.tanimla(tanim(2), 0);
-        o.rapor_isle(k(1), &rapor(1, 1000), 1, herkes);
-        assert_eq!(o.rapor_isle(k(1), &rapor(1, 1000), 2, herkes), RaporSonuc::Tekrar);
+        o.rapor_isle(k(1), &rapor(1, 1000, 1), 1, herkes);
+        assert_eq!(o.rapor_isle(k(1), &rapor(1, 1000, 2), 2, herkes), RaporSonuc::Tekrar);
         assert_eq!(o.akis(1).unwrap().acik_raporlar.len(), 1);
     }
 
     #[test]
     fn yanlis_tur_ve_tanimsiz_akis_reddedilir() {
         let mut o = OracleRegistry::yeni();
-        assert_eq!(o.rapor_isle(k(1), &rapor(1, 1), 1, herkes), RaporSonuc::AkisYok);
+        assert_eq!(o.rapor_isle(k(1), &rapor(1, 1, 1), 1, herkes), RaporSonuc::AkisYok);
         o.tanimla(tanim(1), 0);
-        assert_eq!(o.rapor_isle(k(1), &rapor(2, 1), 1, herkes), RaporSonuc::YanlisTur { acik: 1 });
-        assert_eq!(o.rapor_isle(k(1), &rapor(0, 1), 1, herkes), RaporSonuc::YanlisTur { acik: 1 });
+        assert_eq!(o.rapor_isle(k(1), &rapor(2, 1, 1), 1, herkes), RaporSonuc::YanlisTur { acik: 1 });
+        assert_eq!(o.rapor_isle(k(1), &rapor(0, 1, 1), 1, herkes), RaporSonuc::YanlisTur { acik: 1 });
     }
 
     #[test]
@@ -585,11 +597,11 @@ mod tests {
         tur_kapat(&mut o, 1, &[1000, 1001, 999], 10);
         // tur 2: 4 rapor, biri %2'den fazla sapiyor; 4. gelene kadar 3'te kapanabilir
         // mi? 1000,1002,1500 -> medyan 1002, 1500 elenir, 2 kalir < 3 -> ACIK kalir.
-        assert_eq!(o.rapor_isle(k(1), &rapor(2, 1000), 20, herkes), RaporSonuc::Eklendi);
-        assert_eq!(o.rapor_isle(k(2), &rapor(2, 1500), 20, herkes), RaporSonuc::Eklendi);
-        assert_eq!(o.rapor_isle(k(3), &rapor(2, 1002), 20, herkes), RaporSonuc::Eklendi);
+        assert_eq!(o.rapor_isle(k(1), &rapor(2, 1000, 20), 20, herkes), RaporSonuc::Eklendi);
+        assert_eq!(o.rapor_isle(k(2), &rapor(2, 1500, 20), 20, herkes), RaporSonuc::Eklendi);
+        assert_eq!(o.rapor_isle(k(3), &rapor(2, 1002, 20), 20, herkes), RaporSonuc::Eklendi);
         assert_eq!(
-            o.rapor_isle(k(4), &rapor(2, 1001), 21, herkes),
+            o.rapor_isle(k(4), &rapor(2, 1001, 21), 21, herkes),
             RaporSonuc::Yayinlandi { tur: 2, deger: 1001 }
         );
         let t = o.tur_verisi(1, 2).unwrap();
@@ -601,9 +613,9 @@ mod tests {
     fn bayat_acik_tur_raporlari_dusurulur() {
         let mut o = OracleRegistry::yeni();
         o.tanimla(tanim(2), 0);
-        o.rapor_isle(k(1), &rapor(1, 1000), 100, herkes);
+        o.rapor_isle(k(1), &rapor(1, 1000, 100), 100, herkes);
         // 3600 sn'den fazla sonra ikinci rapor: ilk rapor bayat -> tur kapanmaz.
-        assert_eq!(o.rapor_isle(k(2), &rapor(1, 1000), 100 + 3_601, herkes), RaporSonuc::Eklendi);
+        assert_eq!(o.rapor_isle(k(2), &rapor(1, 1000, 100 + 3_601), 100 + 3_601, herkes), RaporSonuc::Eklendi);
         assert_eq!(o.akis(1).unwrap().acik_raporlar.len(), 1);
         assert_eq!(o.akis(1).unwrap().acik_tur_baslangic, 3_701);
     }
@@ -612,7 +624,7 @@ mod tests {
     fn son_veri_bayatlasir() {
         let mut o = OracleRegistry::yeni();
         o.tanimla(tanim(1), 0);
-        o.rapor_isle(k(1), &rapor(1, 1000), 500, herkes);
+        o.rapor_isle(k(1), &rapor(1, 1000, 500), 500, herkes);
         assert!(o.son_veri(1, 500 + 3_600).is_ok());
         assert_eq!(o.son_veri(1, 500 + 3_601), Err(OkumaHatasi::Bayat));
         assert_eq!(o.son_veri(9, 500), Err(OkumaHatasi::AkisYok));
@@ -622,22 +634,22 @@ mod tests {
     fn devre_kesici_durdurur_ve_ardisik_turla_acilir() {
         let mut o = OracleRegistry::yeni();
         o.tanimla(tanim(1), 0);
-        assert!(matches!(o.rapor_isle(k(1), &rapor(1, 1000), 1, herkes), RaporSonuc::Yayinlandi { .. }));
+        assert!(matches!(o.rapor_isle(k(1), &rapor(1, 1000, 1), 1, herkes), RaporSonuc::Yayinlandi { .. }));
         // %50 sicrama -> DURUR, yayinlanmaz, okuma hata verir.
         assert_eq!(
-            o.rapor_isle(k(1), &rapor(2, 1500), 2, herkes),
+            o.rapor_isle(k(1), &rapor(2, 1500, 2), 2, herkes),
             RaporSonuc::KesiciDurdu { tur: 2, aday: 1500 }
         );
         assert_eq!(o.son_veri(1, 2), Err(OkumaHatasi::Durduruldu));
         assert!(o.tur_verisi(1, 2).is_none(), "aday tur yayinlanmis sayilmaz");
         // Ardisik tur adaydan yine cok farkli (900) -> hala durgun, aday guncellenir.
         assert_eq!(
-            o.rapor_isle(k(1), &rapor(3, 900), 3, herkes),
+            o.rapor_isle(k(1), &rapor(3, 900, 3), 3, herkes),
             RaporSonuc::KesiciDurdu { tur: 3, aday: 900 }
         );
         // Ardisik tur adayi dogruluyor (%10 icinde) -> yayin + akis acilir.
         assert_eq!(
-            o.rapor_isle(k(1), &rapor(4, 950), 4, herkes),
+            o.rapor_isle(k(1), &rapor(4, 950, 4), 4, herkes),
             RaporSonuc::Yayinlandi { tur: 4, deger: 950 }
         );
         assert_eq!(o.son_veri(1, 4).unwrap().deger, 950);
@@ -648,12 +660,12 @@ mod tests {
     fn rolu_iptal_edilenin_acik_raporu_sayilmaz() {
         let mut o = OracleRegistry::yeni();
         o.tanimla(tanim(2), 0);
-        o.rapor_isle(k(1), &rapor(1, 1000), 1, herkes);
+        o.rapor_isle(k(1), &rapor(1, 1000, 1), 1, herkes);
         // k(1)'in rolu iptal edildi; k(2) raporlayinca yalniz 1 gecerli -> kapanmaz.
         let k1_haric = |a: &Adres| *a != k(1);
-        assert_eq!(o.rapor_isle(k(2), &rapor(1, 1000), 2, k1_haric), RaporSonuc::Eklendi);
+        assert_eq!(o.rapor_isle(k(2), &rapor(1, 1000, 2), 2, k1_haric), RaporSonuc::Eklendi);
         assert_eq!(
-            o.rapor_isle(k(3), &rapor(1, 1002), 3, k1_haric),
+            o.rapor_isle(k(3), &rapor(1, 1002, 3), 3, k1_haric),
             RaporSonuc::Yayinlandi { tur: 1, deger: 1000 }
         );
         let t = o.tur_verisi(1, 1).unwrap();
@@ -665,13 +677,32 @@ mod tests {
         let mut o = OracleRegistry::yeni();
         o.tanimla(tanim(1), 0);
         for tur in 1..=(ORACLE_TUR_GECMISI as u64 + 5) {
-            o.rapor_isle(k(1), &rapor(tur, 1000), tur, herkes);
+            o.rapor_isle(k(1), &rapor(tur, 1000, tur), tur, herkes);
         }
         let a = o.akis(1).unwrap();
         assert_eq!(a.turlar.len(), ORACLE_TUR_GECMISI);
         assert!(o.tur_verisi(1, 5).is_none());
         assert!(o.tur_verisi(1, 6).is_some());
         assert!(o.son_veri(1, ORACLE_TUR_GECMISI as u64 + 5).is_ok());
+    }
+
+    #[test]
+    fn olcum_zamani_ileride_veya_pencereden_eskiyse_reddedilir() {
+        let mut o = OracleRegistry::yeni();
+        o.tanimla(tanim(1), 0); // bayat_sn = 3600
+        let simdi = 10_000;
+        let r = |olcum| OracleRapor { akis_no: 1, tur_no: 1, deger: 1000, olcum_zamani: olcum, veri_hash: [0; 32] };
+        assert_eq!(o.rapor_isle(k(1), &r(simdi + 1), simdi, herkes), RaporSonuc::OlcumZamaniGecersiz, "ileri tarihli");
+        assert_eq!(o.rapor_isle(k(1), &r(simdi - 3_601), simdi, herkes), RaporSonuc::OlcumZamaniGecersiz, "pencereden eski");
+        assert_eq!(o.rapor_isle(k(1), &r(u64::MAX), simdi, herkes), RaporSonuc::OlcumZamaniGecersiz);
+        assert!(o.akis(1).unwrap().acik_raporlar.is_empty(), "reddedilen rapor tura girmez");
+        // Sinirlar dahil: tam pencere basi ve tam zincir saati kabul.
+        assert_eq!(
+            o.rapor_isle(k(1), &r(simdi - 3_600), simdi, herkes),
+            RaporSonuc::Yayinlandi { tur: 1, deger: 1000 }
+        );
+        let r2 = OracleRapor { tur_no: 2, ..r(simdi) };
+        assert!(matches!(o.rapor_isle(k(1), &r2, simdi, herkes), RaporSonuc::Yayinlandi { tur: 2, .. }));
     }
 
     #[test]

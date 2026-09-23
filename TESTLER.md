@@ -212,6 +212,8 @@ Her biri once ESKI kodda BASARISIZ, yeni kodda BASARILI oldugu dogrulanarak ekle
 - node::rwa_tests::rwa_eski_tarihli_vertex_bayatligi_atlatamaz — eski tarihli vertex zincir saatini geri almaz, bayat veriyi tazelemez, rapor zamani = zincir saati
 - node::rwa_tests::rwa_kurum_dogrulama_* — kurum dogrulama yalniz M-of-N; owner/kurum/tek imza veremez; kayitsiz adres dogrulanmaz; mevcut belge/kurum kayitlari birebir korunur
 - node::rwa_tests::rwa_mainnet_genesis_ve_mevcut_vertexler_kurum_dogrulamadan_etkilenmez — pinli genesis + mevcut tip vertex'ler; dogrulama denemesi kayitlari degistirmez
+- node::rwa_tests::rwa_gercek_kubra_adresi_yasakli_rol_alamaz — gercek KUBRA adresi sabit yasak listesinde; rol alamaz
+- node::rwa_tests::rwa_olcum_zamani_ileri_veya_eskiyse_rapor_reddedilir / rwa::tests::olcum_zamani_ileride_veya_pencereden_eskiyse_reddedilir — olcum zamani penceresi
 - tx::rwa_tx_tests — tip 17..20 kodlama: gidis-donus, eksik/fazla bayt, yanlis tip, gecersiz alan, tip numarasi cakismasi
 - oracle_hesap::tests — alt medyan, sapma siniri, i128 sinirlarinda tasmasiz 256-bit karsilastirma, eleme, girdi sirasindan bagimsizlik, kesici, bayatlik
 - rwa::tests — tur kapanisi, tekrar rapor, yanlis tur, bayat acik tur, devre kesici durdur/ac, rolu iptal edilenin raporu, tur gecmisi budama, KYC onay/iptal

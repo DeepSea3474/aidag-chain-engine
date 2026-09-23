@@ -5328,8 +5328,8 @@ mod rwa_tests {
         }
     }
 
-    fn rapor(tur: u64, deger: i128) -> Vec<u8> {
-        OracleRapor { akis_no: AKIS, tur_no: tur, deger, olcum_zamani: 0, veri_hash: [7; 32] }
+    fn rapor_olcum(tur: u64, deger: i128, olcum: u64) -> Vec<u8> {
+        OracleRapor { akis_no: AKIS, tur_no: tur, deger, olcum_zamani: olcum, veri_hash: [7; 32] }
             .encode()
     }
 
@@ -5376,6 +5376,11 @@ mod rwa_tests {
             let pks: Vec<[u8; 32]> = ys.iter().map(yonetim_pk).collect();
             node.rwa_yonetim_kur(&pks, 2).expect("2-of-3 kurulum");
             Kurulum { node, osk, ys, gid, son: gid, t: T0, dolgu: 0 }
+        }
+
+        /// Rapor: olcum zamani = zincirin su anki zamani (gecerli pencere).
+        fn rapor(&self, tur: u64, deger: i128) -> Vec<u8> {
+            rapor_olcum(tur, deger, self.t)
         }
 
         fn nonce(&self) -> u64 {
@@ -5447,11 +5452,11 @@ mod rwa_tests {
         assert!(!k.node.kurum_rol_aktif_mi(&adres(&r), ROL_ORACLE_RAPORLAYICI, AKIS));
         // Bildirim suresinden 1 sn once: rapor YOK SAYILIR.
         k.ilerle(BILDIRIM - 1);
-        k.gonder(&r, rapor(1, 1000));
+        k.gonder(&r, k.rapor(1, 1000));
         assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::VeriYok);
         // Tam sinirda: rol etkin, rapor kabul.
         k.ilerle(1);
-        k.gonder(&r, rapor(1, 1000));
+        k.gonder(&r, k.rapor(1, 1000));
         assert_eq!(k.node.oracle_son_veri(AKIS).unwrap().deger, 1000);
         assert_eq!(
             k.node.kurum_rolleri(&adres(&r)),
@@ -5467,7 +5472,7 @@ mod rwa_tests {
         // Herkes kendini "Devlet" diye kaydedebilir; bu RAPOR HAKKI VERMEZ.
         k.gonder(&sahte, KurumKaydiTx::new(0, "Sahte Bakanlik".into()).encode());
         k.ilerle(BILDIRIM);
-        k.gonder(&sahte, rapor(1, 1));
+        k.gonder(&sahte, k.rapor(1, 1));
         k.gonder(&sahte, KycKayit { adres: [9; 20], onay: true, kanit_hash: [0; 32] }.encode());
         assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::VeriYok);
         assert!(!k.node.kyc_onayli_mi(&[9; 20]));
@@ -5513,7 +5518,7 @@ mod rwa_tests {
         k.owner(akis_tanimi(1).encode());
         k.owner(OracleAkisTanim { akis_no: 2, ..akis_tanimi(1) }.encode());
         k.yetkili_kurum(&r, ROL_ORACLE_RAPORLAYICI, 2);
-        k.gonder(&r, rapor(1, 1000)); // akis 1 -> yetkisiz
+        k.gonder(&r, k.rapor(1, 1000)); // akis 1 -> yetkisiz
         assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::VeriYok);
     }
 
@@ -5527,7 +5532,7 @@ mod rwa_tests {
         k.rol(KurumYetki::new(owner, ROL_KYC_ONAYLAYICI, 0, true));
         k.ilerle(BILDIRIM);
         assert!(k.node.kurum_rolleri(&owner).is_empty(), "owner'a rol verilemez");
-        k.owner(rapor(1, 1000));
+        k.owner(k.rapor(1, 1000));
         k.owner(KycKayit { adres: [9; 20], onay: true, kanit_hash: [0; 32] }.encode());
         assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::VeriYok);
         assert!(!k.node.kyc_onayli_mi(&[9; 20]));
@@ -5545,7 +5550,7 @@ mod rwa_tests {
         k.rol(KurumYetki::new(adres(&kubra), ROL_KYC_ONAYLAYICI, 0, true));
         k.ilerle(BILDIRIM);
         assert!(k.node.kurum_rolleri(&adres(&kubra)).is_empty());
-        k.gonder(&kubra, rapor(1, 1000));
+        k.gonder(&kubra, k.rapor(1, 1000));
         k.gonder(&kubra, KycKayit { adres: [9; 20], onay: true, kanit_hash: [0; 32] }.encode());
         assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::VeriYok);
         assert!(!k.node.kyc_onayli_mi(&[9; 20]));
@@ -5563,12 +5568,12 @@ mod rwa_tests {
         k.ilerle(BILDIRIM);
         assert_eq!(k.node.oracle_raporlayici_sayisi(AKIS), 4, "N = 4");
         // Ayni kurum ayni tura farkli vertex'le iki kez: bir kez sayilir.
-        k.gonder(&ks[0], rapor(1, 1000));
-        k.gonder(&ks[0], rapor(1, 1000));
-        k.gonder(&ks[1], rapor(1, 5000)); // asiri sapan
+        k.gonder(&ks[0], k.rapor(1, 1000));
+        k.gonder(&ks[0], k.rapor(1, 1000));
+        k.gonder(&ks[1], k.rapor(1, 5000)); // asiri sapan
         assert!(k.node.oracle_son_veri(AKIS).is_err(), "3 rapor ama 1 elenir -> kalan 2 < M");
-        k.gonder(&ks[2], rapor(1, 1004));
-        k.gonder(&ks[3], rapor(1, 1002));
+        k.gonder(&ks[2], k.rapor(1, 1004));
+        k.gonder(&ks[3], k.rapor(1, 1002));
         let t = k.node.oracle_son_veri(AKIS).unwrap();
         assert_eq!((t.tur_no, t.deger, t.guncelleme), (1, 1002, k.t));
         assert_eq!(t.raporlar.iter().filter(|r| r.elendi).count(), 1);
@@ -5594,7 +5599,7 @@ mod rwa_tests {
         k.rol(KurumYetki::new(adres(&kyc), ROL_KYC_ONAYLAYICI, 0, false));
         assert!(!k.node.kyc_onayli_mi(&musteri));
         k.rol(KurumYetki::new(adres(&orc), ROL_ORACLE_RAPORLAYICI, AKIS, false));
-        k.gonder(&orc, rapor(1, 1000));
+        k.gonder(&orc, k.rapor(1, 1000));
         assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::VeriYok);
         // Yeniden verilen rol yine bildirim suresi bekler.
         k.rol(KurumYetki::new(adres(&kyc), ROL_KYC_ONAYLAYICI, 0, true));
@@ -5662,7 +5667,7 @@ mod rwa_tests {
         k.yetkili_kurum(&ks[0], ROL_KYC_ONAYLAYICI, 0);
         for (tur, d) in [(1u64, [1000i128, 1010, 990]), (2, [1005, 1001, 1003])] {
             for (sk, v) in ks.iter().zip(d) {
-                k.gonder(sk, rapor(tur, v));
+                k.gonder(sk, k.rapor(tur, v));
             }
         }
         k.gonder(&ks[0], KycKayit { adres: [0xD1; 20], onay: true, kanit_hash: [1; 32] }.encode());
@@ -5957,7 +5962,7 @@ mod rwa_tests {
         k.gonder(&servis, OracleAkisTanim { akis_no: 99, ..akis_tanimi(1) }.encode());
         k.ilerle(BILDIRIM);
         // tip=19 ve tip=20.
-        k.gonder(&servis, rapor(1, 1_000));
+        k.gonder(&servis, k.rapor(1, 1_000));
         k.gonder(&servis, KycKayit { adres: [0xC9; 20], onay: true, kanit_hash: [0; 32] }.encode());
         // KANIT: hicbir RWA durumu degismedi.
         assert!(k.node.kurum_rolleri(&sa).is_empty(), "rol yok");
@@ -5982,8 +5987,8 @@ mod rwa_tests {
         let b = anahtar(0x92 ^ 0x10);
         k.yetkili_kurum(&a, ROL_ORACLE_RAPORLAYICI, AKIS);
         k.yetkili_kurum(&b, ROL_ORACLE_RAPORLAYICI, AKIS);
-        k.gonder(&a, rapor(1, 1000));
-        k.gonder(&b, rapor(1, 1001));
+        k.gonder(&a, k.rapor(1, 1000));
+        k.gonder(&b, k.rapor(1, 1001));
         let yayin = k.t;
         assert_eq!(k.node.oracle_son_veri(AKIS).unwrap().guncelleme, yayin);
         k.ilerle(3_601);
@@ -5994,13 +5999,15 @@ mod rwa_tests {
         assert_eq!(k.node.zincir_saati(), saat, "zincir saati monoton");
         assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::Bayat);
         // 2) Eski tarihli RAPOR: tur 2'nin ilk raporu; zamani vertex zamani DEGIL.
-        eski_tarihli_gonder(&mut k, &a, rapor(2, 1002), yayin);
+        let p = k.rapor(2, 1002); // olcum = su an (gecerli); vertex zamani = eski
+        eski_tarihli_gonder(&mut k, &a, p, yayin);
         let acik = k.node.oracle_akis(AKIS).unwrap();
         assert_eq!(acik.acik_tur_baslangic, saat, "tur baslangici zincir saati");
         assert_eq!(acik.acik_raporlar.values().next().unwrap().zaman, saat);
         assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::Bayat, "tek rapor < M");
         // 3) Eski tarihli ikinci rapor turu kapatir; guncelleme = ZINCIR saati.
-        eski_tarihli_gonder(&mut k, &b, rapor(2, 1003), T0 + 1); // genesis sonrasi en eski an
+        let p = k.rapor(2, 1003);
+        eski_tarihli_gonder(&mut k, &b, p, T0 + 1); // genesis sonrasi en eski an
         let t = k.node.oracle_son_veri(AKIS).unwrap();
         assert_eq!((t.tur_no, t.baslangic, t.guncelleme), (2, saat, saat));
         // 4) Bir bayat_sn sonra yine bayatlar (eski tarihli vertex sureyi uzatmaz).
@@ -6172,6 +6179,53 @@ mod rwa_tests {
         for a in crate::mainnet::dagitim_adresleri() {
             assert_eq!(denemeli.bakiye(&a), temiz.bakiye(&a));
         }
+    }
+
+    /// OLCUM ZAMANI SERTLESTIRMESI (zincir saatine gore): ileri tarihli ve
+    /// `bayat_sn` penceresinden eski olcumler reddedilir; sinirlar kabul.
+    /// Gecikmeli aktarimi yakalar; yalan beyan eden kuruma karsi asil koruma
+    /// M-of-N rol yonetimi + medyan/elemedir.
+    #[test]
+    fn rwa_olcum_zamani_ileri_veya_eskiyse_rapor_reddedilir() {
+        let mut k = Kurulum::yeni();
+        k.owner(akis_tanimi(1).encode()); // bayat_sn = 3600
+        let r = anahtar(0xC1);
+        k.yetkili_kurum(&r, ROL_ORACLE_RAPORLAYICI, AKIS);
+        let simdi = k.t;
+        k.gonder(&r, rapor_olcum(1, 1000, simdi + 1));
+        k.gonder(&r, rapor_olcum(1, 1000, simdi - 3_601));
+        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::VeriYok);
+        assert!(k.node.oracle_akis(AKIS).unwrap().acik_raporlar.is_empty());
+        // Eski tarihli VERTEX + eski olcum: zincir saati ilerde -> yine red.
+        k.ilerle(10_000);
+        eski_tarihli_gonder(&mut k, &r, rapor_olcum(1, 1000, simdi), simdi);
+        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::VeriYok);
+        // Pencere siniri (zincir saati - 3600) kabul -> tur kapanir.
+        let simdi = k.node.zincir_saati();
+        k.gonder(&r, rapor_olcum(1, 1000, simdi - 3_600));
+        let t = k.node.oracle_son_veri(AKIS).unwrap();
+        assert_eq!((t.tur_no, t.raporlar[0].olcum_zamani), (1, simdi - 3_600));
+    }
+
+    /// GERCEK KUBRA imza adresi (0x1f4b...d747) sabit yasak listesinde: mainnet ve
+    /// devnet'te yasakli; kurum kaydi olsa bile M-of-N yonetim ona rol VEREMEZ.
+    /// (KUBRA'nin ozel anahtari testte kullanilmaz; adres tabanli kapi yeterli.)
+    #[test]
+    fn rwa_gercek_kubra_adresi_yasakli_rol_alamaz() {
+        let kubra = crate::mainnet::KUBRA_IMZA_ADRESI;
+        assert_eq!(hex::encode(kubra), "1f4b6bc66533f80f76c0823d5553b1456653d747");
+        assert!(crate::mainnet::RWA_YASAKLI_ADRESLER.contains(&kubra));
+        assert!(NodeState::new_mainnet().rwa_yasakli_mi(&kubra));
+        let mut k = Kurulum::yeni();
+        assert!(k.node.rwa_yasakli_mi(&kubra));
+        k.owner(akis_tanimi(1).encode());
+        // KUBRA'nin kendini kurum kaydettigi durum (kayit herkese acik).
+        k.node.kurum_registry.kaydet(kubra, "KUBRA".into(), crate::registry::KurumKategori::Ozel, k.t);
+        k.rol(KurumYetki::new(kubra, ROL_ORACLE_RAPORLAYICI, AKIS, true));
+        k.rol(KurumYetki::new(kubra, ROL_KYC_ONAYLAYICI, 0, true));
+        k.ilerle(BILDIRIM);
+        assert!(k.node.kurum_rolleri(&kubra).is_empty(), "KUBRA'ya rol verilemez");
+        assert_eq!(k.nonce(), 2, "yonetim islemleri yetkili ama eylem etkisiz");
     }
 
     #[test]
