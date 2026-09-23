@@ -19,6 +19,7 @@ mod hesap;       // deterministik hesap makinesi aracı (araç-kullanımı)
 mod zincir;      // deterministik zincir sorgu araci (arac-kullanimi)
 mod stream;      // SSE streaming (cevabi harf harf akitir)
 mod resmi;       // AIDAG/KUBRA resmi kaynak katmani (grounding onceligi)
+mod kanit;       // zincir kaniti: etkilesim hash'i (tuzlu v1 + eski tuzsuz dogrulama)
 
 use axum::{extract::State, routing::{get, post}, response::{IntoResponse, Sse, sse::Event}, http::{StatusCode, header}, body::Body, Json, Router};
 use ed25519_dalek::SigningKey;
@@ -463,19 +464,13 @@ async fn arac_calistir(st: &AppState, prompt: &str) -> Option<(String, &'static 
     None
 }
 
-// Araç cevabını zincire yaz (etkileşim hash'i = net_id|ts|prompt|sonuç|araç).
-async fn arac_kanit(st: &AppState, prompt: &str, sonuc: &str, arac_ad: &str, ts: u64) -> ([u8; 32], ChainProof) {
-    let mut h = blake3::Hasher::new();
-    h.update(&st.cfg.net_id.to_le_bytes());
-    h.update(&ts.to_le_bytes());
-    h.update(prompt.as_bytes());
-    h.update(&[0x1e]);
-    h.update(sonuc.as_bytes());
-    h.update(&[0x1e]);
-    h.update(arac_ad.as_bytes());
-    let data_hash: [u8; 32] = *h.finalize().as_bytes();
+// Araç cevabını zincire yaz (tuzlu etkileşim hash'i = net_id|ts|prompt|sonuç|araç).
+// Tuz zincire YAZILMAZ; yalnız kullanıcıya döner (bkz. kanit.rs).
+async fn arac_kanit(st: &AppState, prompt: &str, sonuc: &str, arac_ad: &str, ts: u64) -> ([u8; 32], ChainProof, [u8; 32]) {
+    let tuz = kanit::yeni_tuz();
+    let data_hash = kanit::kanit_hash(st.cfg.net_id, ts, &[prompt.as_bytes(), sonuc.as_bytes(), arac_ad.as_bytes()], Some(&tuz));
     let chain = zincire_yaz(st, data_hash, ts).await;
-    (data_hash, chain)
+    (data_hash, chain, tuz)
 }
 
 // AIDAG konusu → resmi kaynaklar (genel korpustan ÖNCE, onun YERİNE). Değilse None.
@@ -529,6 +524,11 @@ struct AskResp {
     input_tokens: Option<u64>,
     output_tokens: Option<u64>,
     proof_hash: String,
+    /// Hash'e giren zaman (unix sn). Doğrulama (/v1/verify) için gerekir.
+    ts: u64,
+    /// Tuz (64 hex). Zincire YAZILMAZ; yalnız burada döner. Kaybolursa kayıt doğrulanamaz.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    salt: Option<String>,
     chain: ChainProof,
     #[serde(skip_serializing_if = "Option::is_none")]
     hata: Option<String>,
@@ -708,20 +708,20 @@ async fn gorsel(State(st): State<Arc<AppState>>, Json(req): Json<GorselReq>) -> 
     };
     // ── KORUMA KALKANI (2): KÖKEN LİSANSI — içeriği zincire yaz (sahiplik/telif kanıtı) ──
     let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let mut h = blake3::Hasher::new();
-    h.update(&st.cfg.net_id.to_le_bytes());
-    h.update(&ts.to_le_bytes());
-    h.update(prompt.as_bytes());
-    h.update(&[0x1e]);
-    if let Some(w) = req.wallet.as_deref() { h.update(w.as_bytes()); h.update(&[0x1e]); }
-    h.update(&bytes);
-    let data_hash: [u8; 32] = *h.finalize().as_bytes();
+    // Tuzlu köken hash'i: prompt|[cüzdan]|içerik. Tuz zincire yazılmaz, başlıkta döner.
+    let tuz = kanit::yeni_tuz();
+    let mut alanlar: Vec<&[u8]> = vec![prompt.as_bytes()];
+    if let Some(w) = req.wallet.as_deref() { alanlar.push(w.as_bytes()); }
+    alanlar.push(&bytes);
+    let data_hash = kanit::kanit_hash(st.cfg.net_id, ts, &alanlar, Some(&tuz));
     let _ = zincire_yaz(&st, data_hash, ts).await;
     let proof = hex::encode(data_hash);
     axum::response::Response::builder()
         .header(header::CONTENT_TYPE, "image/png")
         .header("x-kubra-proof", proof.clone())
         .header("x-kubra-verify", format!("/belge/{proof}"))
+        .header("x-kubra-salt", hex::encode(tuz))
+        .header("x-kubra-ts", ts.to_string())
         .body(Body::from(bytes))
         .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "yanıt oluşturulamadı").into_response())
 }
@@ -749,22 +749,56 @@ async fn video_uret(State(st): State<Arc<AppState>>, Json(req): Json<GorselReq>)
         Err(e) => return (StatusCode::BAD_GATEWAY, format!("video servis erişilemez: {e}")).into_response(),
     };
     let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let mut h = blake3::Hasher::new();
-    h.update(&st.cfg.net_id.to_le_bytes());
-    h.update(&ts.to_le_bytes());
-    h.update(prompt.as_bytes());
-    h.update(&[0x1e]);
-    if let Some(w) = req.wallet.as_deref() { h.update(w.as_bytes()); h.update(&[0x1e]); }
-    h.update(&bytes);
-    let data_hash: [u8; 32] = *h.finalize().as_bytes();
+    // Tuzlu köken hash'i: prompt|[cüzdan]|içerik. Tuz zincire yazılmaz, başlıkta döner.
+    let tuz = kanit::yeni_tuz();
+    let mut alanlar: Vec<&[u8]> = vec![prompt.as_bytes()];
+    if let Some(w) = req.wallet.as_deref() { alanlar.push(w.as_bytes()); }
+    alanlar.push(&bytes);
+    let data_hash = kanit::kanit_hash(st.cfg.net_id, ts, &alanlar, Some(&tuz));
     let _ = zincire_yaz(&st, data_hash, ts).await;
     let proof = hex::encode(data_hash);
     axum::response::Response::builder()
         .header(header::CONTENT_TYPE, "video/mp4")
         .header("x-kubra-proof", proof.clone())
         .header("x-kubra-verify", format!("/belge/{proof}"))
+        .header("x-kubra-salt", hex::encode(tuz))
+        .header("x-kubra-ts", ts.to_string())
         .body(Body::from(bytes))
         .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "yanıt oluşturulamadı").into_response())
+}
+
+// DOĞRULAMA: içerik (+ varsa tuz) → hash'i yeniden hesapla → zincirde var mı?
+// Tuz yoksa ESKİ (tuzsuz) şema: eski kayıtlar aynen doğrulanır. Tuz hiçbir yere kaydedilmez.
+async fn dogrula(State(st): State<Arc<AppState>>, Json(req): Json<kanit::DogrulaIstek>) -> (StatusCode, Json<Value>) {
+    let (hash, tuzlu) = match kanit::dogrulama_hash(st.cfg.net_id, &req) {
+        Ok(x) => x,
+        Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({ "ok": false, "hata": e }))),
+    };
+    let hash_hex = hex::encode(hash);
+    let proof_eslesir = req.proof_hash.as_deref()
+        .map(|p| p.trim().trim_start_matches("0x").eq_ignore_ascii_case(&hash_hex));
+    let url = format!("{}/belge/{hash_hex}", st.cfg.chain_rpc.trim_end_matches('/'));
+    let v: Value = match st.http.get(&url).send().await {
+        Ok(r) => match r.json().await {
+            Ok(v) => v,
+            Err(e) => return (StatusCode::BAD_GATEWAY, Json(json!({ "ok": false, "hata": format!("zincir yanıtı çözülemedi: {e}") }))),
+        },
+        Err(e) => return (StatusCode::BAD_GATEWAY, Json(json!({ "ok": false, "hata": format!("zincire ulaşılamıyor: {e}") }))),
+    };
+    let zincirde = v.get("kayitli").and_then(|x| x.as_bool()).unwrap_or(false);
+    let kaydeden = v.get("kaydeden").and_then(|x| x.as_str()).map(|a| a.trim_start_matches("0x").to_lowercase());
+    let kubra_imzali = kaydeden.as_deref().map(|a| a == hex::encode(st.key_addr));
+    (StatusCode::OK, Json(json!({
+        "ok": true,
+        "proof_hash": hash_hex,
+        "sema": if tuzlu { "tuzlu-v1" } else { "eski-tuzsuz" },
+        "proof_eslesir": proof_eslesir,
+        "zincirde": zincirde,
+        "kaydeden": kaydeden.map(|a| format!("0x{a}")),
+        "kubra_imzali": kubra_imzali,
+        "zaman": v.get("zaman").cloned(),
+        "dogrulandi": zincirde && kubra_imzali == Some(true) && proof_eslesir != Some(false),
+    })))
 }
 
 async fn health() -> Json<Value> {
@@ -783,6 +817,7 @@ async fn info(State(st): State<Arc<AppState>>) -> Json<Value> {
         "net_id": st.cfg.net_id,
         "imzalayan": format!("0x{}", hex::encode(st.key_addr)),
         "uc": "POST /v1/ask {\"prompt\":\"...\",\"context\":\"(ops.)\",\"brain\":\"local|claude (ops.)\"}",
+        "dogrulama": "POST /v1/verify {\"ts\":..,\"prompt\":\"..\",\"answer\":\"..\",\"model\":\"..\",\"salt\":\"(64 hex; eski kayitta yok)\"}",
     }))
 }
 
@@ -809,8 +844,8 @@ async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) ->
                 tokio::time::sleep(std::time::Duration::from_millis(15)).await;
             }
             // Zincire yaz + proof
-            let (data_hash, chain) = arac_kanit(&st, &req.prompt, &sonuc, arac_ad, ts).await;
-            let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "model": arac_ad, "brain": "arac", "chain": chain});
+            let (data_hash, chain, tuz) = arac_kanit(&st, &req.prompt, &sonuc, arac_ad, ts).await;
+            let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "model": arac_ad, "brain": "arac", "chain": chain});
             let _ = tx.send(Ok(Event::default().event("done").data(proof.to_string()))).await;
             return;
         }
@@ -855,14 +890,12 @@ async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) ->
 
         match tam {
             Ok(metin) => {
-                // Zincire yaz + proof
-                let mut h = blake3::Hasher::new();
-                h.update(&st.cfg.net_id.to_le_bytes()); h.update(&ts.to_le_bytes());
-                h.update(req.prompt.as_bytes()); h.update(&[0x1e]);
-                h.update(metin.as_bytes());
-                let data_hash: [u8;32] = *h.finalize().as_bytes();
+                // Zincire yaz + proof (tuzlu: prompt|metin|model; tuz zincire yazılmaz)
+                let tuz = kanit::yeni_tuz();
+                let data_hash = kanit::kanit_hash(st.cfg.net_id, ts,
+                    &[req.prompt.as_bytes(), metin.as_bytes(), st.cfg.remote_model.as_bytes()], Some(&tuz));
                 let chain = zincire_yaz(&st, data_hash, ts).await;
-                let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "model": st.cfg.remote_model, "brain": "kubra-gpu", "grounded": !kaynaklar.is_empty(), "chain": chain});
+                let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "model": st.cfg.remote_model, "brain": "kubra-gpu", "grounded": !kaynaklar.is_empty(), "chain": chain});
                 let _ = tx.send(Ok(Event::default().event("done").data(proof.to_string()))).await;
             }
             Err(e) => { let _ = tx.send(Ok(Event::default().event("error").data(e))).await; }
@@ -883,12 +916,12 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
     // ── ARAÇ-KULLANIMI: kesin cevap gereken niyetler ZAYIF MODELE bırakılmaz ──
     // (isim, belge hash doğrulama/kayıt, ağ durumu, zincir sorgusu, hesap). Bkz. arac_calistir.
     if let Some((sonuc, arac_ad)) = arac_calistir(&st, &req.prompt).await {
-        let (data_hash, chain) = arac_kanit(&st, &req.prompt, &sonuc, arac_ad, ts).await;
+        let (data_hash, chain, tuz) = arac_kanit(&st, &req.prompt, &sonuc, arac_ad, ts).await;
         return Json(AskResp {
             ok: true, answer: sonuc, brain: "arac".into(), model: arac_ad.into(),
             grounded: false, abstained: arac_ad == "resmi-kaynak", sources: vec![],
             latency_ms: t0.elapsed().as_millis(), input_tokens: None, output_tokens: None,
-            proof_hash: hex::encode(data_hash), chain, hata: None,
+            proof_hash: hex::encode(data_hash), ts, salt: Some(hex::encode(tuz)), chain, hata: None,
         });
     }
 
@@ -994,16 +1027,10 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
     let grounded = etkin_baglam.as_deref().map(|c| !c.trim().is_empty()).unwrap_or(false);
     let is_abstained = abstained(&answer);
 
-    // ZİNCİR: etkileşim hash'i imzalı Record olarak GERÇEK zincire.
-    let mut h = blake3::Hasher::new();
-    h.update(&st.cfg.net_id.to_le_bytes());
-    h.update(&ts.to_le_bytes());
-    h.update(req.prompt.as_bytes());
-    h.update(&[0x1e]);
-    h.update(answer.as_bytes());
-    h.update(&[0x1e]);
-    h.update(model.as_bytes());
-    let data_hash: [u8; 32] = *h.finalize().as_bytes();
+    // ZİNCİR: tuzlu etkileşim hash'i imzalı Record olarak GERÇEK zincire (tuz zincire yazılmaz).
+    let tuz = kanit::yeni_tuz();
+    let data_hash = kanit::kanit_hash(st.cfg.net_id, ts,
+        &[req.prompt.as_bytes(), answer.as_bytes(), model.as_bytes()], Some(&tuz));
 
     let chain = zincire_yaz(&st, data_hash, ts).await;
 
@@ -1019,6 +1046,8 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
         input_tokens: in_tok,
         output_tokens: out_tok,
         proof_hash: hex::encode(data_hash),
+        ts,
+        salt: Some(hex::encode(tuz)),
         chain,
         hata: None,
     })
@@ -1029,6 +1058,8 @@ fn bos_hata(mesaj: &str) -> AskResp {
         ok: false, answer: String::new(), brain: String::new(), model: String::new(),
         grounded: false, abstained: false, sources: vec![], latency_ms: 0, input_tokens: None, output_tokens: None,
         proof_hash: String::new(),
+        ts: 0,
+        salt: None,
         chain: ChainProof {
             submitted: false, data_hash: String::new(), verify_path: String::new(),
             signer: String::new(), result: None, reason: Some("beyin başarısız — zincire yazılmadı".into()),
@@ -1160,6 +1191,7 @@ async fn main() {
         .route("/", get(info))
         .route("/v1/ask", post(ask))
         .route("/v1/ask-stream", post(ask_stream))
+        .route("/v1/verify", post(dogrula))
         .route("/v1/image", post(gorsel))
         .route("/v1/video", post(video_uret))
         .route("/kb/ingest", post(kb_ingest))
