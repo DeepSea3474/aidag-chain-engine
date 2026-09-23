@@ -799,7 +799,14 @@ pub async fn run_node(
                     SwarmEvent::NewListenAddr { address, .. } => {
                         tracing::info!("Listening on {address}");
                     }
-                    SwarmEvent::ConnectionEstablished { peer_id, .. } => {
+                    SwarmEvent::ConnectionEstablished { peer_id, endpoint, num_established, .. } => {
+                        // ES KAYDI: kim (peer id), hangi yonde, nereden (IP maskeli).
+                        // Dis dugumler (orn. uzak/ulkeler arasi testler) boylece gunlukte
+                        // kendi dugumlerimizden ayirt edilebilir; IP'nin son iki okteti gizli.
+                        let (yon, adres) = es_ozeti(&endpoint);
+                        tracing::info!(
+                            "ES BAGLANDI: peer={peer_id} yon={yon} adres={adres} bu_esle_baglanti={num_established}"
+                        );
                         tracing::info!("Connected to {peer_id}");
                         // PULL SYNC: yeni baglandigim peer'dan gecmis vertex'leri ISTE.
                         // request-response AYRI kanal (gossipsub seen-cache YOK) ->
@@ -811,8 +818,11 @@ pub async fn run_node(
                             .send_request(&peer_id, SyncRequest { offset: 0 });
                         tracing::info!("Pull-sync istegi gonderildi -> {peer_id}");
                     }
-                    SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
-                        tracing::debug!("Connection closed with {peer_id}: {cause:?}");
+                    SwarmEvent::ConnectionClosed { peer_id, endpoint, num_established, cause, .. } => {
+                        let (yon, adres) = es_ozeti(&endpoint);
+                        tracing::info!(
+                            "ES AYRILDI: peer={peer_id} yon={yon} adres={adres} kalan_baglanti={num_established} sebep={cause:?}"
+                        );
                     }
                     SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
                         tracing::debug!("Outgoing connection error to {peer_id:?}: {error}");
@@ -1055,9 +1065,67 @@ pub fn generate_peer_id() -> PeerId {
     PeerId::from(keypair.public())
 }
 
+/// Adresi gunluk icin maskele: IPv4 son iki oktet, IPv6 ilk iki grup disi gizlenir.
+/// Ulke/ag duzeyinde ayirt etmeye yeter, tam adres gunluge yazilmaz.
+pub fn maskeli_adres(adres: &Multiaddr) -> String {
+    use libp2p::multiaddr::Protocol;
+    let mut parcalar = Vec::new();
+    for p in adres.iter() {
+        match p {
+            Protocol::Ip4(ip) => {
+                let o = ip.octets();
+                parcalar.push(format!("/ip4/{}.{}.x.x", o[0], o[1]));
+            }
+            Protocol::Ip6(ip) => {
+                let s = ip.segments();
+                parcalar.push(format!("/ip6/{:x}:{:x}:x", s[0], s[1]));
+            }
+            Protocol::Tcp(port) => parcalar.push(format!("/tcp/{port}")),
+            Protocol::Dns(_) | Protocol::Dns4(_) | Protocol::Dns6(_) => parcalar.push("/dns/x".into()),
+            _ => {}
+        }
+    }
+    if parcalar.is_empty() { "-".into() } else { parcalar.concat() }
+}
+
+/// Baglanti ucundan (yon, maskeli karsi adres). Gelen baglantida karsi adres
+/// `send_back_addr`, giden baglantida aranan adrestir.
+pub fn es_ozeti(endpoint: &libp2p::core::ConnectedPoint) -> (&'static str, String) {
+    match endpoint {
+        libp2p::core::ConnectedPoint::Dialer { address, .. } => ("giden", maskeli_adres(address)),
+        libp2p::core::ConnectedPoint::Listener { send_back_addr, .. } => ("gelen", maskeli_adres(send_back_addr)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn es_kaydi_adres_maskeler() {
+        let a: Multiaddr = "/ip4/203.0.113.45/tcp/40001".parse().unwrap();
+        assert_eq!(maskeli_adres(&a), "/ip4/203.0.x.x/tcp/40001");
+        let b: Multiaddr = "/ip6/2001:db8:abcd:12::1/tcp/40002".parse().unwrap();
+        assert_eq!(maskeli_adres(&b), "/ip6/2001:db8:x/tcp/40002");
+        let c: Multiaddr = "/dns4/ornek.example/tcp/40001".parse().unwrap();
+        assert_eq!(maskeli_adres(&c), "/dns/x/tcp/40001");
+        assert!(!maskeli_adres(&a).contains("113.45"), "tam IP gunluge yazilmaz");
+    }
+
+    #[test]
+    fn es_kaydi_yon_ve_adres() {
+        use libp2p::core::{ConnectedPoint, Endpoint};
+        let uzak: Multiaddr = "/ip4/198.51.100.7/tcp/40002".parse().unwrap();
+        let yerel: Multiaddr = "/ip4/0.0.0.0/tcp/40001".parse().unwrap();
+        let gelen = ConnectedPoint::Listener { local_addr: yerel.clone(), send_back_addr: uzak.clone() };
+        assert_eq!(es_ozeti(&gelen), ("gelen", "/ip4/198.51.x.x/tcp/40002".to_string()));
+        let giden = ConnectedPoint::Dialer {
+            address: uzak,
+            role_override: Endpoint::Dialer,
+            port_use: libp2p::core::transport::PortUse::New,
+        };
+        assert_eq!(es_ozeti(&giden), ("giden", "/ip4/198.51.x.x/tcp/40002".to_string()));
+    }
 
     #[test]
     fn peer_id_is_generated() {
