@@ -152,13 +152,16 @@
 <script src="/lib/blake3.js"></script>
 <script src="/lib/nacl.min.js"></script>
 <script src="/lib/belge-kayit.js?v=1"></script>
-<script src="/lib/belge-cikti.js?v=1"></script>
+<script src="/lib/belge-cikti.js?v=2"></script>
 <script>
 const RPC = location.origin + "/rpc", KUBRA = location.origin + "/kubra-brain", NETWORK_ID = 3474;
 const BK = window.BelgeKayit, BC = window.BelgeCikti;
 const $ = id => document.getElementById(id);
 const enc = s => new TextEncoder().encode(s);
-function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
+// Kurum adı zincirde beyandır: BC.kurumAdi yön/kontrol karakterlerini siler ve adı “tırnak” içine alır;
+// durum etiketi ayrı <b> öğesinde — adın içindeki "doğrulanmış" yazısı etiketle karışmaz.
+function kurumHtml(k){ return esc(BC.kurumAdi(k.ad)) + ' <b class="kurumDurum">— ' + esc(BC.kurumDurumu(k)) + '</b>'; }
 async function rpcGet(p){ const r = await fetch(RPC + p); return r.json(); }
 async function rpcSubmit(bytes){ const r = await fetch(RPC + "/submit", { method:"POST", body: BK.hex(bytes) }); return r.json(); }
 function utcYerel(sn){ return new Date(Number(sn)*1000).toLocaleString("tr-TR") + " (" + BC.utc(sn) + ")"; }
@@ -202,7 +205,7 @@ function talepIzi(t){
   if (t.imzalayan) {
     const k = t.imzalayan.kurum;
     s.push(["imzalayan", "<code>" + esc(t.imzalayan.adres) + "</code>"]);
-    s.push(["kurum", k.kayitli ? esc(k.ad || "?") + (k.dogrulanmis === true ? " — doğrulanmış kurum" : " — beyan (doğrulanmamış)") : "bu adres zincirde kurum olarak kayıtlı değil"]);
+    s.push(["kurum", k.kayitli ? kurumHtml(k) : "bu adres zincirde kurum olarak kayıtlı değil"]);
   }
   s.push(["not", esc(t.sonraki_adim)]);
   return s;
@@ -263,7 +266,7 @@ $("onaylaBtn").onclick = async () => {
     $("onayKutu").style.display = "none";
     if (b.kayitli && ("0x" + String(b.kaydeden).replace(/^0x/,"")) === adres) {
       sonuc.className = "sonuc ok";
-      sonuc.innerHTML = "<b>Belge zincire kaydedildi</b>Kaydeden: sizin adresiniz. Doğrulama adresi: <a href='/belge/" + aktifTalep.belge_hash + "'>/belge/" + aktifTalep.belge_hash.slice(0,16) + "…</a><div class='detay'>vertex: " + id + "</div>";
+      sonuc.innerHTML = "<b>Belge zincire kaydedildi</b>Kaydeden: sizin adresiniz. Doğrulama adresi: <a href='/belge/" + esc(aktifTalep.belge_hash) + "'>/belge/" + esc(aktifTalep.belge_hash.slice(0,16)) + "…</a><div class='detay'>vertex: " + esc(id) + "</div>";
       ciktiGoster(aktifTalep.belge_hash, { kayitli:true, kaydeden: adres, zaman: b.zaman });
     } else {
       sonuc.className = "sonuc yok";
@@ -327,7 +330,7 @@ async function ciktiGoster(hash, zincir){
     olusturma: Math.floor(Date.now()/1000) };
   izYaz($("ciktiIz"), "çıktı", [["araç", "<code>belge-cikti</code> (tarayıcıda)"], ["özet (hash)", "<code>" + hash + "</code>"],
     ["zincir durumu", "kayıtlı · " + utcYerel(zincir.zaman)], ["kaydeden", "<code>" + esc(zincir.kaydeden) + "</code>"],
-    ["kurum", ciktiVeri.kurum ? esc(ciktiVeri.kurum.ad) + (ciktiVeri.kurum.dogrulanmis === true ? " — doğrulanmış kurum" : " — beyan (doğrulanmamış)") : "kurum kaydı yok"],
+    ["kurum", ciktiVeri.kurum ? kurumHtml(ciktiVeri.kurum) : "kurum kaydı yok"],
     ["doğrulama adresi", "<code>" + BC.dogrulamaUrl(hash) + "</code>"], ["kısa referans", "<code>" + BC.kisaRefGoster(hash) + "</code>"]]);
   try {
     const k = await kutuphaneler();

@@ -118,15 +118,67 @@ const BRAIN = window.KUBRA_BRAIN || "https://aidag-chain.com/kubra-brain";
 const $ = id => document.getElementById(id);
 const konusma = $("konusma");
 function ekle(cls, txt){ const d=document.createElement("div"); d.className="msg "+cls; d.textContent=txt; konusma.appendChild(d); konusma.scrollTop=konusma.scrollHeight; return d; }
-// Cevaptaki URL/yolları tıklanabilir linke çevir (güvenli: önce HTML kaçışı)
-function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
-function linkify(txt){
-  let s = esc(txt);
-  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank">$1</a>'); // markdown
-  s = s.replace(/(^|[^"=\/])((https?:\/\/)[^\s<)]+)/g,'$1<a href="$2" target="_blank">$2</a>');   // düz URL
-  s = s.replace(/(^|[\s(>])((?:www\.)?aidag-chain\.com\/[a-zA-Z]+)/g,'$1<a href="https://$2" target="_blank">$2</a>'); // protokolsüz
-  return s;
+// GUVENLI-BASLA — KUBRA cevabını DOM API ile işler: HTML string YOK, innerHTML YOK.
+// Aynı blok ask.html, ask-stream.html ve soulware-web/ask.html'de birebir aynıdır;
+// web-yedek/aidag/test/xss.test.js bu bloğu saldırı girdileriyle çalıştırır.
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
+const GUVENLI_KOK = "https://aidag-chain.com";
+// Yalnız https: mutlak adres veya site-içi göreli yol ("/..."). Diğer her şey (javascript:, data:,
+// http:, //baska-site, kontrol/bidi karakteri, tırnak, ters bölü) -> null (link yapılmaz, düz metin kalır).
+function guvenliUrl(ham){
+  if(typeof ham !== "string") return null;
+  const s = ham.trim();
+  if(!s || s.length > 2048) return null;
+  if(/[\u0000-\u0020\u007f-\u00a0\u00ad\u061c\u115f\u1160\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\u3000\ufeff\ufff9-\ufffb"'<>`\\]/.test(s)) return null;
+  let u;
+  try {
+    if(s[0] === "/"){
+      if(s[1] === "/") return null;
+      u = new URL(s, GUVENLI_KOK);
+      if(u.origin !== GUVENLI_KOK) return null;
+      const yol = u.pathname + u.search + u.hash;
+      return (yol[0] === "/" && yol[1] !== "/") ? yol : null;
+    }
+    u = new URL(s);
+  } catch(e){ return null; }
+  if(u.protocol !== "https:" || u.username || u.password || !u.hostname) return null;
+  return u.href;
 }
+function linkEkle(kap, metin, href){
+  const a = document.createElement("a");
+  a.href = href; a.target = "_blank"; a.rel = "noopener noreferrer"; a.title = href;
+  a.textContent = metin;
+  kap.appendChild(a);
+}
+// [metin](url) · https://… · (www.)aidag-chain.com/yol  -> <a>; geri kalan her şey metin düğümü.
+const LINK_RE = /\[([^\]\n]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>()"'`\[\]{}]+)|((?:www\.)?aidag-chain\.com\/[a-zA-Z]+)/g;
+function linkifyDom(kap, txt){
+  const s = String(txt == null ? "" : txt);
+  kap.textContent = "";
+  let son = 0, m;
+  LINK_RE.lastIndex = 0;
+  while((m = LINK_RE.exec(s))){
+    let metin, href;
+    if(m[1] !== undefined){ metin = m[1]; href = guvenliUrl(m[2]); }
+    else if(m[3] !== undefined){
+      let u = m[3];
+      const kuyruk = u.match(/[.,;:!?]+$/);
+      if(kuyruk){ u = u.slice(0, -kuyruk[0].length); LINK_RE.lastIndex -= kuyruk[0].length; }
+      metin = u; href = guvenliUrl(u);
+    } else {
+      const once = m.index > 0 ? s[m.index - 1] : "";
+      if(once && !/[\s(>]/.test(once)) continue;
+      metin = m[4]; href = guvenliUrl("https://" + m[4]);
+    }
+    if(!href) continue;
+    if(m.index > son) kap.appendChild(document.createTextNode(s.slice(son, m.index)));
+    linkEkle(kap, metin, href);
+    son = LINK_RE.lastIndex;
+  }
+  if(son < s.length) kap.appendChild(document.createTextNode(s.slice(son)));
+  return kap;
+}
+// GUVENLI-BITIS
 
 async function j(path, opt){ const r = await fetch(COORD+path, opt); return r.json(); }
 
@@ -160,13 +212,14 @@ function gorselPaneli(prefill){
     b.disabled=true; out.innerHTML='<span class="think">'+t("genThink")+'</span>';
     try{
       const r = await fetch(BRAIN+"/v1/image",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompt})});
-      if(!r.ok){ const m=(await r.text().catch(()=>""))||("HTTP "+r.status); out.innerHTML='<div style="color:#ff8a6a">🚫 '+m+'</div>'; b.disabled=false; return; }
+      if(!r.ok){ const m=(await r.text().catch(()=>""))||("HTTP "+r.status); out.textContent=""; const eh=document.createElement("div"); eh.style.color="#ff8a6a"; eh.textContent="🚫 "+m; out.appendChild(eh); b.disabled=false; return; }
       const verify = r.headers.get("x-kubra-verify")||"";
       const url = URL.createObjectURL(await r.blob());
       out.innerHTML="";
       const img=new Image(); img.src=url; img.style.maxWidth="100%"; img.style.borderRadius="10px"; img.style.display="block"; out.appendChild(img);
       const w=document.createElement("div"); w.className="src"; w.style.color="#ffd48a"; w.textContent=t("genWarn"); out.appendChild(w);
-      if(verify){ const c=document.createElement("div"); c.className="src"; c.innerHTML=t("genCert")+' <a href="'+verify+'" target="_blank">'+t("genVerify")+'</a>'; out.appendChild(c); }
+      const vHref = guvenliUrl(verify);
+      if(vHref){ const c=document.createElement("div"); c.className="src"; c.appendChild(document.createTextNode(t("genCert")+" ")); linkEkle(c, t("genVerify"), vHref); out.appendChild(c); }
       const dl=document.createElement("button"); dl.className="btn"; dl.style.marginTop="8px"; dl.textContent="⬇ "+t("genDl");
       dl.onclick=()=>{ if(!confirm(t("genConsent"))) return; const a=document.createElement("a"); a.href=url; a.download="kubra-gorsel.png"; document.body.appendChild(a); a.click(); a.remove(); };
       out.appendChild(dl);
@@ -195,7 +248,7 @@ async function sor(){
       if(s.ok && s.job && s.job.status==="verified"){ ans = s.job.verified_answer; break; }
     }
     if(ans){
-      bekle.innerHTML = linkify(ans);
+      linkifyDom(bekle, ans);
       // KUBRA görsel/stüdyodan bahsettiyse → tıklanır "İçerik Oluştur →" butonu ekle
       const nn = ans.toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g,"").replace(/ı/g,"i");
       if(nn.includes("gorsel")||nn.includes("studyo")||nn.includes("resim uret")||nn.includes("/gorsel")){

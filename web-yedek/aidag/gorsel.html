@@ -102,6 +102,67 @@ const BRAIN = window.KUBRA_BRAIN || "https://aidag-chain.com/kubra-brain";
 const istem = document.getElementById("istem");
 const btn = document.getElementById("uret");
 const sahne = document.getElementById("sahne");
+// GUVENLI-BASLA — KUBRA cevabını DOM API ile işler: HTML string YOK, innerHTML YOK.
+// Aynı blok ask.html, ask-stream.html ve soulware-web/ask.html'de birebir aynıdır;
+// web-yedek/aidag/test/xss.test.js bu bloğu saldırı girdileriyle çalıştırır.
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
+const GUVENLI_KOK = "https://aidag-chain.com";
+// Yalnız https: mutlak adres veya site-içi göreli yol ("/..."). Diğer her şey (javascript:, data:,
+// http:, //baska-site, kontrol/bidi karakteri, tırnak, ters bölü) -> null (link yapılmaz, düz metin kalır).
+function guvenliUrl(ham){
+  if(typeof ham !== "string") return null;
+  const s = ham.trim();
+  if(!s || s.length > 2048) return null;
+  if(/[\u0000-\u0020\u007f-\u00a0\u00ad\u061c\u115f\u1160\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\u3000\ufeff\ufff9-\ufffb"'<>`\\]/.test(s)) return null;
+  let u;
+  try {
+    if(s[0] === "/"){
+      if(s[1] === "/") return null;
+      u = new URL(s, GUVENLI_KOK);
+      if(u.origin !== GUVENLI_KOK) return null;
+      const yol = u.pathname + u.search + u.hash;
+      return (yol[0] === "/" && yol[1] !== "/") ? yol : null;
+    }
+    u = new URL(s);
+  } catch(e){ return null; }
+  if(u.protocol !== "https:" || u.username || u.password || !u.hostname) return null;
+  return u.href;
+}
+function linkEkle(kap, metin, href){
+  const a = document.createElement("a");
+  a.href = href; a.target = "_blank"; a.rel = "noopener noreferrer"; a.title = href;
+  a.textContent = metin;
+  kap.appendChild(a);
+}
+// [metin](url) · https://… · (www.)aidag-chain.com/yol  -> <a>; geri kalan her şey metin düğümü.
+const LINK_RE = /\[([^\]\n]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>()"'`\[\]{}]+)|((?:www\.)?aidag-chain\.com\/[a-zA-Z]+)/g;
+function linkifyDom(kap, txt){
+  const s = String(txt == null ? "" : txt);
+  kap.textContent = "";
+  let son = 0, m;
+  LINK_RE.lastIndex = 0;
+  while((m = LINK_RE.exec(s))){
+    let metin, href;
+    if(m[1] !== undefined){ metin = m[1]; href = guvenliUrl(m[2]); }
+    else if(m[3] !== undefined){
+      let u = m[3];
+      const kuyruk = u.match(/[.,;:!?]+$/);
+      if(kuyruk){ u = u.slice(0, -kuyruk[0].length); LINK_RE.lastIndex -= kuyruk[0].length; }
+      metin = u; href = guvenliUrl(u);
+    } else {
+      const once = m.index > 0 ? s[m.index - 1] : "";
+      if(once && !/[\s(>]/.test(once)) continue;
+      metin = m[4]; href = guvenliUrl("https://" + m[4]);
+    }
+    if(!href) continue;
+    if(m.index > son) kap.appendChild(document.createTextNode(s.slice(son, m.index)));
+    linkEkle(kap, metin, href);
+    son = LINK_RE.lastIndex;
+  }
+  if(son < s.length) kap.appendChild(document.createTextNode(s.slice(son)));
+  return kap;
+}
+// GUVENLI-BITIS
 
 const UYARILAR = [
   "⚠️ Ürettiğin içerik herkese açıktır — kötü niyetli kişilerce kullanılabilir.",
@@ -126,14 +187,18 @@ function flashBasla(){
 function flashDur(){ if(flashTimer){ clearInterval(flashTimer); flashTimer=null; } }
 
 function sonucGoster(blobUrl, verifyPath){
-  const belge = verifyPath ? ('<div class="cert">📜 Köken belgesi: <a href="'+verifyPath+'" target="_blank">zincirde doğrula</a></div>') : '';
+  // Sunucudan gelen hiçbir değer HTML'e string olarak girmez: görsel yalnız blob:, köken linki yalnız guvenliUrl.
   sahne.innerHTML =
-    '<img src="'+blobUrl+'" alt="üretilen görsel">'+
+    '<img id="gorselImg" alt="üretilen görsel">'+
     '<div class="shield">'+
-      '<div class="warnbox"><b>Uyarı:</b> Bu içerik AI ile üretildi ve herkese açıktır. Kötü niyetli kişilerce kullanılabileceğini biliyorum. Başkalarını rızasız/istismar amaçlı kullanmayacağım. Sahipliğim zincirde kayıtlıdır.'+belge+'</div>'+
+      '<div class="warnbox"><b>Uyarı:</b> Bu içerik AI ile üretildi ve herkese açıktır. Kötü niyetli kişilerce kullanılabileceğini biliyorum. Başkalarını rızasız/istismar amaçlı kullanmayacağım. Sahipliğim zincirde kayıtlıdır.<span id="belgeYer"></span></div>'+
       '<label class="onay"><input type="checkbox" id="onay"> Yukarıdaki uyarıları <b>okudum ve kabul ediyorum.</b></label>'+
       '<button class="dlbtn" id="indir" disabled>⬇ Kabul et ve indir</button>'+
     '</div>';
+  if(/^blob:/.test(String(blobUrl))) document.getElementById("gorselImg").src = blobUrl;
+  const vHref = guvenliUrl(verifyPath), yer = document.getElementById("belgeYer");
+  if(vHref){ const c=document.createElement("div"); c.className="cert"; c.appendChild(document.createTextNode("📜 Köken belgesi: ")); linkEkle(c, "zincirde doğrula", vHref); yer.replaceWith(c); }
+  else yer.remove();
   const onay = document.getElementById("onay");
   const indir = document.getElementById("indir");
   onay.addEventListener("change", ()=>{ indir.disabled = !onay.checked; });
@@ -158,7 +223,7 @@ async function uret(){
     if(!r.ok){
       let msg = "Üretim başarısız (HTTP "+r.status+")";
       try{ const t = await r.text(); if(t) msg = t; }catch(e){}
-      sahne.innerHTML = '<span class="err">🚫 '+msg+'</span>';
+      sahne.textContent = ""; const eh = document.createElement("span"); eh.className = "err"; eh.textContent = "🚫 " + msg; sahne.appendChild(eh);
       btn.disabled = false; return;
     }
     const verify = r.headers.get("x-kubra-verify") || "";

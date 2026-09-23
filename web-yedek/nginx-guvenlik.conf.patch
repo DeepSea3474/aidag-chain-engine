@@ -1,0 +1,121 @@
+# AIDAG statik sayfalar icin guvenlik basliklari (CSP vb.) — YAMA ONERISI, UYGULANMADI.
+#
+# Taban: web-yedek/nginx/aidag-chain.conf + web-yedek/nginx-belge-hash.patch (canli durumun yedegi).
+# Uygulama (elle, onayla):
+#   sudo patch -p0 --dry-run < web-yedek/nginx-guvenlik.conf.patch   # once kuru deneme
+#   sudo patch -p0 < web-yedek/nginx-guvenlik.conf.patch
+#   sudo nginx -t && sudo systemctl reload nginx
+# Sonra: curl -sI https://aidag-chain.com/ask | grep -i content-security
+# /katil icin CSP once Report-Only (bkz. snippet); ihlal yoksa zorunluya cevir.
+# Proxy location'lari (/rpc, /kubra-brain, /kubra-api, / Next.js) DEGISMEZ.
+#
+--- /etc/nginx/sites-available/aidag-chain
++++ /etc/nginx/sites-available/aidag-chain
+@@ -6,6 +6,8 @@
+     location = /belge {
+         alias /var/www/aidag/belge-dogrulama.html;
+         default_type text/html;
++        # Guvenlik basliklari (CSP) — statik sayfa
++        include snippets/aidag-statik-guvenlik.conf;
+     }
+ 
+     # Belge dogrulama baglantisi (QR hedefi): /belge/<64 hex> -> ayni sayfa;
+@@ -14,17 +16,22 @@
+         root /var/www/aidag;
+         try_files /belge-dogrulama.html =404;
+         default_type text/html;
++        # Guvenlik basliklari (CSP) — statik sayfa
++        include snippets/aidag-statik-guvenlik.conf;
+     }
+ 
+     # KUBRA sohbet sayfasi
+     location = /ask {
+         alias /var/www/aidag/ask.html;
+         default_type text/html;
++        # Guvenlik basliklari (CSP) — statik sayfa
++        include snippets/aidag-statik-guvenlik.conf;
+     }
+ 
+     # Kutuphaneler (blake3, nacl, qrcode)
+     location /lib/ {
+         alias /var/www/aidag/lib/;
++        add_header X-Content-Type-Options "nosniff" always;
+     }
+ 
+     # Node RPC (belge dogrulama /submit, /belge/:hash icin) - 8645
+@@ -54,22 +61,32 @@
+     location = /katil {
+         alias /var/www/aidag/katil.html;
+         default_type text/html;
++        # Guvenlik basliklari (CSP: WebLLM CDN + model agirliklari icin genis)
++        include snippets/aidag-statik-guvenlik-katil.conf;
+     }
+     location = /gorsel {
+         alias /var/www/aidag/gorsel.html;
+         default_type text/html;
++        # Guvenlik basliklari (CSP) — statik sayfa
++        include snippets/aidag-statik-guvenlik.conf;
+     }
+     location = /how {
+         alias /var/www/aidag/how.html;
+         default_type text/html;
++        # Guvenlik basliklari (CSP) — statik sayfa
++        include snippets/aidag-statik-guvenlik.conf;
+     }
+     location = /kit {
+         alias /var/www/aidag/kit.html;
+         default_type text/html;
++        # Guvenlik basliklari (CSP) — statik sayfa
++        include snippets/aidag-statik-guvenlik.conf;
+     }
+     location = /cuzdan {
+         alias /var/www/aidag/cuzdan.html;
+         default_type text/html;
++        # Guvenlik basliklari (CSP) — statik sayfa
++        include snippets/aidag-statik-guvenlik.conf;
+     }
+ 
+     # KUBRA koordinator API (job/create - ask sayfasi buraya sorar)
+@@ -87,11 +104,15 @@
+     location = /ask-stream {
+         alias /var/www/aidag/ask-stream.html;
+         default_type text/html;
++        # Guvenlik basliklari (CSP) — statik sayfa
++        include snippets/aidag-statik-guvenlik.conf;
+     }
+ 
+     location = /komutlar {
+         alias /var/www/aidag/komutlar.html;
+         default_type text/html;
++        # Guvenlik basliklari (CSP) — statik sayfa
++        include snippets/aidag-statik-guvenlik.conf;
+     }
+ 
+     # Ana site (Next.js)
+--- /dev/null
++++ /etc/nginx/snippets/aidag-statik-guvenlik.conf
+@@ -0,0 +1,13 @@
++# AIDAG statik sayfalar (/ask, /ask-stream, /belge, /belge/<hash>, /gorsel, /how, /kit, /komutlar, /cuzdan)
++# NOT: nginx'te bir location'da add_header varsa sunucu seviyesindekiler MIRAS ALINMAZ;
++#      bu yuzden basliklar snippet ile her statik location'a ayri eklenir.
++# NOT (unsafe-inline): sayfalar satir ici <script> ve onclick/onerror kullaniyor. 'unsafe-inline'
++#      kaldirilirsa sayfalar calismaz; kaldirmak icin scriptler /lib/*.js'e tasinip nonce/hash
++#      kullanilmali (buyuk degisiklik — ayri is). Bu haliyle CSP, enjekte edilen <script src=dis>,
++#      <object>, <base> ve dis sitelere veri sizdirma (connect-src) / iframe'e gomme saldirilarini keser;
++#      satir ici XSS'e karsi asil savunma sayfalardaki DOM API + kacis duzeltmeleridir.
++add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://aidag-chain.com https://www.aidag-chain.com; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'; upgrade-insecure-requests" always;
++add_header X-Content-Type-Options "nosniff" always;
++add_header Referrer-Policy "strict-origin-when-cross-origin" always;
++add_header X-Frame-Options "SAMEORIGIN" always;
++add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
+--- /dev/null
++++ /etc/nginx/snippets/aidag-statik-guvenlik-katil.conf
+@@ -0,0 +1,8 @@
++# /katil: WebLLM (tarayicida model) — motor CDN'den import edilir (esm.run -> cdn.jsdelivr.net, yedek unpkg),
++# model agirliklari/wasm huggingface ve raw.githubusercontent'ten indirilir; WebAssembly derlemesi icin
++# 'wasm-unsafe-eval' gerekir. Once Report-Only ile dene (asagidaki satir), konsolda ihlal yoksa
++# "Content-Security-Policy" adiyla zorunlu yap.
++add_header Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://esm.run https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://aidag-chain.com https://www.aidag-chain.com https://esm.run https://cdn.jsdelivr.net https://unpkg.com https://huggingface.co https://*.huggingface.co https://*.hf.co https://raw.githubusercontent.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'" always;
++add_header X-Content-Type-Options "nosniff" always;
++add_header Referrer-Policy "strict-origin-when-cross-origin" always;
++add_header X-Frame-Options "SAMEORIGIN" always;

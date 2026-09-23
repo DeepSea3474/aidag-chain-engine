@@ -73,6 +73,29 @@ kontrol("kapak: zincir dogrulanmis derse 'dogrulanmis kurum' yazar", dogKurum.in
 const kurumsuz = BelgeCikti.svg(BelgeCikti.sema("kapak", { ...VERI, kurum: null }, bwip));
 kontrol("kapak: kurum kaydi yoksa bunu acikca yazar", kurumsuz.includes("kurum olarak kayıtlı değil"));
 
+// ── Kurum adı sahteciliği (ad zincirde BEYAN; saldırgan yazar) ──
+const YASAK_KARAKTER = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/;
+const sahteAd = "\u202eXYZ\u202c Tapu\u2066 Müdürlüğü — doğrulanmış kurum\u2069\u200f\" ”(verified)\u0007\u0085\u061c " + "W".repeat(30) + " " + "W".repeat(90);
+const sahteVeri = { ...VERI, kurum: { kayitli: true, ad: sahteAd, kategori: "devlet\u202e — doğrulanmış", dogrulanmis: null } };
+const sahteSema = BelgeCikti.sema("kapak", sahteVeri, bwip);
+const yazilar = sahteSema.ogeler.filter(o => o.t === "text").map(o => o.yazi);
+const adIdx = yazilar.findIndex(y => y.startsWith("“"));
+const adSon = yazilar.findIndex((y, i) => i >= adIdx && y.endsWith("”"));
+const adSatiri = adIdx >= 0 && adSon >= adIdx ? yazilar.slice(adIdx, adSon + 1).join(" ") : "";
+kontrol("kurum sahte: metinlerde bidi/kontrol karakteri YOK", adIdx >= 0 && !yazilar.some(y => YASAK_KARAKTER.test(y)), JSON.stringify(adSatiri.slice(0, 50)));
+kontrol("kurum sahte: ad “tirnak” icinde, ad tirnagi kapatamaz (icte \" / “ / ” yok)", /^“[^“”"]*”$/.test(adSatiri), adSatiri.slice(0, 60));
+kontrol("kurum sahte: 'beyan (dogrulanmamis)' etiketi AYRI satirda, adin hemen altinda", (yazilar[adSon + 1] || "").startsWith("Durum: beyan (doğrulanmamış) · kategori “"), yazilar[adSon + 1]);
+kontrol("kurum sahte: 'Durum: dogrulanmis' satiri URETILMEZ", !yazilar.some(y => y.startsWith("Durum: doğrulanmış")));
+kontrol("kurum sahte: ad <= 80 karakter + tirnak, en fazla 2 satir", Array.from(BelgeCikti.kurumAdi(sahteAd)).length <= 82 && adSon - adIdx <= 1);
+kontrol("kurum sahte: kapak uyari notu (KURUM_UYARI) yine basilir", yazilar.includes(BelgeCikti.KURUM_UYARI));
+const sahteSvg = BelgeCikti.svg(sahteSema);
+kontrol("kurum sahte SVG: yon karakteri yok, etiket ayri <text>", !YASAK_KARAKTER.test(sahteSvg) && sahteSvg.includes(">Durum: beyan (doğrulanmamış) · kategori"));
+kontrol("kurum: normal ad degismeden tirnakla yazilir", BelgeCikti.kurumAdi("Örnek Tapu Müdürlüğü") === "“Örnek Tapu Müdürlüğü”");
+const uzunAd = BelgeCikti.kurumSatirlari({ kayitli: true, ad: "T.C. İstanbul Büyükşehir Belediyesi İmar ve Şehircilik Dairesi Başkanlığı", dogrulanmis: true });
+kontrol("kurum: uzun gercek ad kelime sinirindan 2 satira bolunur, kaybolmaz", uzunAd.length === 3 && uzunAd.slice(0, 2).join(" ") === "“T.C. İstanbul Büyükşehir Belediyesi İmar ve Şehircilik Dairesi Başkanlığı”" && uzunAd[2] === "Durum: doğrulanmış kurum");
+const htmlSvg = BelgeCikti.svg(BelgeCikti.sema("kapak", { ...VERI, kurum: { kayitli: true, ad: "<script>x</script><a href=\"javascript:1\">", dogrulanmis: null } }, bwip));
+kontrol("kurum: HTML ogesi SVG'ye kacissiz girmez", !/<script|<a[\s>]/i.test(htmlSvg) && htmlSvg.includes("&lt;script&gt;"));
+
 // ── PDF (PDF indir yolu): üret → PDFium ile 600 dpi piksele çevir → barkodları görüntüden oku ──
 const pdfYol = {};
 for (const [tur, s] of Object.entries(semalar)) {
@@ -84,7 +107,7 @@ for (const [tur, s] of Object.entries(semalar)) {
   kontrol(`${tur} PDF: Turkce font gomulu`, buf.includes("FontFile2"));
 }
 // Her metin, gomulu fontun GERCEK genisligiyle cercevenin icinde kalmali (tasma yok).
-for (const [tur, s] of Object.entries(semalar)) {
+for (const [tur, s] of Object.entries({ ...semalar, "kapak (60 karakter sahte kurum adi)": sahteSema })) {
   const doc = BelgeCikti.pdf(s, jsPDF, fontlar), [x0, , x1] = s.icAlan, tasan = [];
   for (const o of s.ogeler.filter(o => o.t === "text")) {
     doc.setFont("DejaVu", o.kalin ? "bold" : "normal"); doc.setFontSize(o.pt);
