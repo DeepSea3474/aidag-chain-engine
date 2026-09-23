@@ -1,4 +1,5 @@
-//! KUBRA zincir imza anahtari — FAIL-CLOSED yukleme.
+//! Zincir imza anahtari — FAIL-CLOSED yukleme (soulware-core, soulware-coordinator
+//! ve soulware-worker ortak kodu; #[path] ile paylasilir).
 //!
 //! Eski davranis (kaldirildi): dosya yoksa ya da bicimi gecersizse SESSIZCE yeni
 //! anahtar uretip dosyanin UZERINE yaziyordu -> KUBRA'nin zincir adresi habersizce
@@ -38,8 +39,8 @@ impl std::fmt::Display for AnahtarHatasi {
             AnahtarHatasi::Yok(y) => write!(
                 f,
                 "anahtar dosyasi YOK: {y}. Sessizce yeni anahtar uretilmez. Yeni anahtar icin \
-                 acikca `soulware-core --yeni-anahtar-uret` calistirin (KUBRA adresi degisir; \
-                 BAKIM-REHBERI.md bolum 8)."
+                 ayni ikiliyi acikca `--yeni-anahtar-uret` ile calistirin (bu servisin zincir \
+                 adresi degisir; KUBRA icin BAKIM-REHBERI.md bolum 8)."
             ),
             AnahtarHatasi::Bozuk { yol, sebep } => write!(
                 f,

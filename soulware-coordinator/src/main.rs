@@ -12,13 +12,25 @@
 //! rızalı kabul eder.
 //!
 //! Uçlar:
-//!   POST /job/create       {"prompt","deterministic?"}         → {job_id}
-//!   POST /worker/register   {"wallet"}                          → {ok}
-//!   GET  /worker/poll/:wallet                                   → iş | {none:true}
-//!   POST /worker/submit     {"wallet","job_id","answer"}        → doğrulama/ödül
+//!   POST /job/create       {"prompt","deterministic?","fee_lsc?","payer?"} → {job_id}
+//!   POST /job/confirm      {"job_id","odeme_hex"}               → ücretli iş ödemesi (tip=7) bağlanır
+//!   POST /worker/register   {"wallet", İMZA}                    → {ok}
+//!   GET  /worker/poll/:wallet?ts=&imza=&pubkey=                  → iş | {none:true}
+//!   POST /worker/benchmark  {"wallet","cevaplar", İMZA}
+//!   POST /worker/submit     {"wallet","job_id","answer", İMZA}  → doğrulama/ödül
 //!   GET  /status                                                → özet
+//!
+//! İMZA = {"ts","imza","pubkey?"}: cüzdan sahipliği (worker_mesaj.rs). İmzasız → 401.
 
-use axum::{extract::{Path, State}, routing::{get, post}, Json, Router};
+#[path = "../../soulware-core/src/imza_dosyasi.rs"]
+mod imza_dosyasi; // havuz anahtarı: FAIL-CLOSED (soulware-core ile ortak kod)
+mod worker_mesaj; // worker imza mesajı biçimi (worker ile ortak)
+mod cuzdan_imza;  // ed25519 / EVM (EIP-191) cüzdan imzası doğrulama
+mod denetim;      // istemci IP, sybil-dirençli oylama, günlük kota, ödeme bağlama
+
+use axum::extract::{ConnectInfo, Path, Query, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::{routing::{get, post}, Json, Router};
 use ed25519_dalek::SigningKey;
 use lsc_engine::dag::wire;
 use lsc_engine::tx::{ComputeReward, Record};
@@ -57,6 +69,14 @@ struct Config {
     // (ücretli havuzu yemez) ve bu tavana kadar. Bootstrap enflasyonunu sınırlar.
     free_budget_lsc: u64,            // SOULWARE_FREE_BUDGET_LSC (0 = ücretsiz tier kapalı)
     gold_path: Option<String>,       // SOULWARE_GOLD_PATH (öz-kıyaslama altın-testleri; yoksa gömülü)
+    /// SOULWARE_FREE_DAILY_PER_CLIENT: istemci (IP ve/veya cüzdan) başına günlük
+    /// ücretsiz iş sınırı (varsayılan 10; 0 = ücretsiz iş kapalı).
+    free_daily_per_client: u32,
+}
+
+/// Otomatik settlement YALNIZ açıkça "1" ise açık (varsayılan KAPALI; mainnet güvenli).
+fn settle_auto_coz(v: Option<String>) -> bool {
+    v.as_deref().map(str::trim) == Some("1")
 }
 impl Config {
     fn from_env() -> Self {
@@ -71,10 +91,11 @@ impl Config {
             max_assign: ev("SOULWARE_MAX_ASSIGN", "3").parse().unwrap_or(3),
             data_path: ev("SOULWARE_COORD_DATA", "/root/aidag-lsc/.data/soulware-coordinator.json"),
             settle_key_path: std::env::var("SOULWARE_SETTLE_KEY").ok().filter(|s| !s.trim().is_empty()),
-            settle_auto: ev("SOULWARE_SETTLE_AUTO", "0") == "1",
+            settle_auto: settle_auto_coz(std::env::var("SOULWARE_SETTLE_AUTO").ok()),
             settle_interval: ev("SOULWARE_SETTLE_INTERVAL", "15").parse().unwrap_or(15),
             free_budget_lsc: ev("SOULWARE_FREE_BUDGET_LSC", "1000").parse().unwrap_or(1000),
             gold_path: std::env::var("SOULWARE_GOLD_PATH").ok().filter(|s| !s.trim().is_empty()),
+            free_daily_per_client: ev("SOULWARE_FREE_DAILY_PER_CLIENT", "10").parse().unwrap_or(10),
         }
     }
 }
@@ -153,6 +174,9 @@ struct WorkResult {
     answer: String,
     hash: String, // blake3(answer) hex — hızlı eşleşme
     at: u64,
+    /// Gönderenin IP'si (biliniyorsa). Aynı IP'den ikinci cüzdan oy sayılmaz (sybil).
+    #[serde(default)]
+    ip: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -207,6 +231,12 @@ struct Job {
     // yeterli seviyedeki worker'a dağıtılır → küçük model zayıf halka olmaz.
     #[serde(default)]
     min_tier: u8,
+    /// Atanan worker → IP (biliniyorsa). Aynı IP'ye aynı iş ikinci kez verilmez.
+    #[serde(default)]
+    atanan_ip: HashMap<String, String>,
+    /// Ücretli işin ödemesi: bağlandığı tip=7 vertex id'si (hex).
+    #[serde(default)]
+    odeme_vertex: Option<String>,
 }
 
 struct Coord {
@@ -225,6 +255,9 @@ struct Coord {
     // ── Ekonomi muhasebesi ──
     fees_committed_wei: u128,          // ödemesi doğrulanmış toplam ücret (high-water-mark)
     free_committed_lsc: u64,           // ücretsiz-tier'e rezerve edilmiş toplam LSC (bütçeye karşı)
+    // ── Kötüye kullanım korumaları ──
+    ucretsiz_gunluk: HashMap<String, (u64, u32)>, // istemci anahtarı → (gün, ücretsiz iş sayısı)
+    kullanilan_odemeler: HashMap<String, u64>,    // vertex id / "payer:nonce" → iş (çifte sayım kilidi)
 }
 
 impl Coord {
@@ -235,6 +268,8 @@ impl Coord {
             "settlements": self.settlements, "next_reward_id": self.next_reward_id,
             "fees_committed_wei": self.fees_committed_wei.to_string(),
             "free_committed_lsc": self.free_committed_lsc,
+            "ucretsiz_gunluk": self.ucretsiz_gunluk,
+            "kullanilan_odemeler": self.kullanilan_odemeler,
         });
         let p = &self.cfg.data_path;
         if let Some(dir) = std::path::Path::new(p).parent() {
@@ -256,6 +291,8 @@ struct LoadedState {
     next_reward_id: u64,
     fees_committed_wei: u128,
     free_committed_lsc: u64,
+    ucretsiz_gunluk: HashMap<String, (u64, u32)>,
+    kullanilan_odemeler: HashMap<String, u64>,
 }
 
 /// Diskten durumu yükle (yoksa boş). Restart sonrası worker/iş/ödül/settlement/muhasebe korunur.
@@ -269,37 +306,19 @@ fn load_state(path: &str) -> LoadedState {
             let next_reward_id = v.get("next_reward_id").and_then(|x| x.as_u64()).unwrap_or(1);
             let fees_committed_wei = v.get("fees_committed_wei").and_then(|x| x.as_str()).and_then(|s| s.parse().ok()).unwrap_or(0);
             let free_committed_lsc = v.get("free_committed_lsc").and_then(|x| x.as_u64()).unwrap_or(0);
-            return LoadedState { workers, jobs, next_job, settlements, next_reward_id, fees_committed_wei, free_committed_lsc };
+            let ucretsiz_gunluk = v.get("ucretsiz_gunluk").cloned().and_then(|x| serde_json::from_value(x).ok()).unwrap_or_default();
+            let kullanilan_odemeler = v.get("kullanilan_odemeler").cloned().and_then(|x| serde_json::from_value(x).ok()).unwrap_or_default();
+            return LoadedState { workers, jobs, next_job, settlements, next_reward_id, fees_committed_wei, free_committed_lsc, ucretsiz_gunluk, kullanilan_odemeler };
         }
     }
-    LoadedState { workers: HashMap::new(), jobs: HashMap::new(), next_job: 1, settlements: vec![], next_reward_id: 1, fees_committed_wei: 0, free_committed_lsc: 0 }
+    LoadedState { workers: HashMap::new(), jobs: HashMap::new(), next_job: 1, settlements: vec![], next_reward_id: 1, fees_committed_wei: 0, free_committed_lsc: 0,
+        ucretsiz_gunluk: HashMap::new(), kullanilan_odemeler: HashMap::new() }
 }
 
 type St = Arc<Mutex<Coord>>;
 
 // ════════════════════════════ Zincir: imzalı ödül kaydı ════════════════════════════
-fn anahtar_yukle_veya_uret(path: &str) -> std::io::Result<SigningKey> {
-    if let Ok(data) = std::fs::read(path) {
-        if data.len() == 33 && data[0] == 1 {
-            let mut seed = [0u8; 32];
-            seed.copy_from_slice(&data[1..33]);
-            return Ok(SigningKey::from_bytes(&seed));
-        }
-    }
-    use rand::RngCore;
-    let mut seed = [0u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut seed);
-    let mut dosya = Vec::with_capacity(33);
-    dosya.push(1u8);
-    dosya.extend_from_slice(&seed);
-    std::fs::write(path, &dosya)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-    }
-    Ok(SigningKey::from_bytes(&seed))
-}
+// Havuz anahtarı: imza_dosyasi.rs (fail-closed; sessiz üretim kaldırıldı).
 
 async fn uclari_cek(http: &reqwest::Client, rpc: &str) -> Vec<[u8; 32]> {
     let mut out: Vec<[u8; 32]> = Vec::new();
@@ -510,6 +529,24 @@ async fn settle_loop(st: St) {
 }
 
 // ════════════════════════════ Uçlar ════════════════════════════
+type Yanit = (StatusCode, Json<Value>);
+
+fn yanit(v: Value) -> Yanit {
+    (StatusCode::OK, Json(v))
+}
+
+fn hata(kod: StatusCode, mesaj: impl Into<String>) -> Yanit {
+    (kod, Json(json!({ "ok": false, "hata": mesaj.into() })))
+}
+
+/// Cüzdan imzasını doğrula; başarısızsa 401.
+fn imza_kontrol(wallet: &str, nonce: &str, alan: &cuzdan_imza::ImzaAlanlari) -> Result<(), Yanit> {
+    cuzdan_imza::dogrula(wallet, nonce, alan, now_secs()).map_err(|e| hata(StatusCode::UNAUTHORIZED, e))
+}
+
+fn peer_ip(ci: Option<ConnectInfo<SocketAddr>>, h: &HeaderMap) -> Option<String> {
+    denetim::istemci_ip(ci.map(|c| c.0), h)
+}
 #[derive(Deserialize)]
 struct CreateJob {
     prompt: String,
@@ -519,9 +556,16 @@ struct CreateJob {
     #[serde(default)] min_tier: Option<u8>,   // gereken min worker seviyesi (zorluk; 0=herkes)
 }
 
-async fn job_create(State(st): State<St>, Json(req): Json<CreateJob>) -> Json<Value> {
+async fn job_create(State(st): State<St>, ci: Option<ConnectInfo<SocketAddr>>, h: HeaderMap, Json(req): Json<CreateJob>) -> Json<Value> {
     if req.prompt.trim().is_empty() {
         return Json(json!({ "ok": false, "hata": "prompt boş" }));
+    }
+    let ip = peer_ip(ci, &h);
+    let payer = req.payer.as_deref().map(|p| p.trim().to_lowercase()).filter(|p| !p.is_empty());
+    if let Some(p) = &payer {
+        if cuzdan20(p).is_none() {
+            return Json(json!({ "ok": false, "hata": "payer 0x + 40 hex olmalı" }));
+        }
     }
     let mut c = st.lock().await;
     let det = req.deterministic.unwrap_or(true);
@@ -536,6 +580,10 @@ async fn job_create(State(st): State<St>, Json(req): Json<CreateJob>) -> Json<Va
                 "hata": format!("ücret en az {is_maliyeti} LSC olmalı (yedeklilik×ödül); havuzu erirtmez"),
                 "min_ucret_lsc": is_maliyeti }));
         }
+        // Ödeme belirli bir tip=7 transferine bağlanacak: imzalayan = payer olmalı.
+        if payer.is_none() {
+            return Json(json!({ "ok": false, "hata": "ücretli iş için payer (ödeyen cüzdan) zorunlu" }));
+        }
         false // ödeme /job/confirm ile havuzda doğrulanana kadar dağıtılmaz
     } else {
         // ÜCRETSİZ: yalnız emisyonla fonlanır (ücretli havuzu YEMEZ) + free bütçe tavanı.
@@ -548,6 +596,15 @@ async fn job_create(State(st): State<St>, Json(req): Json<CreateJob>) -> Json<Va
                 "hata": format!("ücretsiz kota doldu ({}/{} LSC). Ücretli kullanın ya da katkı verip kazanın.",
                     c.free_committed_lsc, c.cfg.free_budget_lsc) }));
         }
+        // İstemci başına günlük sınır: IP (bilinmiyorsa ortak "bilinmiyor" kovası) + varsa cüzdan.
+        let mut anahtarlar = vec![format!("ip:{}", ip.as_deref().unwrap_or("bilinmiyor"))];
+        if let Some(p) = &payer { anahtarlar.push(format!("cuzdan:{p}")); }
+        let gun = now_secs() / 86_400;
+        let sinir = c.cfg.free_daily_per_client;
+        if !denetim::gunluk_kota_dene(&mut c.ucretsiz_gunluk, &anahtarlar, gun, sinir) {
+            return Json(json!({ "ok": false,
+                "hata": format!("günlük ücretsiz iş sınırı doldu (istemci başına {sinir}/gün). Yarın tekrar deneyin ya da ücretli kullanın.") }));
+        }
         c.free_committed_lsc = yeni_taahhut; // rezerve et
         true // ücretsiz iş hemen dağıtılabilir (emisyonla ödenir)
     };
@@ -558,30 +615,36 @@ async fn job_create(State(st): State<St>, Json(req): Json<CreateJob>) -> Json<Va
     c.jobs.insert(id, Job {
         id, prompt: req.prompt, deterministic: det, status: "pending".into(),
         assigned: vec![], results: vec![], verified_answer: None, rewards: vec![], created_at: now_secs(),
-        fee_lsc: fee, payer: req.payer.map(|p| p.trim().to_lowercase()), paid, min_tier,
+        fee_lsc: fee, payer, paid, min_tier, atanan_ip: HashMap::new(), odeme_vertex: None,
     });
     c.save();
     Json(json!({ "ok": true, "job_id": id, "deterministic": det, "fee_lsc": fee, "paid": paid, "min_tier": min_tier,
         "not": if fee > 0 {
-            "ÜCRETLİ: havuza öde (soulware-pay tip=7) sonra POST /job/confirm ile doğrula → dağıtılır"
+            "ÜCRETLİ: payer cüzdanıyla havuza tip=7 LSC transferi imzala, imzalı vertex hex'ini POST /job/confirm {job_id, odeme_hex} ile gönder → dağıtılır"
         } else { "ÜCRETSİZ: emisyonla fonlanır (bootstrap), hemen dağıtılır" } }))
 }
 
 #[derive(Deserialize)]
-struct Reg { wallet: String }
+struct Reg {
+    wallet: String,
+    #[serde(flatten)]
+    imza: cuzdan_imza::ImzaAlanlari,
+}
 
-async fn worker_register(State(st): State<St>, Json(req): Json<Reg>) -> Json<Value> {
+async fn worker_register(State(st): State<St>, Json(req): Json<Reg>) -> Yanit {
     let w = req.wallet.trim().to_lowercase();
-    if w.is_empty() {
-        return Json(json!({ "ok": false, "hata": "wallet boş" }));
+    if cuzdan20(&w).is_none() {
+        return hata(StatusCode::BAD_REQUEST, "wallet 0x + 40 hex olmalı");
     }
+    // Cüzdan sahipliği: imzasız/yanlış imza → 401 (başkası adına kayıt/sybil zorlaşır).
+    if let Err(r) = imza_kontrol(&w, worker_mesaj::NONCE_KAYIT, &req.imza) { return r; }
     let mut c = st.lock().await;
     c.workers.entry(w.clone()).or_insert_with(|| Worker {
         wallet: w.clone(), reputation: 0, earned_lsc: 0, jobs_done: 0, registered_at: now_secs(),
         tier: 0, gold_score: 0.0, avg_latency_ms: 0.0, benchmarked_at: 0,
     });
     c.save();
-    Json(json!({ "ok": true, "wallet": w,
+    yanit(json!({ "ok": true, "wallet": w,
         "rıza": "GPU katkısı yalnızca istemci onayıyla",
         "not": "seviye için GET /worker/benchmark/:wallet ile öz-kıyaslamayı yap" }))
 }
@@ -602,14 +665,22 @@ async fn worker_benchmark_al(State(st): State<St>, Path(wallet): Path<String>) -
 #[derive(Deserialize)]
 struct BenchCevap { id: u64, cevap: String, #[serde(default)] ms: u64 }
 #[derive(Deserialize)]
-struct BenchSubmit { wallet: String, cevaplar: Vec<BenchCevap> }
+struct BenchSubmit {
+    wallet: String,
+    cevaplar: Vec<BenchCevap>,
+    #[serde(flatten)]
+    imza: cuzdan_imza::ImzaAlanlari,
+}
 
 // ÖZ-KIYASLAMA 2/2: cevapları puanla → gold_score + tier + ortalama gecikme ata.
-async fn worker_benchmark_gonder(State(st): State<St>, Json(req): Json<BenchSubmit>) -> Json<Value> {
+async fn worker_benchmark_gonder(State(st): State<St>, Json(req): Json<BenchSubmit>) -> Yanit {
     let w = req.wallet.trim().to_lowercase();
+    // İmza cevapların kendisine bağlı: başkasının seviyesini değiştiremez.
+    let ozet: Vec<(u64, u64, &str)> = req.cevaplar.iter().map(|c| (c.id, c.ms, c.cevap.as_str())).collect();
+    if let Err(r) = imza_kontrol(&w, &worker_mesaj::benchmark_nonce(&ozet), &req.imza) { return r; }
     let mut c = st.lock().await;
     if !c.workers.contains_key(&w) {
-        return Json(json!({ "ok": false, "hata": "önce kaydol" }));
+        return hata(StatusCode::BAD_REQUEST, "önce kaydol");
     }
     let gold = gold_seti(&c.cfg);
     let toplam = gold.len().max(1);
@@ -633,16 +704,22 @@ async fn worker_benchmark_gonder(State(st): State<St>, Json(req): Json<BenchSubm
         wk.benchmarked_at = ts;
     }
     c.save();
-    Json(json!({ "ok": true, "wallet": w, "dogru": dogru, "toplam": toplam,
+    yanit(json!({ "ok": true, "wallet": w, "dogru": dogru, "toplam": toplam,
         "gold_score": score, "tier": tier, "ort_gecikme_ms": ort_ms,
         "not": "tier ≥ işin min_tier'i ise o iş sana dağıtılır" }))
 }
 
-async fn worker_poll(State(st): State<St>, Path(wallet): Path<String>) -> Json<Value> {
+async fn worker_poll(
+    State(st): State<St>, Path(wallet): Path<String>, Query(imza): Query<cuzdan_imza::ImzaAlanlari>,
+    ci: Option<ConnectInfo<SocketAddr>>, h: HeaderMap,
+) -> Yanit {
     let w = wallet.trim().to_lowercase();
+    // Başkası adına poll = kurbanın adına iş kapma/slot doldurma → imza şart.
+    if let Err(r) = imza_kontrol(&w, worker_mesaj::NONCE_POLL, &imza) { return r; }
+    let ip = peer_ip(ci, &h);
     let mut c = st.lock().await;
     if !c.workers.contains_key(&w) {
-        return Json(json!({ "none": true, "hata": "önce kaydol (/worker/register)" }));
+        return yanit(json!({ "none": true, "hata": "önce kaydol (/worker/register)" }));
     }
     let max_assign = c.cfg.max_assign;
     let w_tier = c.workers.get(&w).map(|x| x.tier).unwrap_or(0);
@@ -659,9 +736,12 @@ async fn worker_poll(State(st): State<St>, Path(wallet): Path<String>) -> Json<V
     });
     for id in ids {
         if let Some(j) = c.jobs.get(&id) {
+            // Aynı IP'den ikinci cüzdana aynı iş VERİLMEZ (sybil slot doldurmasın).
+            let ayni_ip = ip.as_ref().is_some_and(|i| j.atanan_ip.values().any(|x| x == i));
             let dagitilabilir = j.status == "pending" && j.paid
                 && w_tier >= j.min_tier
-                && !j.assigned.contains(&w) && j.assigned.len() < max_assign;
+                && !j.assigned.contains(&w) && j.assigned.len() < max_assign
+                && !ayni_ip;
             if dagitilabilir {
                 secilen = Some((id, j.prompt.clone(), j.deterministic));
                 break;
@@ -672,21 +752,31 @@ async fn worker_poll(State(st): State<St>, Path(wallet): Path<String>) -> Json<V
         Some((id, prompt, det)) => {
             if let Some(j) = c.jobs.get_mut(&id) {
                 j.assigned.push(w.clone());
+                if let Some(i) = &ip { j.atanan_ip.insert(w.clone(), i.clone()); }
             }
             c.save();
-            Json(json!({ "job_id": id, "prompt": prompt, "deterministic": det }))
+            yanit(json!({ "job_id": id, "prompt": prompt, "deterministic": det }))
         }
-        None => Json(json!({ "none": true })),
+        None => yanit(json!({ "none": true })),
     }
 }
 
 #[derive(Deserialize)]
-struct Submit { wallet: String, job_id: u64, answer: String }
+struct Submit {
+    wallet: String,
+    job_id: u64,
+    answer: String,
+    #[serde(flatten)]
+    imza: cuzdan_imza::ImzaAlanlari,
+}
 
-async fn worker_submit(State(st): State<St>, Json(req): Json<Submit>) -> Json<Value> {
+async fn worker_submit(State(st): State<St>, ci: Option<ConnectInfo<SocketAddr>>, h: HeaderMap, Json(req): Json<Submit>) -> Yanit {
     let w = req.wallet.trim().to_lowercase();
     let ts = now_secs();
-    let hash = hex::encode(blake3::hash(req.answer.trim().as_bytes()).as_bytes());
+    // İmza belirli bir iş + belirli bir cevaba bağlı (worker_mesaj::is_nonce).
+    if let Err(r) = imza_kontrol(&w, &worker_mesaj::is_nonce(req.job_id, &req.answer), &req.imza) { return r; }
+    let ip = peer_ip(ci, &h);
+    let hash = worker_mesaj::cevap_ozeti(&req.answer);
 
     // 1) Sonucu kaydet + doğrulama/karar (kilit altında, await YOK).
     //    verdict = Some((job_id, kazananlar, slashlananlar)) doğrulandıysa.
@@ -698,25 +788,24 @@ async fn worker_submit(State(st): State<St>, Json(req): Json<Submit>) -> Json<Va
         let max_assign = cfg.max_assign;
         let job = match c.jobs.get_mut(&req.job_id) {
             Some(j) => j,
-            None => return Json(json!({ "ok": false, "hata": "iş yok" })),
+            None => return hata(StatusCode::NOT_FOUND, "iş yok"),
         };
         if job.status != "pending" {
-            return Json(json!({ "ok": true, "durum": job.status.clone(), "not": "iş zaten kapandı" }));
+            return yanit(json!({ "ok": true, "durum": job.status.clone(), "not": "iş zaten kapandı" }));
         }
         if !job.assigned.contains(&w) {
-            return Json(json!({ "ok": false, "hata": "bu iş sana atanmadı" }));
+            return hata(StatusCode::FORBIDDEN, "bu iş sana atanmadı");
         }
         if job.results.iter().any(|r| r.worker == w) {
-            return Json(json!({ "ok": false, "hata": "zaten gönderdin" }));
+            return hata(StatusCode::CONFLICT, "zaten gönderdin");
         }
-        job.results.push(WorkResult { worker: w.clone(), answer: req.answer.clone(), hash: hash.clone(), at: ts });
+        job.results.push(WorkResult { worker: w.clone(), answer: req.answer.clone(), hash: hash.clone(), at: ts, ip: ip.clone() });
 
-        // Eşleşme sayımı: bir cevap-hash ≥ redundancy kez → DOĞRULANDI (o cevap doğru kabul).
-        let mut sayac: HashMap<String, Vec<String>> = HashMap::new();
-        for r in &job.results {
-            sayac.entry(r.hash.clone()).or_default().push(r.worker.clone());
-        }
-        let kazanan = sayac.iter().find(|(_, ws)| ws.len() >= redundancy).map(|(h, ws)| (h.clone(), ws.clone()));
+        // Eşleşme sayımı: bir cevap-hash için FARKLI cüzdan + (biliniyorsa) FARKLI IP
+        // sayısı ≥ redundancy → DOĞRULANDI. Aynı IP'den ikinci cüzdan oy sayılmaz/ödül almaz.
+        let oylar: Vec<denetim::Oy> = job.results.iter()
+            .map(|r| denetim::Oy { worker: &r.worker, hash: &r.hash, ip: r.ip.as_deref() }).collect();
+        let kazanan = denetim::oylama(&oylar, redundancy);
         let maxed = job.assigned.len() >= max_assign && job.results.len() >= job.assigned.len();
 
         let verdict = if let Some((khash, kazananlar)) = kazanan {
@@ -777,14 +866,14 @@ async fn worker_submit(State(st): State<St>, Json(req): Json<Submit>) -> Json<Va
             odul_sonuc.push(json!({ "worker": worker, "lsc": cfg.reward_lsc, "chain_ok": chain_ok, "proof": proof, "reward_id": reward_id }));
         }
         { let c = st.lock().await; c.save(); }
-        return Json(json!({
+        return yanit(json!({
             "ok": true, "durum": "verified",
             "kazananlar": kazananlar.len(), "slashlanan": slashlananlar.len(),
             "oduller": odul_sonuc,
         }));
     }
 
-    Json(json!({ "ok": true, "durum": "kaydedildi", "not": "doğrulama için daha çok sonuç bekleniyor" }))
+    yanit(json!({ "ok": true, "durum": "kaydedildi", "not": "doğrulama için daha çok sonuç bekleniyor" }))
 }
 
 async fn status(State(st): State<St>) -> Json<Value> {
@@ -892,42 +981,100 @@ fn havuz_odemeleri_wei(c: &Coord) -> u128 {
 }
 
 #[derive(Deserialize)]
-struct Confirm { job_id: u64 }
+struct Confirm {
+    job_id: u64,
+    /// Payer'ın imzaladığı tip=7 LSC transfer vertex'i (wire hex). Ödeme bu İŞLEME bağlanır.
+    #[serde(default)]
+    odeme_hex: Option<String>,
+}
 
-// Ücretli işin ödemesini DOĞRULA: tüketici havuza (tip=7) ödedi mi? Zincirdeki
-// gerçek havuz bakiyesi + geçmiş havuz ödemeleri = toplam giriş; taahhüt edilmemiş
-// kısım ücreti karşılıyorsa iş "paid" olur ve dağıtılır. Zincir-temelli, sahte YOK.
-async fn job_confirm(State(st): State<St>, Json(req): Json<Confirm>) -> Json<Value> {
-    let (http, rpc, pool_addr, fee_wei, already) = {
+// Ücretli işin ödemesini DOĞRULA ve BELİRLİ bir tip=7 transferine BAĞLA:
+//  1) odeme_hex: imzalı vertex, doğru ağ, alıcı = havuz, miktar ≥ ücret, imzalayan = işin payer'ı;
+//  2) aynı vertex id / (payer, nonce) başka bir işe sayılmışsa RED (çifte sayım yok);
+//  3) gönderim öncesi payer nonce'u == transfer nonce'u; vertex'i koordinatör gönderir
+//     ve zincir "Integrated" der; gönderim sonrası nonce ilerlemiş olmalı (transfer İŞLENDİ);
+//  5) ek güvence: havuzdaki taahhüt edilmemiş bakiye ücreti karşılamalı.
+async fn job_confirm(State(st): State<St>, Json(req): Json<Confirm>) -> Yanit {
+    let (http, rpc, net_id, pool_addr, fee_wei, payer, already) = {
         let c = st.lock().await;
         let job = match c.jobs.get(&req.job_id) {
             Some(j) => j,
-            None => return Json(json!({ "ok": false, "hata": "iş yok" })),
+            None => return hata(StatusCode::NOT_FOUND, "iş yok"),
         };
         if job.fee_lsc == 0 {
-            return Json(json!({ "ok": false, "hata": "ücretsiz iş, ödeme gerekmez" }));
+            return hata(StatusCode::BAD_REQUEST, "ücretsiz iş, ödeme gerekmez");
         }
-        (c.http.clone(), c.cfg.chain_rpc.clone(), c.key_addr,
-         (job.fee_lsc as u128).saturating_mul(ONDALIK), job.paid)
+        (c.http.clone(), c.cfg.chain_rpc.clone(), c.cfg.net_id, c.key_addr,
+         (job.fee_lsc as u128).saturating_mul(ONDALIK), job.payer.clone(), job.paid)
     };
     if already {
-        return Json(json!({ "ok": true, "job_id": req.job_id, "paid": true, "not": "zaten doğrulanmış" }));
+        return yanit(json!({ "ok": true, "job_id": req.job_id, "paid": true, "not": "zaten doğrulanmış" }));
+    }
+    let Some(payer) = payer else { return hata(StatusCode::BAD_REQUEST, "işin payer adresi yok") };
+    let Some(odeme_hex) = req.odeme_hex.as_deref().filter(|s| !s.trim().is_empty()) else {
+        return hata(StatusCode::BAD_REQUEST, "odeme_hex zorunlu: payer'ın havuza imzaladığı tip=7 transfer vertex'i");
+    };
+    let odeme = match denetim::odeme_coz(odeme_hex, net_id, &pool_addr, &payer, fee_wei) {
+        Ok(o) => o,
+        Err(e) => return hata(StatusCode::BAD_REQUEST, e),
+    };
+    let kilit_anahtarlari = [odeme.vertex_id.clone(), odeme.nonce_anahtari()];
+    {
+        let c = st.lock().await;
+        if let Some(j) = kilit_anahtarlari.iter().find_map(|k| c.kullanilan_odemeler.get(k)) {
+            return hata(StatusCode::CONFLICT, format!("bu ödeme zaten iş #{j} için sayıldı"));
+        }
+    }
+    // Transferin GERÇEKTEN bu gönderimle işlendiğini kanıtla:
+    //  (a) gönderim ÖNCESİ payer nonce'u == transfer nonce'u (sıradaki geçerli işlem),
+    //  (b) vertex'i KOORDİNATÖR gönderir ve zincir "Integrated" der (Duplicate = daha
+    //      önce başka yoldan gönderilmiş → sonucu bu gönderimle kanıtlanamaz → RED),
+    //  (c) gönderim SONRASI payer nonce'u transfer nonce'unu geçmiş (yalnız BAŞARILI
+    //      tip=7 nonce ilerletir: bakiye yetersiz/yanlış nonce → ilerlemez).
+    let payer20 = match cuzdan20(&payer) { Some(a) => a, None => return hata(StatusCode::BAD_REQUEST, "payer geçersiz") };
+    let onceki_nonce = nonce_cek(&http, &rpc, &payer20).await;
+    if onceki_nonce != odeme.nonce {
+        return hata(StatusCode::CONFLICT, format!(
+            "transfer nonce'u ({}) payer'ın sıradaki nonce'u ({onceki_nonce}) değil; GET /nonce ile yeniden imzalayın", odeme.nonce));
+    }
+    let temiz_hex = odeme_hex.trim().trim_start_matches("0x").to_string();
+    let sonuc = match http.post(format!("{rpc}/submit")).json(&json!({ "hex": temiz_hex })).send().await {
+        Ok(r) => r.json::<Value>().await.ok()
+            .and_then(|v| v.get("sonuc").and_then(|s| s.as_str()).map(String::from))
+            .unwrap_or_default(),
+        Err(e) => return hata(StatusCode::BAD_GATEWAY, format!("zincire ulaşılamıyor: {e}")),
+    };
+    if !sonuc.starts_with("Integrated") {
+        return hata(StatusCode::BAD_REQUEST, format!(
+            "ödeme vertex'i bu gönderimle işlenmedi ({sonuc}). İmzalı transferi zincire kendiniz göndermeyin; yalnız /job/confirm'e verin"));
+    }
+    let sonraki_nonce = nonce_cek(&http, &rpc, &payer20).await;
+    if sonraki_nonce <= odeme.nonce {
+        return hata(StatusCode::CONFLICT, format!(
+            "ödeme zincirde uygulanmadı (payer nonce {sonraki_nonce}); bakiye yetersiz olabilir"));
     }
     let pool_live = lsc_bakiye_cek(&http, &rpc, &pool_addr).await;
-    // Nihai kararı kilit altında ver (fresh fees_committed ile — yarış güvenli).
+    // Nihai kararı kilit altında ver (fresh fees_committed + çifte sayım kilidi — yarış güvenli).
     let mut c = st.lock().await;
+    if let Some(j) = kilit_anahtarlari.iter().find_map(|k| c.kullanilan_odemeler.get(k)) {
+        return hata(StatusCode::CONFLICT, format!("bu ödeme zaten iş #{j} için sayıldı"));
+    }
     let total_in = pool_live.saturating_add(havuz_odemeleri_wei(&c));
     let available = total_in.saturating_sub(c.fees_committed_wei);
-    if available >= fee_wei {
-        c.fees_committed_wei = c.fees_committed_wei.saturating_add(fee_wei);
-        if let Some(j) = c.jobs.get_mut(&req.job_id) { j.paid = true; }
-        c.save();
-        Json(json!({ "ok": true, "job_id": req.job_id, "paid": true, "not": "ödeme havuzda doğrulandı → iş dağıtılabilir" }))
-    } else {
-        Json(json!({ "ok": false, "job_id": req.job_id, "paid": false,
-            "hata": "ödeme henüz havuzda görünmüyor",
-            "gereken_wei": fee_wei.to_string(), "musait_wei": available.to_string() }))
+    if available < fee_wei {
+        return (StatusCode::CONFLICT, Json(json!({ "ok": false, "job_id": req.job_id, "paid": false,
+            "hata": "ödeme havuzda görünmüyor",
+            "gereken_wei": fee_wei.to_string(), "musait_wei": available.to_string() })));
     }
+    c.fees_committed_wei = c.fees_committed_wei.saturating_add(fee_wei);
+    for k in kilit_anahtarlari { c.kullanilan_odemeler.insert(k, req.job_id); }
+    if let Some(j) = c.jobs.get_mut(&req.job_id) {
+        j.paid = true;
+        j.odeme_vertex = Some(odeme.vertex_id.clone());
+    }
+    c.save();
+    yanit(json!({ "ok": true, "job_id": req.job_id, "paid": true, "odeme_vertex": odeme.vertex_id,
+        "not": "ödeme bu işe bağlandı → iş dağıtılabilir" }))
 }
 
 async fn health() -> Json<Value> {
@@ -937,7 +1084,28 @@ async fn health() -> Json<Value> {
 #[tokio::main]
 async fn main() {
     let cfg = Config::from_env();
-    let key = anahtar_yukle_veya_uret(&cfg.key_path).expect("koordinatör anahtarı");
+    // HAVUZ ANAHTARI (FAIL-CLOSED): yoksa/bozuksa koordinatör AÇILMAZ; yeni anahtar yalnız
+    // `--yeni-anahtar-uret` ile (havuz adresi değişir → eski havuz bakiyesi erişilemez olur).
+    let argumanlar: Vec<String> = std::env::args().skip(1).collect();
+    match argumanlar.as_slice() {
+        [] => {}
+        [a] if a == "--yeni-anahtar-uret" => match imza_dosyasi::uret(&cfg.key_path) {
+            Ok(k) => {
+                println!("YENI HAVUZ ANAHTARI URETILDI: {}\n   havuz adresi: 0x{}\nServis BASLATILMADI.",
+                    cfg.key_path, hex::encode(public_key_to_adres(&k.verifying_key().to_bytes())));
+                return;
+            }
+            Err(e) => { eprintln!("HATA: {e}"); std::process::exit(2); }
+        },
+        _ => {
+            eprintln!("HATA: bilinmeyen arguman: {argumanlar:?}. Gecerli: (yok) | --yeni-anahtar-uret");
+            std::process::exit(2);
+        }
+    }
+    let key = match imza_dosyasi::yukle(&cfg.key_path) {
+        Ok(k) => k,
+        Err(e) => { eprintln!("HATA: {e}"); std::process::exit(2); }
+    };
     let key_addr = public_key_to_adres(&key.verifying_key().to_bytes());
     let http = reqwest::Client::builder().timeout(Duration::from_secs(30)).build().expect("http");
     let listen = cfg.listen.clone();
@@ -997,6 +1165,7 @@ async fn main() {
         settlements: ls.settlements, next_reward_id: ls.next_reward_id,
         settle_key, settle_addr,
         fees_committed_wei: ls.fees_committed_wei, free_committed_lsc: ls.free_committed_lsc,
+        ucretsiz_gunluk: ls.ucretsiz_gunluk, kullanilan_odemeler: ls.kullanilan_odemeler,
     }));
 
     // Arka plan settlement döngüsü (yalnız auto aktifse gerçek iş yapar).
@@ -1025,5 +1194,22 @@ async fn main() {
 
     let addr: SocketAddr = listen.parse().expect("SOULWARE_COORD_LISTEN geçersiz");
     let listener = tokio::net::TcpListener::bind(addr).await.expect("port");
-    axum::serve(listener, app).await.expect("sunucu");
+    // ConnectInfo: istemci IP'si (sybil/kota); yerel vekil arkasında X-Real-IP/XFF.
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await.expect("sunucu");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::settle_auto_coz;
+
+    // Bulgu 8e: otomatik settlement varsayılan KAPALI; yalnız açıkça "1".
+    #[test]
+    fn oto_settlement_varsayilan_kapali() {
+        assert!(!settle_auto_coz(None));
+        for v in ["", "0", "true", "yes", "evet", "on", "11"] {
+            assert!(!settle_auto_coz(Some(v.into())), "{v}");
+        }
+        assert!(settle_auto_coz(Some("1".into())));
+        assert!(settle_auto_coz(Some(" 1 ".into())));
+    }
 }
