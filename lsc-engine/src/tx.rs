@@ -26,6 +26,8 @@ pub enum TxError {
     BadLength { expected: usize, got: usize },
     /// Hiç bayt yok (boş payload).
     Empty,
+    /// Alan degeri gecersiz (uzunluk dogru ama icerik kurala aykiri).
+    GecersizAlan(&'static str),
 }
 
 impl core::fmt::Display for TxError {
@@ -39,6 +41,7 @@ impl core::fmt::Display for TxError {
                 )
             }
             TxError::Empty => write!(f, "bos islem payload'i"),
+            TxError::GecersizAlan(a) => write!(f, "gecersiz alan: {a}"),
         }
     }
 }
@@ -1607,5 +1610,413 @@ mod evm_transfer_tests {
             }
         }
         eprintln!("KALKAN OK: {} tur, sahte token korumasi tuttu", turlar);
+    }
+}
+
+// ============================================================================
+// RWA: KURUM YETKI (17), ORACLE AKIS TANIMI (18), ORACLE RAPORU (19), KYC KAYDI (20)
+//
+// Izinli model: rapor ve KYC onayi YALNIZ KurumRegistry'de kayitli ve rol
+// verilmis kurumlardan kabul edilir. Kurum imzasi = vertex'in ed25519 imzasi
+// (kaydeden = imzalayan). Ham veri zincire YAZILMAZ; yalniz hash'i. KYC'de
+// kisisel veri YOK: sadece "adres onayli / onay iptal" + kanit hash'i.
+// Kurallar node.rs'te (kalkana_yonlendir), hesap oracle_hesap.rs'te.
+// ============================================================================
+
+/// tip=17: kuruma rol ver / rol geri al. SADECE owner imzalar; owner yalniz
+/// rol yonetir, rapor ya da KYC onayi YAZAMAZ.
+pub const TX_TYPE_KURUM_YETKI: u8 = 17;
+/// tip=18: oracle akisi tanimi (parametreler). SADECE owner; ILK TANIM KAZANIR
+/// (sonradan esik/sapma degistirilemez -> manipulasyon yolu kapali).
+pub const TX_TYPE_ORACLE_AKIS_TANIM: u8 = 18;
+/// tip=19: oracle raporu. Yalniz o akis icin ORACLE_RAPORLAYICI rolu aktif kurum.
+pub const TX_TYPE_ORACLE_RAPOR: u8 = 19;
+/// tip=20: KYC onay / onay iptali. Yalniz KYC_ONAYLAYICI rolu aktif kurum.
+pub const TX_TYPE_KYC_KAYIT: u8 = 20;
+
+/// Rol: belirli bir oracle akisina rapor verebilir (kapsam = akis_no).
+pub const ROL_ORACLE_RAPORLAYICI: u8 = 1;
+/// Rol: adres KYC onayi verebilir / iptal edebilir (kapsam = 0).
+pub const ROL_KYC_ONAYLAYICI: u8 = 2;
+
+/// Bir akisin azami raporlayici esigi (M). Medyan/eleme maliyetini sinirlar.
+pub const ORACLE_AZAMI_ESIK: u8 = 31;
+/// Akis aciklamasi azami uzunluk (bayt).
+pub const ORACLE_ACIKLAMA_MAX: usize = 64;
+/// Azami ondalik (i128 cevap icin makul ust sinir).
+pub const ORACLE_AZAMI_ONDALIK: u8 = 18;
+/// Baz puan tabani (10_000 bps = %100).
+pub const BPS: u16 = 10_000;
+
+const KURUM_YETKI_ENCODED_LEN: usize = 1 + ADDR_LEN + 1 + 4 + 1;
+const ORACLE_AKIS_SABIT_LEN: usize = 1 + 4 + 1 + 1 + 2 + 2 + 4;
+const ORACLE_RAPOR_ENCODED_LEN: usize = 1 + 4 + 8 + 16 + 8 + 32;
+const KYC_KAYIT_ENCODED_LEN: usize = 1 + ADDR_LEN + 1 + 32;
+
+/// Ortak baslik kontrolu: bos degil + tip dogru.
+fn tip_kontrol(bytes: &[u8], tip: u8) -> Result<(), TxError> {
+    let &first = bytes.first().ok_or(TxError::Empty)?;
+    if first != tip {
+        return Err(TxError::UnknownType(first));
+    }
+    Ok(())
+}
+
+fn tam_uzunluk(bytes: &[u8], beklenen: usize) -> Result<(), TxError> {
+    if bytes.len() != beklenen {
+        return Err(TxError::BadLength {
+            expected: beklenen,
+            got: bytes.len(),
+        });
+    }
+    Ok(())
+}
+
+fn oku<const N: usize>(bytes: &[u8], bas: usize) -> [u8; N] {
+    let mut out = [0u8; N];
+    out.copy_from_slice(&bytes[bas..bas + N]);
+    out
+}
+
+/// tip=17 cozulmus: kuruma rol ver (`ver=true`) ya da geri al (`ver=false`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KurumYetki {
+    pub kurum: [u8; ADDR_LEN],
+    /// ROL_ORACLE_RAPORLAYICI ya da ROL_KYC_ONAYLAYICI.
+    pub rol: u8,
+    /// Oracle rolu icin akis_no (>=1); KYC rolu icin 0.
+    pub kapsam: u32,
+    pub ver: bool,
+}
+
+impl KurumYetki {
+    pub fn new(kurum: [u8; ADDR_LEN], rol: u8, kapsam: u32, ver: bool) -> Self {
+        KurumYetki { kurum, rol, kapsam, ver }
+    }
+
+    /// `[17][kurum:20][rol:1][kapsam:4 BE][islem:1]` = 27 bayt.
+    pub fn encode(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(KURUM_YETKI_ENCODED_LEN);
+        out.push(TX_TYPE_KURUM_YETKI);
+        out.extend_from_slice(&self.kurum);
+        out.push(self.rol);
+        out.extend_from_slice(&self.kapsam.to_be_bytes());
+        out.push(u8::from(self.ver));
+        out
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<KurumYetki, TxError> {
+        tip_kontrol(bytes, TX_TYPE_KURUM_YETKI)?;
+        tam_uzunluk(bytes, KURUM_YETKI_ENCODED_LEN)?;
+        let kurum = oku::<ADDR_LEN>(bytes, 1);
+        let rol = bytes[1 + ADDR_LEN];
+        let kapsam = u32::from_be_bytes(oku::<4>(bytes, 2 + ADDR_LEN));
+        let ver = match bytes[6 + ADDR_LEN] {
+            0 => false,
+            1 => true,
+            _ => return Err(TxError::GecersizAlan("islem 0/1 olmali")),
+        };
+        match rol {
+            ROL_ORACLE_RAPORLAYICI if kapsam == 0 => {
+                return Err(TxError::GecersizAlan("oracle rolu akis_no>=1 ister"))
+            }
+            ROL_KYC_ONAYLAYICI if kapsam != 0 => {
+                return Err(TxError::GecersizAlan("kyc rolu kapsam=0 ister"))
+            }
+            ROL_ORACLE_RAPORLAYICI | ROL_KYC_ONAYLAYICI => {}
+            _ => return Err(TxError::GecersizAlan("bilinmeyen rol")),
+        }
+        Ok(KurumYetki { kurum, rol, kapsam, ver })
+    }
+}
+
+/// tip=18 cozulmus: oracle akisi parametreleri.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OracleAkisTanim {
+    /// Akis numarasi (>=1). Ileride precompile adresi bundan turer.
+    pub akis_no: u32,
+    /// Cevabin ondalik sayisi (Chainlink `decimals()`).
+    pub ondalik: u8,
+    /// Bir turun kapanmasi icin gereken asgari (elemeden sonra kalan) rapor: M.
+    pub esik_m: u8,
+    /// Medyandan bu kadar (bps) sapan rapor elenir.
+    pub sapma_bps: u16,
+    /// Onceki cevaba gore bu kadar (bps) ani degisim devre kesiciyi tetikler.
+    pub kesici_bps: u16,
+    /// Bu sureden (sn) eski veri bayattir; ayrica acik turun rapor penceresi.
+    pub bayat_sn: u32,
+    /// Chainlink `description()` (UTF-8, <= 64 bayt).
+    pub aciklama: String,
+}
+
+impl OracleAkisTanim {
+    /// `[18][akis:4][ondalik:1][m:1][sapma:2][kesici:2][bayat:4][aciklama]`.
+    pub fn encode(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(ORACLE_AKIS_SABIT_LEN + self.aciklama.len());
+        out.push(TX_TYPE_ORACLE_AKIS_TANIM);
+        out.extend_from_slice(&self.akis_no.to_be_bytes());
+        out.push(self.ondalik);
+        out.push(self.esik_m);
+        out.extend_from_slice(&self.sapma_bps.to_be_bytes());
+        out.extend_from_slice(&self.kesici_bps.to_be_bytes());
+        out.extend_from_slice(&self.bayat_sn.to_be_bytes());
+        out.extend_from_slice(self.aciklama.as_bytes());
+        out
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<OracleAkisTanim, TxError> {
+        tip_kontrol(bytes, TX_TYPE_ORACLE_AKIS_TANIM)?;
+        if bytes.len() < ORACLE_AKIS_SABIT_LEN
+            || bytes.len() > ORACLE_AKIS_SABIT_LEN + ORACLE_ACIKLAMA_MAX
+        {
+            return Err(TxError::BadLength {
+                expected: ORACLE_AKIS_SABIT_LEN,
+                got: bytes.len(),
+            });
+        }
+        let akis_no = u32::from_be_bytes(oku::<4>(bytes, 1));
+        let ondalik = bytes[5];
+        let esik_m = bytes[6];
+        let sapma_bps = u16::from_be_bytes(oku::<2>(bytes, 7));
+        let kesici_bps = u16::from_be_bytes(oku::<2>(bytes, 9));
+        let bayat_sn = u32::from_be_bytes(oku::<4>(bytes, 11));
+        if akis_no == 0 {
+            return Err(TxError::GecersizAlan("akis_no>=1 olmali"));
+        }
+        if ondalik > ORACLE_AZAMI_ONDALIK {
+            return Err(TxError::GecersizAlan("ondalik cok buyuk"));
+        }
+        if esik_m == 0 || esik_m > ORACLE_AZAMI_ESIK {
+            return Err(TxError::GecersizAlan("esik_m 1..=31 olmali"));
+        }
+        if sapma_bps == 0 || sapma_bps > BPS || kesici_bps == 0 || bayat_sn == 0 {
+            return Err(TxError::GecersizAlan("sapma/kesici/bayat sifir ya da asiri"));
+        }
+        let aciklama = std::str::from_utf8(&bytes[ORACLE_AKIS_SABIT_LEN..])
+            .map_err(|_| TxError::GecersizAlan("aciklama UTF-8 degil"))?
+            .to_string();
+        Ok(OracleAkisTanim {
+            akis_no,
+            ondalik,
+            esik_m,
+            sapma_bps,
+            kesici_bps,
+            bayat_sn,
+            aciklama,
+        })
+    }
+}
+
+/// tip=19 cozulmus: bir kurumun bir akis turu icin raporu.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OracleRapor {
+    pub akis_no: u32,
+    /// Raporun ait oldugu tur. Yalniz ACIK tur (son kapanan + 1) kabul edilir.
+    pub tur_no: u64,
+    /// Olculen deger (akisin `ondalik`'ina gore olceklenmis tamsayi).
+    pub deger: i128,
+    /// Kurumun beyan ettigi olcum zamani. YALNIZ BILGI: gecerlilik/bayatlik
+    /// zincir saatiyle hesaplanir (imzalayan bu alani secebilir).
+    pub olcum_zamani: u64,
+    /// Ham verinin hash'i (ham veri zincire yazilmaz).
+    pub veri_hash: [u8; 32],
+}
+
+impl OracleRapor {
+    /// `[19][akis:4][tur:8][deger:16 BE i128][olcum:8][veri_hash:32]` = 69 bayt.
+    pub fn encode(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(ORACLE_RAPOR_ENCODED_LEN);
+        out.push(TX_TYPE_ORACLE_RAPOR);
+        out.extend_from_slice(&self.akis_no.to_be_bytes());
+        out.extend_from_slice(&self.tur_no.to_be_bytes());
+        out.extend_from_slice(&self.deger.to_be_bytes());
+        out.extend_from_slice(&self.olcum_zamani.to_be_bytes());
+        out.extend_from_slice(&self.veri_hash);
+        out
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<OracleRapor, TxError> {
+        tip_kontrol(bytes, TX_TYPE_ORACLE_RAPOR)?;
+        tam_uzunluk(bytes, ORACLE_RAPOR_ENCODED_LEN)?;
+        Ok(OracleRapor {
+            akis_no: u32::from_be_bytes(oku::<4>(bytes, 1)),
+            tur_no: u64::from_be_bytes(oku::<8>(bytes, 5)),
+            deger: i128::from_be_bytes(oku::<16>(bytes, 13)),
+            olcum_zamani: u64::from_be_bytes(oku::<8>(bytes, 29)),
+            veri_hash: oku::<32>(bytes, 37),
+        })
+    }
+}
+
+/// tip=20 cozulmus: adres KYC onayi (`onay=true`) ya da onay iptali.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KycKayit {
+    pub adres: [u8; ADDR_LEN],
+    pub onay: bool,
+    /// Kurumun kendi kayitlarindaki KYC dosyasinin hash'i (kisisel veri DEGIL).
+    pub kanit_hash: [u8; 32],
+}
+
+impl KycKayit {
+    /// `[20][adres:20][durum:1][kanit_hash:32]` = 54 bayt.
+    pub fn encode(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(KYC_KAYIT_ENCODED_LEN);
+        out.push(TX_TYPE_KYC_KAYIT);
+        out.extend_from_slice(&self.adres);
+        out.push(u8::from(self.onay));
+        out.extend_from_slice(&self.kanit_hash);
+        out
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<KycKayit, TxError> {
+        tip_kontrol(bytes, TX_TYPE_KYC_KAYIT)?;
+        tam_uzunluk(bytes, KYC_KAYIT_ENCODED_LEN)?;
+        let onay = match bytes[1 + ADDR_LEN] {
+            0 => false,
+            1 => true,
+            _ => return Err(TxError::GecersizAlan("durum 0/1 olmali")),
+        };
+        Ok(KycKayit {
+            adres: oku::<ADDR_LEN>(bytes, 1),
+            onay,
+            kanit_hash: oku::<32>(bytes, 2 + ADDR_LEN),
+        })
+    }
+}
+
+#[cfg(test)]
+mod rwa_tx_tests {
+    use super::*;
+
+    fn akis() -> OracleAkisTanim {
+        OracleAkisTanim {
+            akis_no: 7,
+            ondalik: 8,
+            esik_m: 3,
+            sapma_bps: 200,
+            kesici_bps: 1_000,
+            bayat_sn: 3_600,
+            aciklama: "XAU / USD".into(),
+        }
+    }
+
+    #[test]
+    fn rwa_tip_numaralari_cakismaz() {
+        let tipler = [
+            TX_TYPE_RECORD, TX_TYPE_TOKEN, TX_TYPE_STAKE, TX_TYPE_TRANSFER, TX_TYPE_KURUM,
+            TX_TYPE_FAUCET, TX_TYPE_LSC_TRANSFER, TX_TYPE_ESLESTIRME, TX_TYPE_AVM_CAGRI,
+            TX_TYPE_ON_SATIS, TX_TYPE_EVM_TRANSFER, TX_TYPE_HAM_ETH_TX, TX_TYPE_ON_SATIS_CLAIM,
+            TX_TYPE_EVM_ON_SATIS_CLAIM, TX_TYPE_TGE_AYARLA, TX_TYPE_COMPUTE_REWARD,
+            TX_TYPE_KURUM_YETKI, TX_TYPE_ORACLE_AKIS_TANIM, TX_TYPE_ORACLE_RAPOR,
+            TX_TYPE_KYC_KAYIT,
+        ];
+        let mut s = tipler.to_vec();
+        s.sort();
+        s.dedup();
+        assert_eq!(s.len(), tipler.len(), "tip numarasi cakismasi");
+        assert_eq!(s, (1..=20).collect::<Vec<u8>>());
+    }
+
+    #[test]
+    fn kurum_yetki_gidis_donus_ve_sertlik() {
+        let y = KurumYetki::new([0xA1; 20], ROL_ORACLE_RAPORLAYICI, 7, true);
+        let b = y.encode();
+        assert_eq!(b.len(), 27);
+        assert_eq!(KurumYetki::decode(&b), Ok(y));
+        let k = KurumYetki::new([0xA1; 20], ROL_KYC_ONAYLAYICI, 0, false);
+        assert_eq!(KurumYetki::decode(&k.encode()), Ok(k));
+        // eksik / fazla bayt
+        assert!(matches!(KurumYetki::decode(&b[..26]), Err(TxError::BadLength { .. })));
+        let mut fazla = b.clone();
+        fazla.push(0);
+        assert!(matches!(KurumYetki::decode(&fazla), Err(TxError::BadLength { .. })));
+        // yanlis tip / bos
+        assert_eq!(KurumYetki::decode(&[]), Err(TxError::Empty));
+        let mut yanlis = b.clone();
+        yanlis[0] = TX_TYPE_KURUM;
+        assert_eq!(KurumYetki::decode(&yanlis), Err(TxError::UnknownType(TX_TYPE_KURUM)));
+        // bilinmeyen rol, gecersiz islem, rol-kapsam uyumsuzlugu
+        let mut r = b.clone();
+        r[21] = 9;
+        assert!(matches!(KurumYetki::decode(&r), Err(TxError::GecersizAlan(_))));
+        let mut i = b.clone();
+        i[26] = 2;
+        assert!(matches!(KurumYetki::decode(&i), Err(TxError::GecersizAlan(_))));
+        let oracle_kapsamsiz = KurumYetki::new([1; 20], ROL_ORACLE_RAPORLAYICI, 0, true).encode();
+        assert!(matches!(KurumYetki::decode(&oracle_kapsamsiz), Err(TxError::GecersizAlan(_))));
+        let kyc_kapsamli = KurumYetki::new([1; 20], ROL_KYC_ONAYLAYICI, 3, true).encode();
+        assert!(matches!(KurumYetki::decode(&kyc_kapsamli), Err(TxError::GecersizAlan(_))));
+    }
+
+    #[test]
+    fn oracle_akis_tanim_gidis_donus_ve_sinirlar() {
+        let a = akis();
+        assert_eq!(OracleAkisTanim::decode(&a.encode()), Ok(a.clone()));
+        // bos aciklama gecerli, 64 bayt gecerli, 65 bayt reddedilir
+        let mut bos = a.clone();
+        bos.aciklama.clear();
+        assert_eq!(OracleAkisTanim::decode(&bos.encode()), Ok(bos));
+        let mut uzun = a.clone();
+        uzun.aciklama = "x".repeat(64);
+        assert!(OracleAkisTanim::decode(&uzun.encode()).is_ok());
+        uzun.aciklama.push('x');
+        assert!(matches!(OracleAkisTanim::decode(&uzun.encode()), Err(TxError::BadLength { .. })));
+        // gecersiz parametreler
+        for bozuk in [
+            OracleAkisTanim { akis_no: 0, ..a.clone() },
+            OracleAkisTanim { esik_m: 0, ..a.clone() },
+            OracleAkisTanim { esik_m: ORACLE_AZAMI_ESIK + 1, ..a.clone() },
+            OracleAkisTanim { sapma_bps: 0, ..a.clone() },
+            OracleAkisTanim { sapma_bps: BPS + 1, ..a.clone() },
+            OracleAkisTanim { kesici_bps: 0, ..a.clone() },
+            OracleAkisTanim { bayat_sn: 0, ..a.clone() },
+            OracleAkisTanim { ondalik: ORACLE_AZAMI_ONDALIK + 1, ..a.clone() },
+        ] {
+            assert!(
+                matches!(OracleAkisTanim::decode(&bozuk.encode()), Err(TxError::GecersizAlan(_))),
+                "reddedilmeliydi: {bozuk:?}"
+            );
+        }
+        // bozuk UTF-8
+        let mut b = a.encode();
+        b.push(0xFF);
+        assert!(matches!(OracleAkisTanim::decode(&b), Err(TxError::GecersizAlan(_))));
+        // kisa
+        assert!(matches!(OracleAkisTanim::decode(&a.encode()[..10]), Err(TxError::BadLength { .. })));
+    }
+
+    #[test]
+    fn oracle_rapor_gidis_donus_negatif_ve_sinir_degerler() {
+        for deger in [0i128, -1, 1, i128::MIN, i128::MAX, -123_456_789] {
+            let r = OracleRapor {
+                akis_no: 7,
+                tur_no: u64::MAX,
+                deger,
+                olcum_zamani: 1_800_000_000,
+                veri_hash: [0x5E; 32],
+            };
+            let b = r.encode();
+            assert_eq!(b.len(), 69);
+            assert_eq!(OracleRapor::decode(&b), Ok(r));
+        }
+        let b = OracleRapor { akis_no: 1, tur_no: 1, deger: 5, olcum_zamani: 0, veri_hash: [0; 32] }.encode();
+        assert!(matches!(OracleRapor::decode(&b[..68]), Err(TxError::BadLength { .. })));
+        let mut y = b.clone();
+        y[0] = TX_TYPE_KYC_KAYIT;
+        assert_eq!(OracleRapor::decode(&y), Err(TxError::UnknownType(TX_TYPE_KYC_KAYIT)));
+    }
+
+    #[test]
+    fn kyc_kayit_gidis_donus_ve_sertlik() {
+        for onay in [true, false] {
+            let k = KycKayit { adres: [0xC3; 20], onay, kanit_hash: [0x11; 32] };
+            let b = k.encode();
+            assert_eq!(b.len(), 54);
+            assert_eq!(KycKayit::decode(&b), Ok(k));
+        }
+        let mut b = KycKayit { adres: [1; 20], onay: true, kanit_hash: [0; 32] }.encode();
+        assert!(matches!(KycKayit::decode(&b[..53]), Err(TxError::BadLength { .. })));
+        b[21] = 7;
+        assert!(matches!(KycKayit::decode(&b), Err(TxError::GecersizAlan(_))));
     }
 }

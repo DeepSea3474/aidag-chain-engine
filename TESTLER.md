@@ -206,6 +206,13 @@ Her biri once ESKI kodda BASARISIZ, yeni kodda BASARILI oldugu dogrulanarak ekle
 - on_satis_asamalar_otomatik_devam_toplam_tavan_asilamaz — 630k sonrasi satis kesilmez, 1.680.000'de durur
 - rpc::mainnet_kapisi_testleri — mainnet'te faucet/test_bakiye/lsc_test_bakiye hicbir vertex yazmaz
 
+## RWA ORACLE + KYC TESTLERI (dal: rwa-oracle-kyc) — bkz. RWA_ORACLE_KYC_TASARIM.md
+- tx::rwa_tx_tests — tip 17..20 kodlama: gidis-donus, eksik/fazla bayt, yanlis tip, gecersiz alan, tip numarasi cakismasi
+- oracle_hesap::tests — alt medyan, sapma siniri, i128 sinirlarinda tasmasiz 256-bit karsilastirma, eleme, girdi sirasindan bagimsizlik, kesici, bayatlik
+- rwa::tests — tur kapanisi, tekrar rapor, yanlis tur, bayat acik tur, devre kesici durdur/ac, rolu iptal edilenin raporu, tur gecmisi budama, KYC onay/iptal
+- node::rwa_tests — bildirim suresi, kendi kendine kurum kaydi yetki vermez, owner/KUBRA yazamaz, rol iptali aninda, eski tarihli vertex bildirimi kisaltamaz, taze + ters sirali dugum ayni durum, mainnet'te kapali
+- rpc::rwa_rpc_testleri — /oracle, /kyc, /kurum roller (i128 deger string)
+
 ## MAINNET REPLAY (konsensus degisikligi oncesi ZORUNLU)
 Canli veri dosyasinin KOPYASI eski ve yeni kodla oynatilir; ozet birebir ayni olmali:
   cp /root/aidag-mainnet/aidag-data-mainnet.log /tmp/kopya.log

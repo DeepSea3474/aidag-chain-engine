@@ -104,6 +104,7 @@ async fn kurum(State(st): State<RpcState>, Path(adres_hex): Path<String>) -> Jso
                 "ad": k.ad,
                 "kategori": kat,
                 "zaman": k.zaman,
+                "roller": rol_listesi(&node, &adres),
             }))
         }
         None => Json(json!({
@@ -112,6 +113,110 @@ async fn kurum(State(st): State<RpcState>, Path(adres_hex): Path<String>) -> Jso
             "adres": adres_hex.trim(),
         })),
     }
+}
+
+/// RWA: kurumun rol kayitlari (rol adi, kapsam, etkin, iptal, su an aktif mi).
+fn rol_listesi(node: &lsc_engine::NodeState, adres: &[u8; 20]) -> Vec<Value> {
+    node.kurum_rolleri(adres)
+        .into_iter()
+        .map(|(rol, kapsam, k)| {
+            let ad = match rol {
+                lsc_engine::tx::ROL_ORACLE_RAPORLAYICI => "oracle_raporlayici",
+                lsc_engine::tx::ROL_KYC_ONAYLAYICI => "kyc_onaylayici",
+                _ => "bilinmeyen",
+            };
+            json!({
+                "rol": ad,
+                "kapsam": kapsam,
+                "etkin": k.etkin,
+                "iptal": k.iptal,
+                "aktif": node.kurum_rol_aktif_mi(adres, rol, kapsam),
+            })
+        })
+        .collect()
+}
+
+/// RWA: tur kaydini JSON'a cevir. Degerler i128 -> STRING (JS hassasiyet kaybi yok).
+fn tur_json(t: &lsc_engine::rwa::TurKaydi) -> Value {
+    json!({
+        "tur": t.tur_no,
+        "deger": t.deger.to_string(),
+        "baslangic": t.baslangic,
+        "guncelleme": t.guncelleme,
+        "raporlar": t.raporlar.iter().map(|r| json!({
+            "kurum": hex::encode(r.kurum),
+            "deger": r.deger.to_string(),
+            "veri_hash": hex::encode(r.veri_hash),
+            "olcum_zamani": r.olcum_zamani,
+            "zaman": r.zaman,
+            "elendi": r.elendi,
+        })).collect::<Vec<_>>(),
+    })
+}
+
+/// GET /oracle/:akis — akis tanimi + durum + son yayinlanmis tur (latestRoundData).
+/// Bayatlik/durma ZINCIR saatine gore; hata varsa "son_veri_hata" doner.
+async fn oracle(State(st): State<RpcState>, Path(akis): Path<u32>) -> Json<Value> {
+    let node = st.node.read().await;
+    let Some(a) = node.oracle_akis(akis) else {
+        return Json(json!({ "ok": true, "tanimli": false, "akis": akis }));
+    };
+    let durum = match a.durum {
+        lsc_engine::rwa::AkisDurum::Calisiyor => json!({ "durum": "calisiyor" }),
+        lsc_engine::rwa::AkisDurum::Durduruldu { aday, aday_tur } => json!({
+            "durum": "durduruldu", "aday": aday.to_string(), "aday_tur": aday_tur,
+        }),
+    };
+    let (son, hata) = match node.oracle_son_veri(akis) {
+        Ok(t) => (tur_json(t), Value::Null),
+        Err(e) => (Value::Null, json!(format!("{e:?}"))),
+    };
+    Json(json!({
+        "ok": true,
+        "tanimli": true,
+        "akis": akis,
+        "aciklama": a.tanim.aciklama,
+        "ondalik": a.tanim.ondalik,
+        "esik_m": a.tanim.esik_m,
+        "raporlayici_n": node.oracle_raporlayici_sayisi(akis),
+        "sapma_bps": a.tanim.sapma_bps,
+        "kesici_bps": a.tanim.kesici_bps,
+        "bayat_sn": a.tanim.bayat_sn,
+        "acik_tur": a.acik_tur,
+        "acik_tur_rapor_sayisi": a.acik_raporlar.len(),
+        "durum": durum,
+        "son_veri": son,
+        "son_veri_hata": hata,
+        "zincir_saati": node.zincir_saati(),
+    }))
+}
+
+/// GET /kyc/:adres — isApproved(adres) + kurum bazli kayitlar. Kisisel veri YOK.
+async fn kyc(State(st): State<RpcState>, Path(adres_hex): Path<String>) -> Json<Value> {
+    let adres_bytes = match hex::decode(adres_hex.trim().trim_start_matches("0x")) {
+        Ok(b) if b.len() == 20 => b,
+        _ => return Json(json!({ "ok": false, "hata": "adres 20 bayt (40 hex) olmali" })),
+    };
+    let mut adres = [0u8; 20];
+    adres.copy_from_slice(&adres_bytes);
+    let node = st.node.read().await;
+    let kayitlar: Vec<Value> = node
+        .kyc_kayitlari(&adres)
+        .into_iter()
+        .map(|(kurum, d)| json!({
+            "kurum": hex::encode(kurum),
+            "onay": d.onay,
+            "zaman": d.zaman,
+            "kanit_hash": hex::encode(d.kanit_hash),
+            "kurum_rol_aktif": node.kurum_rol_aktif_mi(&kurum, lsc_engine::tx::ROL_KYC_ONAYLAYICI, 0),
+        }))
+        .collect();
+    Json(json!({
+        "ok": true,
+        "adres": hex::encode(adres),
+        "onayli": node.kyc_onayli_mi(&adres),
+        "kayitlar": kayitlar,
+    }))
 }
 
 /// GET /belge/:hash — bir belge hash'i (64 hex = 32 bayt) zincirde kayitli mi?
@@ -1133,6 +1238,8 @@ pub fn router(
         .route("/nonce/:adres", get(nonce))
         .route("/belge/:hash", get(belge))
         .route("/kurum/:adres", get(kurum))
+        .route("/oracle/:akis", get(oracle))
+        .route("/kyc/:adres", get(kyc))
         .route("/submit", post(submit))
         .route("/", post(eth_rpc)) // Ethereum JSON-RPC (MetaMask + tum EVM cuzdanlari)
         .route("/islemlerim/:pubkey", get(islemlerim))
@@ -1224,5 +1331,73 @@ mod mainnet_kapisi_testleri {
         let Json(v) = faucet(State(st.clone()), Path("0000000000000000000000000000000000000002".into())).await;
         assert_eq!(v["ok"], true, "devnet faucet calismali: {v}");
         assert_ne!(v["yeni_bakiye"], "0");
+    }
+}
+
+#[cfg(test)]
+mod rwa_rpc_testleri {
+    use super::*;
+    use lsc_engine::tx::{
+        KurumKaydiTx, KurumYetki, KycKayit, OracleAkisTanim, OracleRapor, ROL_KYC_ONAYLAYICI,
+        ROL_ORACLE_RAPORLAYICI,
+    };
+
+    #[tokio::test]
+    async fn oracle_ve_kyc_uclari_zincir_durumunu_verir() {
+        const NET: u32 = 1;
+        let mut t = 1_800_000_000u64;
+        let mut node = lsc_engine::NodeState::new_devnet(NET);
+        let owner = ed25519_dalek::SigningKey::from_bytes(&[0x91; 32]);
+        let kurum = ed25519_dalek::SigningKey::from_bytes(&[0x21; 32]);
+        let kurum_adr = lsc_engine::public_key_to_adres(&kurum.verifying_key().to_bytes());
+        node.faucet_owner_ayarla(lsc_engine::public_key_to_adres(&owner.verifying_key().to_bytes()));
+        let g = lsc_engine::Vertex::new_signed(NET, vec![], b"g".to_vec(), t, &owner).unwrap();
+        let mut son = *g.id();
+        node.ingest(&lsc_engine::dag::wire::encode(&g), t).unwrap();
+        let mut gonder = |node: &mut lsc_engine::NodeState, sk: &ed25519_dalek::SigningKey, p: Vec<u8>, t: u64| {
+            let v = lsc_engine::Vertex::new_signed(NET, vec![son], p, t, sk).unwrap();
+            son = *v.id();
+            node.ingest_networked(&lsc_engine::dag::wire::encode(&v), t);
+        };
+        let tanim = OracleAkisTanim {
+            akis_no: 1, ondalik: 8, esik_m: 1, sapma_bps: 200, kesici_bps: 1_000,
+            bayat_sn: 3_600, aciklama: "XAU/USD".into(),
+        };
+        gonder(&mut node, &owner, tanim.encode(), t);
+        gonder(&mut node, &kurum, KurumKaydiTx::new(1, "Rafineri".into()).encode(), t);
+        gonder(&mut node, &owner, KurumYetki::new(kurum_adr, ROL_ORACLE_RAPORLAYICI, 1, true).encode(), t);
+        gonder(&mut node, &owner, KurumYetki::new(kurum_adr, ROL_KYC_ONAYLAYICI, 0, true).encode(), t);
+        t += lsc_engine::mainnet::RWA_ROL_BILDIRIM_SURESI;
+        let deger: i128 = 250_000_000_000_000_000_000_000; // JS Number'a sigmaz
+        let r = OracleRapor { akis_no: 1, tur_no: 1, deger, olcum_zamani: t, veri_hash: [3; 32] };
+        gonder(&mut node, &kurum, r.encode(), t);
+        gonder(&mut node, &kurum, KycKayit { adres: [0xAB; 20], onay: true, kanit_hash: [4; 32] }.encode(), t);
+
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let st = RpcState {
+            node: Arc::new(RwLock::new(node)),
+            submit_tx: tx,
+            signing_key: ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]),
+        };
+        let Json(v) = oracle(State(st.clone()), Path(1)).await;
+        assert_eq!(v["tanimli"], true, "{v}");
+        assert_eq!(v["son_veri"]["deger"], deger.to_string(), "i128 string olarak: {v}");
+        assert_eq!(v["son_veri"]["tur"], 1);
+        assert_eq!(v["raporlayici_n"], 1);
+        assert_eq!(v["durum"]["durum"], "calisiyor");
+        let Json(v) = oracle(State(st.clone()), Path(9)).await;
+        assert_eq!(v["tanimli"], false);
+
+        let Json(v) = kyc(State(st.clone()), Path(format!("0x{}", "ab".repeat(20)))).await;
+        assert_eq!(v["onayli"], true, "{v}");
+        assert_eq!(v["kayitlar"][0]["kurum"], hex::encode(kurum_adr));
+        let Json(v) = kyc(State(st.clone()), Path("cd".repeat(20))).await;
+        assert_eq!(v["onayli"], false);
+        let Json(v) = kyc(State(st.clone()), Path("zz".into())).await;
+        assert_eq!(v["ok"], false);
+
+        let Json(v) = super::kurum(State(st.clone()), Path(hex::encode(kurum_adr))).await;
+        assert_eq!(v["roller"].as_array().unwrap().len(), 2, "{v}");
+        assert!(v["roller"].as_array().unwrap().iter().all(|r| r["aktif"] == true));
     }
 }

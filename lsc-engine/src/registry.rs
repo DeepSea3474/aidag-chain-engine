@@ -13,7 +13,7 @@
 pub type Tutar = u128;
 
 use crate::tx::{StakeKaydi, TokenKaydi};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// Bir ed25519 public key'den (32 bayt) KANONIK ADRES (20 bayt) turet.
 /// Yontem: blake3(public_key)'in ilk 20 bayti. Hem STAKE hem TOKEN KAYDI ayni
@@ -452,13 +452,82 @@ pub struct KurumKaydi {
 #[derive(Debug, Default)]
 pub struct KurumRegistry {
     kayitlar: HashMap<[u8; 20], KurumKaydi>,
+    /// RWA YETKI KATMANI: (kurum, rol, kapsam) -> rol kaydi. Kurum kaydi herkese
+    /// acik (kendi kendine kayit); YETKI ise yalniz tip=17 ile verilir. BTreeMap:
+    /// gezinme sirasi tum dugumlerde ayni (deterministik).
+    yetkiler: BTreeMap<([u8; 20], u8, u32), RolKaydi>,
+}
+
+/// Bir kurumun bir roldeki durumu. Rol, `etkin` zincir saatinden itibaren ve
+/// `iptal` olmadikca AKTIFTIR.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RolKaydi {
+    /// Rolun yururluge girdigi zincir saati (verilis + bildirim suresi).
+    pub etkin: u64,
+    /// Rolun geri alindigi zincir saati (None = aktif/bekliyor).
+    pub iptal: Option<u64>,
 }
 
 impl KurumRegistry {
     pub fn yeni() -> Self {
         KurumRegistry {
             kayitlar: HashMap::new(),
+            yetkiler: BTreeMap::new(),
         }
+    }
+
+    /// Kuruma rol ver; `etkin` zincir saatinden itibaren gecerli. Kurum
+    /// KurumRegistry'de KAYITLI olmali (kayitsiz adrese rol verilmez).
+    /// Rol zaten verilmis ve iptal edilmemisse DOKUNULMAZ (bekleme suresi
+    /// tekrar tekrar uzatilamaz/kisaltilamaz). Iptalden sonra yeniden verilebilir.
+    /// Donus: true = rol kaydi olusturuldu/yenilendi.
+    pub fn rol_ver(&mut self, kurum: [u8; 20], rol: u8, kapsam: u32, etkin: u64) -> bool {
+        if !self.kayitlar.contains_key(&kurum) {
+            return false;
+        }
+        let anahtar = (kurum, rol, kapsam);
+        if matches!(self.yetkiler.get(&anahtar), Some(k) if k.iptal.is_none()) {
+            return false;
+        }
+        self.yetkiler.insert(anahtar, RolKaydi { etkin, iptal: None });
+        true
+    }
+
+    /// Rolu geri al (ANINDA). Donus: true = aktif/bekleyen rol iptal edildi.
+    pub fn rol_al(&mut self, kurum: [u8; 20], rol: u8, kapsam: u32, zaman: u64) -> bool {
+        match self.yetkiler.get_mut(&(kurum, rol, kapsam)) {
+            Some(k) if k.iptal.is_none() => {
+                k.iptal = Some(zaman);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Kurum bu rolde `simdi` (zincir saati) itibariyla aktif mi?
+    pub fn rol_aktif_mi(&self, kurum: &[u8; 20], rol: u8, kapsam: u32, simdi: u64) -> bool {
+        matches!(
+            self.yetkiler.get(&(*kurum, rol, kapsam)),
+            Some(k) if k.iptal.is_none() && simdi >= k.etkin
+        )
+    }
+
+    /// Bir kurumun tum rol kayitlari: (rol, kapsam, kayit), sirali.
+    pub fn roller(&self, kurum: &[u8; 20]) -> Vec<(u8, u32, RolKaydi)> {
+        self.yetkiler
+            .range((*kurum, 0, 0)..=(*kurum, u8::MAX, u32::MAX))
+            .map(|((_, r, k), v)| (*r, *k, *v))
+            .collect()
+    }
+
+    /// Bu (rol, kapsam) icin `simdi` itibariyla aktif kurum sayisi (oracle N).
+    pub fn aktif_rol_sayisi(&self, rol: u8, kapsam: u32, simdi: u64) -> usize {
+        self.yetkiler
+            .iter()
+            .filter(|((_, r, k), v)| {
+                *r == rol && *k == kapsam && v.iptal.is_none() && simdi >= v.etkin
+            })
+            .count()
     }
 
     /// Kurum/firma kaydet: adres -> (ad, kategori, zaman). ILK KAYIT KAZANIR;

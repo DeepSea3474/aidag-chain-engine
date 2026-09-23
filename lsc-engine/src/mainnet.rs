@@ -373,3 +373,24 @@ pub const TGE_MIN_BILDIRIM_SURESI: u64 = 3 * 86_400;
 /// tarih olarak DEGIL "belirlenmedi" olarak gosterir. Karar alininca owner gercek
 /// tarihi (>= simdi + bildirim) ayarlar.
 pub const TGE_BELIRSIZ: u64 = 4_102_444_800;
+
+/// RWA (oracle + KYC, tip=17..20) MAINNET AKTIVASYON zincir saati. Bu saatten ONCE
+/// mainnet'te tip=17..20 vertex'leri ETKISIZDIR (bugun bilinmeyen tip gibi yok
+/// sayilir) -> mevcut mainnet gecmisinin yeniden oynatilmasi DEGISMEZ.
+/// None = KAPALI (karar verilmedi). Acmak mainnet-etkili bir karardir: tum
+/// dugumlerde ayni surum + gelecekteki bir tarih (Some(t)) ile ayri PR'da ayarlanir.
+/// Devnet/testnet'te (mainnet=false) RWA her zaman aciktir.
+pub const RWA_MAINNET_AKTIVASYON: Option<u64> = None;
+
+/// RWA ROL BILDIRIM SURESI: owner'in tip=17 ile verdigi rol, zincir saatinden bu
+/// kadar SONRA yururluge girer (TGE_MIN_BILDIRIM_SURESI ile ayni ilke: ele gecen
+/// owner anahtari "hemen" raporlayici/onaylayici atayamaz, her atama zincirde
+/// onceden gorunur). Rol GERI ALMA aninda etkilidir (guvenlik yonu).
+pub const RWA_ROL_BILDIRIM_SURESI: u64 = 3 * 86_400;
+
+/// RWA YASAKLI IMZALAYANLAR: bu adreslere rol VERILEMEZ ve bu adreslerin imzaladigi
+/// oracle raporu / KYC kaydi YOK SAYILIR. Owner (kurucu) her zaman ayrica yasaklidir
+/// (node.rs). Buraya KUBRA (soulware-core) imza adresi eklenmelidir: yapay zeka bu
+/// modullerde imza/yazma yetkisine SAHIP DEGILDIR. Adres ACIK bilgidir
+/// (soulware-core acilisinda "imzalayan : 0x..." satiri) — ozel anahtar gerekmez.
+pub const RWA_YASAKLI_ADRESLER: &[[u8; 20]] = &[];

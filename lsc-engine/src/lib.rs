@@ -19,7 +19,9 @@ pub mod dag;
 pub mod genesis;
 pub mod mainnet;
 pub mod node;
+pub mod oracle_hesap;
 pub mod registry;
+pub mod rwa;
 pub mod tx;
 
 pub use consensus::finality::{

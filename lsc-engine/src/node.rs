@@ -72,6 +72,15 @@ pub struct NodeState {
     /// tum dugumler ayni; node yeniden baslatma gerekmez.
     on_satis_tge: Option<u64>,
 
+    /// RWA ORACLE defteri (tip=18/19). total_order'dan turer.
+    oracle_registry: crate::rwa::OracleRegistry,
+    /// RWA KYC onay kaydi (tip=20). total_order'dan turer.
+    kyc_registry: crate::rwa::KycRegistry,
+    /// Test-yalniz ek yasakli imzalayanlar (mainnet::RWA_YASAKLI_ADRESLER'e ek).
+    /// Uretimde HER ZAMAN bos -> konsensus yalniz derleme-zamani sabite baglidir.
+    #[cfg(test)]
+    rwa_test_yasakli: Vec<[u8; 20]>,
+
     /// Faucet owner adresi. On-satis (tip=10) ve faucet (tip=6) yetki kapisi.
     /// Mainnet'te new_mainnet() PINLI kurucu adrese sabitler (env override YOK) ->
     /// tum node'larda AYNI (A2: owner-gating konsensus-deterministik).
@@ -205,6 +214,10 @@ impl NodeState {
             kurum_registry: crate::registry::KurumRegistry::yeni(),
             eslestirme_registry: crate::registry::EslestirmeRegistry::yeni(),
             on_satis_registry: crate::registry::OnSatisRegistry::yeni(),
+            oracle_registry: crate::rwa::OracleRegistry::yeni(),
+            kyc_registry: crate::rwa::KycRegistry::yeni(),
+            #[cfg(test)]
+            rwa_test_yasakli: Vec::new(),
             on_satis_gunluk: (0, 0),
             zincir_saati: 0,
             on_satis_tge: None,
@@ -385,6 +398,83 @@ impl NodeState {
     /// Kayitli kurum/firma sayisi.
     pub fn kurum_sayisi(&self) -> usize {
         self.kurum_registry.len()
+    }
+
+    /// RWA: kurumun rol kayitlari (rol, kapsam, kayit).
+    pub fn kurum_rolleri(&self, adres: &[u8; 20]) -> Vec<(u8, u32, crate::registry::RolKaydi)> {
+        self.kurum_registry.roller(adres)
+    }
+
+    /// RWA: kurum bu rolde SU AN (zincir saati) aktif mi?
+    pub fn kurum_rol_aktif_mi(&self, adres: &[u8; 20], rol: u8, kapsam: u32) -> bool {
+        self.kurum_registry.rol_aktif_mi(adres, rol, kapsam, self.zincir_saati)
+    }
+
+    /// RWA: oracle akisinin tum durumu.
+    pub fn oracle_akis(&self, akis_no: u32) -> Option<&crate::rwa::Akis> {
+        self.oracle_registry.akis(akis_no)
+    }
+
+    /// RWA: akistaki aktif raporlayici sayisi (N).
+    pub fn oracle_raporlayici_sayisi(&self, akis_no: u32) -> usize {
+        self.kurum_registry.aktif_rol_sayisi(
+            crate::tx::ROL_ORACLE_RAPORLAYICI,
+            akis_no,
+            self.zincir_saati,
+        )
+    }
+
+    /// RWA latestRoundData: son yayinlanmis tur; durmus ya da (ZINCIR saatine
+    /// gore) bayatsa hata.
+    pub fn oracle_son_veri(
+        &self,
+        akis_no: u32,
+    ) -> Result<&crate::rwa::TurKaydi, crate::rwa::OkumaHatasi> {
+        self.oracle_registry.son_veri(akis_no, self.zincir_saati)
+    }
+
+    /// RWA getRoundData: gecmis bir yayinlanmis tur.
+    pub fn oracle_tur(&self, akis_no: u32, tur_no: u64) -> Option<&crate::rwa::TurKaydi> {
+        self.oracle_registry.tur_verisi(akis_no, tur_no)
+    }
+
+    /// RWA isApproved(address): rolu aktif en az bir kurumca onayli mi?
+    pub fn kyc_onayli_mi(&self, adres: &[u8; 20]) -> bool {
+        let simdi = self.zincir_saati;
+        self.kyc_registry.onayli_mi(adres, |k| {
+            self.kurum_registry
+                .rol_aktif_mi(k, crate::tx::ROL_KYC_ONAYLAYICI, 0, simdi)
+        })
+    }
+
+    /// RWA: adresin tum kurum KYC kayitlari.
+    pub fn kyc_kayitlari(&self, adres: &[u8; 20]) -> Vec<([u8; 20], crate::rwa::KycDurumu)> {
+        self.kyc_registry.adres_kayitlari(adres)
+    }
+
+    /// Zincir saati (total_order'daki en buyuk vertex zamani).
+    pub fn zincir_saati(&self) -> u64 {
+        self.zincir_saati
+    }
+
+    /// RWA acik mi? Devnet/testnet: her zaman. Mainnet: aktivasyon saatinden sonra.
+    fn rwa_aktif(&self) -> bool {
+        !self.mainnet
+            || matches!(crate::mainnet::RWA_MAINNET_AKTIVASYON, Some(t) if self.zincir_saati >= t)
+    }
+
+    /// RWA'da imza/rol yetkisi olamayacak adres mi? (owner + sabit liste [+ test]).
+    fn rwa_yasakli_mi(&self, adres: &[u8; 20]) -> bool {
+        #[cfg(test)]
+        if self.rwa_test_yasakli.contains(adres) {
+            return true;
+        }
+        self.faucet_owner == Some(*adres) || crate::mainnet::RWA_YASAKLI_ADRESLER.contains(adres)
+    }
+
+    #[cfg(test)]
+    fn rwa_test_yasakli_ekle(&mut self, adres: [u8; 20]) {
+        self.rwa_test_yasakli.push(adres);
     }
 
     /// Faucet owner adresini ayarla (TESTNET). Sadece bu adres faucet basabilir.
@@ -862,6 +952,8 @@ impl NodeState {
         self.kurum_registry = crate::registry::KurumRegistry::yeni();
         self.eslestirme_registry = crate::registry::EslestirmeRegistry::yeni();
         self.on_satis_registry = crate::registry::OnSatisRegistry::yeni();
+        self.oracle_registry = crate::rwa::OracleRegistry::yeni();
+        self.kyc_registry = crate::rwa::KycRegistry::yeni();
         // total_order'dan tureyen TUM sayaclar sifirlanir (yoksa reorg'da gunun
         // satislari eski toplamin USTUNE yeniden sayilir -> gecerli satis reddi,
         // restart eden dugumle durum ayrismasi = konsensus bolunmesi).
@@ -1415,6 +1507,86 @@ impl NodeState {
                                 }
                             }
                         }
+                    }
+                }
+            }
+            // ===== RWA (tip=17..20) =====
+            // Ortak kapilar (hepsi deterministik, tum dugumlerde ayni):
+            //  - rwa_aktif(): mainnet'te aktivasyon saatinden once ETKISIZ.
+            //  - Zaman = ZINCIR SAATI (vertex zamani degil; geriye tarihlenemez).
+            //  - Yasakli imzalayan (owner, KUBRA, ...) rapor/KYC YAZAMAZ, rol ALAMAZ.
+            //  - Ihlal -> SESSIZ RED (tip=15/16 deseni).
+            // tip=17: KURUM YETKI. SADECE owner; yalniz KAYITLI kuruma rol verir /
+            // geri alir. Verilen rol bildirim suresi sonra etkin; geri alma aninda.
+            Some(&crate::tx::TX_TYPE_KURUM_YETKI) => {
+                if let Ok(y) = crate::tx::KurumYetki::decode(payload) {
+                    let cagiran = crate::registry::public_key_to_adres(signer);
+                    if self.rwa_aktif()
+                        && self.faucet_owner == Some(cagiran)
+                        && !self.rwa_yasakli_mi(&y.kurum)
+                    {
+                        if y.ver {
+                            // Oracle rolu yalniz TANIMLI akisa verilir.
+                            let kapsam_ok = y.rol != crate::tx::ROL_ORACLE_RAPORLAYICI
+                                || self.oracle_registry.akis_var_mi(y.kapsam);
+                            if kapsam_ok {
+                                let etkin = self
+                                    .zincir_saati
+                                    .saturating_add(crate::mainnet::RWA_ROL_BILDIRIM_SURESI);
+                                self.kurum_registry.rol_ver(y.kurum, y.rol, y.kapsam, etkin);
+                            }
+                        } else {
+                            self.kurum_registry
+                                .rol_al(y.kurum, y.rol, y.kapsam, self.zincir_saati);
+                        }
+                    }
+                }
+            }
+            // tip=18: ORACLE AKIS TANIMI. SADECE owner; ILK TANIM KAZANIR (esik/sapma
+            // sonradan degistirilemez). Tanim VERI degildir: owner deger yazamaz.
+            Some(&crate::tx::TX_TYPE_ORACLE_AKIS_TANIM) => {
+                if let Ok(t) = crate::tx::OracleAkisTanim::decode(payload) {
+                    let cagiran = crate::registry::public_key_to_adres(signer);
+                    if self.rwa_aktif() && self.faucet_owner == Some(cagiran) {
+                        self.oracle_registry.tanimla(t, self.zincir_saati);
+                    }
+                }
+            }
+            // tip=19: ORACLE RAPORU. Kurum imzasi = vertex imzasi. Yalniz bu akis
+            // icin rolu AKTIF, yasakli olmayan kurum. Tur kapanisinda rolu o an
+            // iptal edilmis kurumlarin raporlari sayilmaz.
+            Some(&crate::tx::TX_TYPE_ORACLE_RAPOR) => {
+                if let Ok(r) = crate::tx::OracleRapor::decode(payload) {
+                    let kurum = crate::registry::public_key_to_adres(signer);
+                    let simdi = self.zincir_saati;
+                    let rol = crate::tx::ROL_ORACLE_RAPORLAYICI;
+                    if self.rwa_aktif()
+                        && !self.rwa_yasakli_mi(&kurum)
+                        && self.kurum_registry.rol_aktif_mi(&kurum, rol, r.akis_no, simdi)
+                    {
+                        let kurumlar = &self.kurum_registry;
+                        let _ = self.oracle_registry.rapor_isle(kurum, &r, simdi, |k| {
+                            kurumlar.rol_aktif_mi(k, rol, r.akis_no, simdi)
+                        });
+                    }
+                }
+            }
+            // tip=20: KYC KAYDI. Yalniz KYC rolu AKTIF, yasakli olmayan kurum; kurum
+            // yalniz KENDI onayini verir/iptal eder. Kisisel veri YOK (adres + hash).
+            Some(&crate::tx::TX_TYPE_KYC_KAYIT) => {
+                if let Ok(k) = crate::tx::KycKayit::decode(payload) {
+                    let kurum = crate::registry::public_key_to_adres(signer);
+                    let simdi = self.zincir_saati;
+                    if self.rwa_aktif()
+                        && !self.rwa_yasakli_mi(&kurum)
+                        && self.kurum_registry.rol_aktif_mi(
+                            &kurum,
+                            crate::tx::ROL_KYC_ONAYLAYICI,
+                            0,
+                            simdi,
+                        )
+                    {
+                        self.kyc_registry.isle(k.adres, kurum, k.onay, k.kanit_hash, simdi);
                     }
                 }
             }
@@ -5026,5 +5198,376 @@ mod tests {
             NetworkIngestOutcome::Integrated(_) | NetworkIngestOutcome::Duplicate(_) => {}
             other => panic!("kendi agindan gelen vertex reddedildi: {other:?}"),
         }
+    }
+}
+// ============================================================================
+// RWA (tip=17..20) DUGUM ENTEGRASYON TESTLERI: yetki kapilari, zincir saati,
+// yasakli imzalayanlar, reorg/replay determinizmi.
+// ============================================================================
+#[cfg(test)]
+mod rwa_tests {
+    use super::*;
+    use crate::dag::vertex::Vertex;
+    use crate::dag::wire;
+    use crate::registry::{public_key_to_adres, RolKaydi};
+    use crate::rwa::OkumaHatasi;
+    use crate::tx::{
+        KurumKaydiTx, KurumYetki, KycKayit, OracleAkisTanim, OracleRapor, ROL_KYC_ONAYLAYICI,
+        ROL_ORACLE_RAPORLAYICI,
+    };
+    use ed25519_dalek::SigningKey;
+
+    const NET: u32 = 1;
+    const T0: u64 = 1_800_000_000;
+    const BILDIRIM: u64 = crate::mainnet::RWA_ROL_BILDIRIM_SURESI;
+    const AKIS: u32 = 1;
+
+    fn anahtar(n: u8) -> SigningKey {
+        SigningKey::from_bytes(&[n; 32])
+    }
+
+    fn adres(sk: &SigningKey) -> [u8; 20] {
+        public_key_to_adres(&sk.verifying_key().to_bytes())
+    }
+
+    fn akis_tanimi(m: u8) -> OracleAkisTanim {
+        OracleAkisTanim {
+            akis_no: AKIS,
+            ondalik: 8,
+            esik_m: m,
+            sapma_bps: 200,
+            kesici_bps: 1_000,
+            bayat_sn: 3_600,
+            aciklama: "XAU/USD".into(),
+        }
+    }
+
+    fn rapor(tur: u64, deger: i128) -> Vec<u8> {
+        OracleRapor { akis_no: AKIS, tur_no: tur, deger, olcum_zamani: 0, veri_hash: [7; 32] }
+            .encode()
+    }
+
+    /// Dogrusal zincir kuran test dugumu.
+    struct Kurulum {
+        node: NodeState,
+        osk: SigningKey,
+        gid: VertexId,
+        son: VertexId,
+        t: u64,
+        dolgu: u32,
+    }
+
+    impl Kurulum {
+        fn yeni() -> Self {
+            let mut node = NodeState::new_devnet(NET);
+            let g = Vertex::new_signed(NET, vec![], vec![1, 1], T0, &anahtar(1)).unwrap();
+            let gid = *g.id();
+            node.ingest_networked(&wire::encode(&g), T0);
+            let osk = anahtar(0x91);
+            node.faucet_owner_ayarla(adres(&osk));
+            Kurulum { node, osk, gid, son: gid, t: T0, dolgu: 0 }
+        }
+
+        /// Imzali vertex'i zincirin ucuna ekle (zaman = self.t).
+        fn gonder(&mut self, sk: &SigningKey, payload: Vec<u8>) {
+            let v = Vertex::new_signed(NET, vec![self.son], payload, self.t, sk).unwrap();
+            assert!(matches!(
+                self.node.ingest_networked(&wire::encode(&v), self.t),
+                NetworkIngestOutcome::Integrated(_)
+            ));
+            self.son = *v.id();
+        }
+
+        fn owner(&mut self, payload: Vec<u8>) {
+            let osk = self.osk.clone();
+            self.gonder(&osk, payload);
+        }
+
+        /// Zincir saatini `sn` ilerlet (dolgu vertex'iyle).
+        fn ilerle(&mut self, sn: u64) {
+            self.t += sn;
+            self.dolgu += 1;
+            let d = self.dolgu.to_be_bytes().to_vec();
+            self.gonder(&anahtar(0x5A), [b"dolgu".to_vec(), d].concat());
+        }
+
+        fn kurum_kaydet(&mut self, sk: &SigningKey, ad: &str) {
+            self.gonder(sk, KurumKaydiTx::new(1, ad.into()).encode());
+        }
+
+        /// Kayit + rol + bildirim suresi: kurum raporlamaya HAZIR.
+        fn yetkili_kurum(&mut self, sk: &SigningKey, rol: u8, kapsam: u32) {
+            if self.node.kurum_sorgula(&adres(sk)).is_none() {
+                self.kurum_kaydet(sk, "Kurum");
+            }
+            self.owner(KurumYetki::new(adres(sk), rol, kapsam, true).encode());
+            self.ilerle(BILDIRIM);
+        }
+    }
+
+    #[test]
+    fn rwa_rol_bildirim_suresi_dolmadan_etkin_olmaz() {
+        let mut k = Kurulum::yeni();
+        k.owner(akis_tanimi(1).encode());
+        let r = anahtar(0x21);
+        k.kurum_kaydet(&r, "Rafineri A");
+        k.owner(KurumYetki::new(adres(&r), ROL_ORACLE_RAPORLAYICI, AKIS, true).encode());
+        let verilis = k.t;
+        assert!(!k.node.kurum_rol_aktif_mi(&adres(&r), ROL_ORACLE_RAPORLAYICI, AKIS));
+        // Bildirim suresinden 1 sn once: rapor YOK SAYILIR.
+        k.ilerle(BILDIRIM - 1);
+        k.gonder(&r, rapor(1, 1000));
+        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::VeriYok);
+        // Tam sinirda: rol etkin, rapor kabul.
+        k.ilerle(1);
+        k.gonder(&r, rapor(1, 1000));
+        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap().deger, 1000);
+        assert_eq!(
+            k.node.kurum_rolleri(&adres(&r)),
+            vec![(ROL_ORACLE_RAPORLAYICI, AKIS, RolKaydi { etkin: verilis + BILDIRIM, iptal: None })]
+        );
+    }
+
+    #[test]
+    fn rwa_kendi_kendine_kurum_kaydi_yetki_vermez() {
+        let mut k = Kurulum::yeni();
+        k.owner(akis_tanimi(1).encode());
+        let sahte = anahtar(0x22);
+        // Herkes kendini "Devlet" diye kaydedebilir; bu RAPOR HAKKI VERMEZ.
+        k.gonder(&sahte, KurumKaydiTx::new(0, "Sahte Bakanlik".into()).encode());
+        k.ilerle(BILDIRIM);
+        k.gonder(&sahte, rapor(1, 1));
+        k.gonder(&sahte, KycKayit { adres: [9; 20], onay: true, kanit_hash: [0; 32] }.encode());
+        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::VeriYok);
+        assert!(!k.node.kyc_onayli_mi(&[9; 20]));
+    }
+
+    #[test]
+    fn rwa_kayitsiz_adrese_rol_verilmez() {
+        let mut k = Kurulum::yeni();
+        let r = anahtar(0x23);
+        k.owner(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true).encode());
+        k.ilerle(BILDIRIM);
+        assert!(k.node.kurum_rolleri(&adres(&r)).is_empty());
+        k.gonder(&r, KycKayit { adres: [9; 20], onay: true, kanit_hash: [0; 32] }.encode());
+        assert!(!k.node.kyc_onayli_mi(&[9; 20]));
+    }
+
+    #[test]
+    fn rwa_owner_disi_rol_veremez_akis_tanimlayamaz() {
+        let mut k = Kurulum::yeni();
+        let r = anahtar(0x24);
+        k.kurum_kaydet(&r, "Kurum");
+        k.gonder(&r, KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true).encode());
+        k.gonder(&r, akis_tanimi(1).encode());
+        k.ilerle(BILDIRIM);
+        assert!(k.node.kurum_rolleri(&adres(&r)).is_empty(), "kurum kendine rol veremez");
+        assert!(k.node.oracle_akis(AKIS).is_none(), "owner-disi akis tanimlayamaz");
+    }
+
+    #[test]
+    fn rwa_oracle_rolu_tanimsiz_akisa_verilmez_ve_akislar_arasi_gecmez() {
+        let mut k = Kurulum::yeni();
+        let r = anahtar(0x25);
+        k.kurum_kaydet(&r, "Kurum");
+        k.owner(KurumYetki::new(adres(&r), ROL_ORACLE_RAPORLAYICI, AKIS, true).encode());
+        assert!(k.node.kurum_rolleri(&adres(&r)).is_empty(), "akis 1 tanimsiz");
+        // Akis 1 ve 2 tanimli; kurum yalniz akis 2'ye yetkili.
+        k.owner(akis_tanimi(1).encode());
+        k.owner(OracleAkisTanim { akis_no: 2, ..akis_tanimi(1) }.encode());
+        k.yetkili_kurum(&r, ROL_ORACLE_RAPORLAYICI, 2);
+        k.gonder(&r, rapor(1, 1000)); // akis 1 -> yetkisiz
+        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::VeriYok);
+    }
+
+    #[test]
+    fn rwa_owner_rapor_ve_kyc_yazamaz_rol_alamaz() {
+        let mut k = Kurulum::yeni();
+        k.owner(akis_tanimi(1).encode());
+        let owner = adres(&k.osk);
+        k.owner(KurumKaydiTx::new(1, "AIDAG".into()).encode());
+        k.owner(KurumYetki::new(owner, ROL_ORACLE_RAPORLAYICI, AKIS, true).encode());
+        k.owner(KurumYetki::new(owner, ROL_KYC_ONAYLAYICI, 0, true).encode());
+        k.ilerle(BILDIRIM);
+        assert!(k.node.kurum_rolleri(&owner).is_empty(), "owner'a rol verilemez");
+        k.owner(rapor(1, 1000));
+        k.owner(KycKayit { adres: [9; 20], onay: true, kanit_hash: [0; 32] }.encode());
+        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::VeriYok);
+        assert!(!k.node.kyc_onayli_mi(&[9; 20]));
+    }
+
+    #[test]
+    fn rwa_yapay_zeka_adresi_yasakli() {
+        // KUBRA imza adresi yasakli listede: kurum kaydi olsa da rol ALAMAZ, yazamaz.
+        let mut k = Kurulum::yeni();
+        let kubra = anahtar(0x4B);
+        k.node.rwa_test_yasakli_ekle(adres(&kubra));
+        k.owner(akis_tanimi(1).encode());
+        k.kurum_kaydet(&kubra, "KUBRA");
+        k.owner(KurumYetki::new(adres(&kubra), ROL_ORACLE_RAPORLAYICI, AKIS, true).encode());
+        k.owner(KurumYetki::new(adres(&kubra), ROL_KYC_ONAYLAYICI, 0, true).encode());
+        k.ilerle(BILDIRIM);
+        assert!(k.node.kurum_rolleri(&adres(&kubra)).is_empty());
+        k.gonder(&kubra, rapor(1, 1000));
+        k.gonder(&kubra, KycKayit { adres: [9; 20], onay: true, kanit_hash: [0; 32] }.encode());
+        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::VeriYok);
+        assert!(!k.node.kyc_onayli_mi(&[9; 20]));
+    }
+
+    #[test]
+    fn rwa_uc_kurum_medyan_eleme_ve_tekrar() {
+        let mut k = Kurulum::yeni();
+        k.owner(akis_tanimi(3).encode());
+        let ks: Vec<SigningKey> = (0x31..=0x34).map(anahtar).collect();
+        for sk in &ks {
+            k.kurum_kaydet(sk, "Rafineri");
+            k.owner(KurumYetki::new(adres(sk), ROL_ORACLE_RAPORLAYICI, AKIS, true).encode());
+        }
+        k.ilerle(BILDIRIM);
+        assert_eq!(k.node.oracle_raporlayici_sayisi(AKIS), 4, "N = 4");
+        // Ayni kurum ayni tura farkli vertex'le iki kez: bir kez sayilir.
+        k.gonder(&ks[0], rapor(1, 1000));
+        k.gonder(&ks[0], rapor(1, 1000));
+        k.gonder(&ks[1], rapor(1, 5000)); // asiri sapan
+        assert!(k.node.oracle_son_veri(AKIS).is_err(), "3 rapor ama 1 elenir -> kalan 2 < M");
+        k.gonder(&ks[2], rapor(1, 1004));
+        k.gonder(&ks[3], rapor(1, 1002));
+        let t = k.node.oracle_son_veri(AKIS).unwrap();
+        assert_eq!((t.tur_no, t.deger, t.guncelleme), (1, 1002, k.t));
+        assert_eq!(t.raporlar.iter().filter(|r| r.elendi).count(), 1);
+        assert_eq!(k.node.oracle_akis(AKIS).unwrap().acik_tur, 2);
+        // Zincir saati ilerleyince veri bayatlar.
+        k.ilerle(3_601);
+        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::Bayat);
+        assert_eq!(k.node.oracle_tur(AKIS, 1).unwrap().deger, 1002, "gecmis tur okunur");
+    }
+
+    #[test]
+    fn rwa_rol_iptali_aninda_etkili() {
+        let mut k = Kurulum::yeni();
+        let kyc = anahtar(0x41);
+        let orc = anahtar(0x42);
+        k.owner(akis_tanimi(1).encode());
+        k.yetkili_kurum(&kyc, ROL_KYC_ONAYLAYICI, 0);
+        k.yetkili_kurum(&orc, ROL_ORACLE_RAPORLAYICI, AKIS);
+        let musteri = [0xC1; 20];
+        k.gonder(&kyc, KycKayit { adres: musteri, onay: true, kanit_hash: [1; 32] }.encode());
+        assert!(k.node.kyc_onayli_mi(&musteri));
+        // Owner rolu geri alir: ONAY ANINDA gecersiz (bekleme yok).
+        k.owner(KurumYetki::new(adres(&kyc), ROL_KYC_ONAYLAYICI, 0, false).encode());
+        assert!(!k.node.kyc_onayli_mi(&musteri));
+        k.owner(KurumYetki::new(adres(&orc), ROL_ORACLE_RAPORLAYICI, AKIS, false).encode());
+        k.gonder(&orc, rapor(1, 1000));
+        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::VeriYok);
+        // Yeniden verilen rol yine bildirim suresi bekler.
+        k.owner(KurumYetki::new(adres(&kyc), ROL_KYC_ONAYLAYICI, 0, true).encode());
+        assert!(!k.node.kyc_onayli_mi(&musteri));
+        k.ilerle(BILDIRIM);
+        assert!(k.node.kyc_onayli_mi(&musteri), "eski onay rol donunce tekrar gecerli");
+    }
+
+    #[test]
+    fn rwa_kyc_kurum_yalniz_kendi_kaydini_degistirir() {
+        let mut k = Kurulum::yeni();
+        let a = anahtar(0x51);
+        let b = anahtar(0x52);
+        k.yetkili_kurum(&a, ROL_KYC_ONAYLAYICI, 0);
+        k.yetkili_kurum(&b, ROL_KYC_ONAYLAYICI, 0);
+        let musteri = [0xC2; 20];
+        k.gonder(&a, KycKayit { adres: musteri, onay: true, kanit_hash: [1; 32] }.encode());
+        // B'nin "iptal"i yalniz B'nin kaydidir; A'nin onayi durur.
+        k.gonder(&b, KycKayit { adres: musteri, onay: false, kanit_hash: [2; 32] }.encode());
+        assert!(k.node.kyc_onayli_mi(&musteri));
+        k.gonder(&a, KycKayit { adres: musteri, onay: false, kanit_hash: [3; 32] }.encode());
+        assert!(!k.node.kyc_onayli_mi(&musteri));
+        let kayitlar = k.node.kyc_kayitlari(&musteri);
+        assert_eq!(kayitlar.len(), 2);
+        assert!(kayitlar.iter().all(|(_, d)| !d.onay && d.zaman == k.t));
+    }
+
+    #[test]
+    fn rwa_eski_tarihli_vertexle_bildirim_kisaltilamaz() {
+        let mut k = Kurulum::yeni();
+        let r = anahtar(0x61);
+        k.kurum_kaydet(&r, "Kurum");
+        k.ilerle(10 * 86_400);
+        let simdi = k.t;
+        // SALDIRI: owner rol vertex'ini 10 gun ONCEYE tarihler (genesis'e baglar).
+        let eski = Vertex::new_signed(
+            NET,
+            vec![k.gid],
+            KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true).encode(),
+            simdi - 10 * 86_400,
+            &k.osk,
+        )
+        .unwrap();
+        k.node.ingest_networked(&wire::encode(&eski), simdi);
+        let mut ebeveyn = vec![k.son, *eski.id()];
+        ebeveyn.sort();
+        let m = Vertex::new_signed(NET, ebeveyn, b"birlestir".to_vec(), simdi, &anahtar(0x5A)).unwrap();
+        k.node.ingest_networked(&wire::encode(&m), simdi);
+        k.son = *m.id();
+        let roller = k.node.kurum_rolleri(&adres(&r));
+        assert_eq!(roller.len(), 1);
+        assert_eq!(roller[0].2.etkin, simdi + BILDIRIM, "etkinlik ZINCIR saatinden sayilir");
+        assert!(!k.node.kurum_rol_aktif_mi(&adres(&r), ROL_KYC_ONAYLAYICI, 0));
+    }
+
+    #[test]
+    fn rwa_taze_dugum_ve_ters_sira_ayni_durum() {
+        let mut k = Kurulum::yeni();
+        k.owner(akis_tanimi(2).encode());
+        let ks: Vec<SigningKey> = (0x71..=0x73).map(anahtar).collect();
+        for sk in &ks {
+            k.yetkili_kurum(sk, ROL_ORACLE_RAPORLAYICI, AKIS);
+        }
+        k.yetkili_kurum(&ks[0], ROL_KYC_ONAYLAYICI, 0);
+        for (tur, d) in [(1u64, [1000i128, 1010, 990]), (2, [1005, 1001, 1003])] {
+            for (sk, v) in ks.iter().zip(d) {
+                k.gonder(sk, rapor(tur, v));
+            }
+        }
+        k.gonder(&ks[0], KycKayit { adres: [0xD1; 20], onay: true, kanit_hash: [1; 32] }.encode());
+        let owner = adres(&k.osk);
+        let ozet = |n: &NodeState| {
+            (
+                n.oracle_son_veri(AKIS).cloned(),
+                n.oracle_akis(AKIS).cloned(),
+                n.kyc_onayli_mi(&[0xD1; 20]),
+                ks.iter().map(|sk| n.kurum_rolleri(&adres(sk))).collect::<Vec<_>>(),
+                n.zincir_saati(),
+            )
+        };
+        let beklenen = ozet(&k.node);
+        assert!(beklenen.0.is_ok() && beklenen.2);
+
+        // 1) Taze dugum, disa aktarilan sirayla (replay).
+        let vs = k.node.export_vertices();
+        let mut taze = NodeState::new_devnet(NET);
+        taze.faucet_owner_ayarla(owner);
+        for vb in &vs {
+            taze.ingest_synced(vb);
+        }
+        assert_eq!(ozet(&taze), beklenen, "replay dugumu ayni durum");
+
+        // 2) Ters sira (yetim havuzu uzerinden) -> ayni durum.
+        let mut ters = NodeState::new_devnet(NET);
+        ters.faucet_owner_ayarla(owner);
+        for vb in vs.iter().rev() {
+            ters.ingest_networked(vb, k.t);
+        }
+        assert_eq!(ters.orphan_count(), 0);
+        assert_eq!(ozet(&ters), beklenen, "ters sirali dugum ayni durum");
+    }
+
+    #[test]
+    fn rwa_mainnet_aktivasyon_oncesi_kapali() {
+        let mut m = NodeState::new_mainnet();
+        m.zincir_saati = crate::mainnet::TGE_BELIRSIZ;
+        assert!(!m.rwa_aktif(), "mainnet: aktivasyon karari verilmeden RWA KAPALI");
+        let d = NodeState::new_devnet(NET);
+        assert!(d.rwa_aktif(), "devnet/testnet: acik");
+        // Mainnet'te kurucu (owner) her zaman yasakli imzalayan.
+        assert!(m.rwa_yasakli_mi(&crate::mainnet::kurucu_adres()));
     }
 }
