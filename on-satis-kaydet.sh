@@ -14,6 +14,7 @@
 #   NET  network_id: 1=devnet, 3474=mainnet (varsayilan 1)
 #   KEY  kurucu anahtar dosyasi (varsayilan aidag-kurucu.key)
 #   BIN  imzalayici binary (varsayilan ./target/release/on-satis-tahsis)
+#   ODEME_ADRESI  odemeyi yapan 0x adres (varsayilan: alici)
 #
 # GUVENLIK: imzalama OFFLINE binary'de olur; anahtar bu makinede kalir.
 # Owner, BSC'de odemeyi (kurucu adrese) DOGRULADIKTAN sonra bunu calistirir.
@@ -38,9 +39,13 @@ if curl -s -m5 "$RPC/on-satis/$REF" | grep -q '"bulundu":true'; then
   exit 1
 fi
 
-TIPS=$(curl -s -m5 "$RPC/tips" | python3 -c "import sys,json; print(','.join(json.load(sys.stdin).get('tips',[])) or '-')")
+# tips: en fazla MAX_PARENTS=8 (lsc-engine dag::vertex::MAX_PARENTS); fazlasi vertex'i gecersiz kilar.
+TIPS=$(curl -s -m5 "$RPC/tips" | python3 -c "import sys,json; print(','.join(json.load(sys.stdin).get('tips',[])[:8]) or '-')")
 NOW=$(date +%s)
-HEX=$("$BIN" "$KEY" "$NET" "$ALICI" "$AIDAG" "$LSC" "$REF" "$NOW" "$TIPS")
+# ARAC IMZASI (9 arguman): <key> <net> <alici> <odeme_adresi> <aidag> <lsc> <ref> <ts> <tips>
+# odeme_adresi: odemeyi YAPAN adres (denetim izi). Ayri verilmezse ODEME_ADRESI=alici.
+ODEME_ADRESI="${ODEME_ADRESI:-$ALICI}"
+HEX=$("$BIN" "$KEY" "$NET" "$ALICI" "$ODEME_ADRESI" "$AIDAG" "$LSC" "$REF" "$NOW" "$TIPS")
 
 echo "Zincire gonderiliyor ($RPC/submit)..."
 RESP=$(curl -s -m10 -X POST "$RPC/submit" -H 'Content-Type: application/json' -d "{\"hex\":\"$HEX\"}")

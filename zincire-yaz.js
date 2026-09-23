@@ -1,13 +1,27 @@
-// Bugunun kayit dosyasini AIDAG zincirine yazar (belge dogrulama mantigi, terminalden)
+// Bir kayit dosyasinin hash'ini AIDAG zincirine yazar (belge dogrulama mantigi, terminalden)
+// Kullanim: node zincire-yaz.js <anahtar_dosyasi> <kayit_dosyasi>
+//   anahtar_dosyasi: [algo=1][32 seed] (33 bayt) — IMZALAYAN anahtar. ZORUNLU.
+//   Sabit/demo seed YOKTUR: anahtar verilmezse arac hata verir ve hicbir sey gondermez.
+// Ortam: RPC (varsayilan http://127.0.0.1:8645), NETWORK_ID (varsayilan 3474)
 const fs = require('fs');
+
+function hataCik(m){ console.error("HATA: "+m); console.error("Kullanim: node zincire-yaz.js <anahtar_dosyasi> <kayit_dosyasi>"); process.exit(1); }
+const ANAHTAR_YOLU = process.argv[2], KAYIT_YOLU = process.argv[3];
+if (!ANAHTAR_YOLU) hataCik("anahtar dosyasi yolu ZORUNLU (sabit seed kaldirildi)");
+if (!KAYIT_YOLU) hataCik("kayit dosyasi yolu ZORUNLU");
+let ANAHTAR;
+try { ANAHTAR = fs.readFileSync(ANAHTAR_YOLU); } catch (e) { hataCik("anahtar dosyasi okunamadi: "+ANAHTAR_YOLU); }
+if (ANAHTAR.length !== 33 || ANAHTAR[0] !== 1) hataCik("anahtar bicimi [1][32 seed] (33 bayt) olmali");
+if (!fs.existsSync(KAYIT_YOLU)) hataCik("kayit dosyasi yok: "+KAYIT_YOLU);
+
 const nacl = require('/var/www/aidag/lib/nacl.min.js'); // module.exports -> dogrudan nacl
 require('/var/www/aidag/lib/blake3.js'); // global.blake3hash yukler
 
 // blake3hash fonksiyonu (sayfadaki gibi) — lib'in export sekline gore
 const blake3hash = global.blake3hash;
 
-const RPC = "http://127.0.0.1:8645";
-const NETWORK_ID = 3474, FORMAT_VERSION = 1, WIRE_VERSION = 1, TX_RECORD = 1;
+const RPC = process.env.RPC || "http://127.0.0.1:8645";
+const NETWORK_ID = parseInt(process.env.NETWORK_ID || "3474", 10), FORMAT_VERSION = 1, WIRE_VERSION = 1, TX_RECORD = 1;
 const DOMAIN_TAG = new TextEncoder().encode("AIDAG-vertex-v1\u0000");
 
 const hex = b => [...b].map(x=>x.toString(16).padStart(2,"0")).join("");
@@ -16,8 +30,8 @@ function leU32(n){const b=new Uint8Array(4);new DataView(b.buffer).setUint32(0,n
 function leU64(n){const b=new Uint8Array(8);new DataView(b.buffer).setBigUint64(0,BigInt(n),true);return b;}
 function cat(...a){let n=0;for(const x of a)n+=x.length;const o=new Uint8Array(n);let i=0;for(const x of a){o.set(x,i);i+=x.length;}return o;}
 
-// Anahtar (sabit seed — kayit imzalayan)
-const SEED = new Uint8Array(32).fill(7); // deterministik demo seed
+// Anahtar: YALNIZ disaridan verilen dosyadan (sabit seed yok)
+const SEED = new Uint8Array(ANAHTAR.subarray(1, 33));
 const kp = nacl.sign.keyPair.fromSeed(SEED);
 const PK = kp.publicKey, SK64 = kp.secretKey;
 
@@ -40,7 +54,7 @@ function recordPayload(hash32){return cat(new Uint8Array([TX_RECORD]),hash32);}
 
 (async()=>{
   // 1) dosyanin hash'i
-  const data = fs.readFileSync("/root/aidag-lsc/zincir-kayitlari/2026-09-21-gelistirme.txt");
+  const data = fs.readFileSync(KAYIT_YOLU);
   const dosyaHash = blake3hash(new Uint8Array(data));
   console.log("dosya hash:", hex(dosyaHash));
 
