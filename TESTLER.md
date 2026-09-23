@@ -1,10 +1,15 @@
 # AIDAG-Chain — Test Suite ve Audit Hazirligi
 
-Durum: MAINNET CANLI (26 Temmuz 2026, Chain ID 3474); bagimsiz denetim (audit) bekliyor. Guncelleme: 2026-09-22.
+Durum: MAINNET CANLI (26 Temmuz 2026, Chain ID 3474); bagimsiz denetim (audit) bekliyor. Guncelleme: 2026-09-23.
+Ag durumu: Mainnet canlidir ve su an cekirdek ekibin islettigi dugumlerle calismaktadir. Cok dugumlu
+mutabakat, uzak bir dugumle gercek internet uzerinden test edilmistir. Bagimsiz dugum operatorlerinin
+aga katilmasi yol haritasindadir.
 Amac: Denetime hazir, seffaf ve tekrar calistirilabilir bir test tablosu sunmak.
 
 ## Tum testleri calistirma
-- CARGO_TARGET_DIR=/root/aidag-build cargo test --release   (lsc-engine 339 + lsc-net + soulware-core 19)
+- CARGO_TARGET_DIR=/root/aidag-build cargo test --release --workspace
+  (2026-09-23, main: 379 gecen / 0 basarisiz — lsc-engine 339 birim + 9 entegrasyon, lsc-net 12,
+   soulware-core 19; 24 agir test #[ignore] ile ayri calistirilir)
   UYARI: sunucuda varsayilan target/ klasoru CANLI dugumlerin binary'sidir; -p lsc-net
   derlemesi onu ezer. Gelistirme/test icin HER ZAMAN ayri CARGO_TARGET_DIR kullan.
 - cargo test --release -- --ignored       (agir fuzz/kalkan testleri)
@@ -53,8 +58,9 @@ Neden: gercek dunyada saldirilar ayni anda ve karisik gelir. Kalkanlarin
 BIRLIKTE dogru calistigini kanitlar. Son: 2.000 tur, kabul=5550 red=5501 OK.
 
 ## BIRIM TESTLERI
-287+ birim testi: graph, vertex, reachability, interval, torba, coloring,
-total_order, RPC, store I/O. Calistirma: cargo test --release.
+lsc-engine 339 birim testi (2026-09-23): graph, vertex, reachability, interval, torba,
+coloring, total_order, registry/tx, AVM, custody. Ayrica lsc-net 12, soulware-core 19.
+Calistirma: yukaridaki "Tum testleri calistirma".
 
 ## OLCEK / PERFORMANS (olculdu)
 - 10.000.000 vertex, ~5000 vertex/sn sabit throughput (near-linear kaniti).
@@ -63,39 +69,20 @@ total_order, RPC, store I/O. Calistirma: cargo test --release.
 - ed25519 imza dogrulama: paralel 11.3x hizlanma (18 cekirdek).
 
 ## AG (multi-node) DOGRULAMASI (elle)
-mDNS peer kesfi, pull/push senkronizasyon, node'lar ayni zincire yakinsiyor
-(orphan=0). Near-linear kod ile 2 node senkronu dogrulandi.
+- Yerel ag: mDNS peer kesfi, pull/push senkronizasyon; node'lar ayni zincire yakinsiyor
+  (orphan=0). Near-linear kod ile 2 node senkronu dogrulandi.
+- Uzak dugum (gercek internet): ilk deneme 18 Temmuz 2026 (bkz. TARIHCE). Tekrarlanabilir
+  prosedur ve log saklama: UZAK_DUGUM_TESTI.md (kayitlar: test-kayitlari/uzak-dugum/<tarih>/).
+- Otomatik (CI) cok dugumlu test henuz YOK (bkz. AUDIT ONCESI TODO).
 
-## AUDIT ONCESI TODO (henuz yapilmadi)
-- Otomatik multi-node entegrasyon testi (CI)
-- Genis-olcek/patolojik DAG fuzz
-- EVM/AVM uyumluluk (revm) - Ethereum test suite
-- cargo clippy, cargo audit, miri
-- CI pipeline
-- Uzun sureli calisma / bellek sizintisi testi
-
-## BAGIMSIZ UZMAN GEREKTIREN (bize ait DEGIL)
-- Konsensus guvenlik / oyun-teorik analiz (balance attack, selfish mining)
-- Ekonomik saldiri modellemesi
-- Kriptografik derinlik denetimi
-- Bagimsiz guvenlik audit'i (para tutan / mainnet oncesi ZORUNLU)
-
-NOT: Ic testler bir audit'in YERINI TUTMAZ. Bunlar audit'e HAZIR girmek icindir.
-Gercek deger/para tutan asamadan once bagimsiz denetim sarttir.
-
-## BIRIM TESTLERI
-287+ birim testi: graph, vertex, reachability, interval, torba, coloring,
-total_order, RPC, store I/O. Calistirma: cargo test --release.
-
-## OLCEK / PERFORMANS (olculdu)
-- 10.000.000 vertex, ~5000 vertex/sn sabit throughput (near-linear kaniti).
-- Bellek lineer (~3.6 GB / 1M vertex). Not: figur imza dogrulama + GHOSTDAG
-  icerir; disk kaliciligi ve ag katmani haric.
-- ed25519 imza dogrulama: paralel 11.3x hizlanma (18 cekirdek).
-
-## AG (multi-node) DOGRULAMASI (elle)
-mDNS peer kesfi, pull/push senkronizasyon, node'lar ayni zincire yakinsiyor
-(orphan=0). Near-linear kod ile 2 node senkronu dogrulandi.
+## RESTART KALICILIGI (surec duzeyi)
+lsc-net/tests/restart_entegrasyon.rs — gercek lsc-node binary'si IZOLE agda (LSC_NETWORK_ID=99999,
+port 40099 / RPC 8699) baslatilir, vertex gonderilir, SUREC OLDURULUR, ayni veri dosyasiyla yeniden
+baslatilir; genesis + vertex sayisi + orphan diskten birebir kurulmali. Mainnet'e dokunmaz.
+  CARGO_TARGET_DIR=/root/aidag-build \
+    cargo test --release -p lsc-net --test restart_entegrasyon -- --ignored --nocapture
+Katman testleri (her calistirmada): lsc-net/src/store.rs restart_diskten_ayni_state_kurulur,
+append_then_load_roundtrip, truncated_last_record_is_skipped.
 
 ## AUDIT ONCESI TODO (henuz yapilmadi)
 - Otomatik multi-node entegrasyon testi (CI)
@@ -143,23 +130,6 @@ proc-macro-error2) DOLAYLI bagimliliklardan gelir (revm, tokio, alloy'un ic
 bagimliliklari) ya da "unmaintained" bildirimidir. Kendi kodumuzda dogrudan
 guvenlik acigi yok. Bu crate'ler ust bagimliliklar (ozellikle revm) guncellendikce
 duzelecek; takip ediliyor. cargo clippy: gercek bug yok, sadece olu-kod uyarilari.
-
-## COK-NODE AG KESIF NOTU (10 Tem)
-2 node ayri ayri baslatilinca: mDNS kesif, baglanti, pull/push-sync protokolu
-CALISIYOR (peer=1, abone oldu). ANCAK her node KENDI genesis'ini urettigi icin
-(farkli imza anahtari -> farkli genesis) "ikinci genesis reddedildi" ve senkron
-0 vertex entegre etti. Node dogru davraniyor (sahte 2. genesis'i reddetmek guvenli).
-MAINNET GEREKSINIMI: tum node'lar AYNI sabit/pinli genesis'ten baslamali (Bitcoin
-gibi gomulu genesis). Bu, genesis.rs + token dagitimi (21M, 6-dilim) ile birlikte
-tasarlanmali; mainnet-oncesi, acele edilmeden. Kod zaten bunu biliyor (lib.rs:
-"gercek mainnet genesis'i pinli/vesting'li olacak").
-
-## GENESIS BAGLAMA PLANI (karar)
-genesis.rs YAZILDI ve test edildi (21M AIDAG, 6-dilim GenesisDagitim). ANCAK henuz
-node'a BAGLI DEGIL (her node kendi gecici genesis'ini uretir). KARAR: gercek cuzdan
-adresleri + vesting + node'a baglama (paylasilan sabit genesis) AUDIT SONRASINA
-birakildi. Sebep: genesis geri alinamaz; adresler/multisig/vesting proje olgunlasip
-audit yapilinca netlesir. Sira: testler -> kod dondur -> audit -> genesis sabitle -> mainnet.
 
 ## PERFORMANS KANITI (olculmus, tekrarlanabilir)
 
@@ -213,3 +183,29 @@ Canli veri dosyasinin KOPYASI eski ve yeni kodla oynatilir; ozet birebir ayni ol
     cargo test --release -p lsc-net --test mainnet_replay_ozet -- --ignored --nocapture | grep '^OZET'
 (on satis kayitlari, TGE, arz/hesap sayilari, tum imzalayan/alici adreslerin bakiye+nonce'u)
 
+## TARIHCE (eski notlar — guncel durumu yansitmaz)
+
+### 18 Temmuz 2026 — ilk uzak dugum testi (elle, tek seferlik)
+Ilk deneme; ELLE yapildi. Telefon uzerinden, gercek internet uzerinden mainnet'e baglanan uzak bir
+dugum ile: AYNI genesis yuklendi, belge kaydinin uzak dugume yayilimi goruldu, orphan=0.
+Ayni gun "mainnet dugumu testnet vertex'lerini orphan'a aliyor" hatasi bulundu ve kapatildi
+(ag izolasyonu: network_id kapisi; regresyon testi yabanci_network_id_her_ingest_yolunda_reddedilir).
+Bu denemenin loglari repoda SAKLANMADI. Tekrar ve kalici kayit icin: UZAK_DUGUM_TESTI.md.
+Kaynak: MAINNET_HAZIRLIK_DENETIMI_2026-07-16.md (#12).
+
+### 10 Temmuz 2026 — cok-node ag kesif notu (GECERSIZ: pinli genesis ile cozuldu)
+2 node ayri ayri baslatilinca: mDNS kesif, baglanti, pull/push-sync protokolu
+CALISIYOR (peer=1, abone oldu). ANCAK her node KENDI genesis'ini urettigi icin
+(farkli imza anahtari -> farkli genesis) "ikinci genesis reddedildi" ve senkron
+0 vertex entegre etti. Node dogru davraniyor (sahte 2. genesis'i reddetmek guvenli).
+MAINNET GEREKSINIMI: tum node'lar AYNI sabit/pinli genesis'ten baslamali (Bitcoin
+gibi gomulu genesis). Bu, genesis.rs + token dagitimi (21M, 6-dilim) ile birlikte
+tasarlanmali; mainnet-oncesi, acele edilmeden. Kod zaten bunu biliyor (lib.rs:
+"gercek mainnet genesis'i pinli/vesting'li olacak").
+
+### Genesis baglama plani (GECERSIZ: mainnet 26 Temmuz 2026'da pinli genesis b82345008ae109d8 ile acildi)
+genesis.rs YAZILDI ve test edildi (21M AIDAG, 6-dilim GenesisDagitim). ANCAK henuz
+node'a BAGLI DEGIL (her node kendi gecici genesis'ini uretir). KARAR: gercek cuzdan
+adresleri + vesting + node'a baglama (paylasilan sabit genesis) AUDIT SONRASINA
+birakildi. Sebep: genesis geri alinamaz; adresler/multisig/vesting proje olgunlasip
+audit yapilinca netlesir. Sira: testler -> kod dondur -> audit -> genesis sabitle -> mainnet.

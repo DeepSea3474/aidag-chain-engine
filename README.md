@@ -92,6 +92,9 @@ timeline
 | Presale — Phase 1 → Phase 2 automatic | 🟡 in progress |
 | Independent security audit | ⏳ pending |
 | TGE + listing | ⏳ pending — announced on-chain ≥ 3 days ahead |
+| Independent node operators | ⏳ roadmap |
+
+**Network:** Mainnet is live and currently runs on nodes operated by the core team. Multi-node consensus has been tested with a remote node over the public internet. Onboarding independent node operators is on the roadmap.
 
 ---
 
@@ -140,7 +143,9 @@ Rust · `revm` · GHOSTDAG · libp2p · ed25519 / secp256k1 · blake3 · Next.js
 
 ## Status
 
-Mainnet live (network_id 3474, pinned genesis). Independent security audit: **pending** — until it completes, treat all components as pre-audit.
+Mainnet live (network_id 3474, pinned genesis). Mainnet is live and currently runs on nodes operated by the core team. Multi-node consensus has been tested with a remote node over the public internet. Onboarding independent node operators is on the roadmap. Independent security audit: **pending** — until it completes, treat all components as pre-audit.
+
+Remote-node test procedure and logs: [`UZAK_DUGUM_TESTI.md`](UZAK_DUGUM_TESTI.md) · test suite: [`TESTLER.md`](TESTLER.md).
 
 ## Links
 
