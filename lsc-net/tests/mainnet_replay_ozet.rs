@@ -26,6 +26,12 @@ fn mainnet_replay_ozet() {
             Some(v)
         })
         .collect();
+    // Belge (tip=1) hash'leri: kayit ayrintilari (kaydeden, ZAMAN) ozete girer.
+    let belge_hashleri: BTreeSet<[u8; 32]> = bekleyen
+        .iter()
+        .filter(|v| v.payload().len() == 33 && v.payload()[0] == 1)
+        .map(|v| { let mut h = [0u8; 32]; h.copy_from_slice(&v.payload()[1..]); h })
+        .collect();
     let mut yuklu: HashSet<[u8; 32]> = HashSet::new();
     let mut imzalayanlar: BTreeSet<[u8; 20]> = BTreeSet::new();
     loop {
@@ -71,6 +77,26 @@ fn mainnet_replay_ozet() {
         st.belge_sayisi(), st.kurum_sayisi(), st.token_sayisi(), st.staker_sayisi(), st.toplam_stake(),
         st.toplam_bakiye_arzi(), st.bakiye_hesap_sayisi(), st.lsc_toplam_arzi(), st.lsc_hesap_sayisi()
     );
+    // Tum belge kayitlarinin (hash, kaydeden, zaman) ve imzalayanlarin kurum
+    // kayitlarinin deterministik ozeti: zaman damgasi kurali degisirse ayrisir.
+    let mut hb = blake3::Hasher::new();
+    let mut belge_n = 0usize;
+    for h in &belge_hashleri {
+        if let Some(k) = st.belge_dogrula(h) {
+            belge_n += 1;
+            hb.update(h); hb.update(&k.kaydeden); hb.update(&k.zaman.to_le_bytes());
+        }
+    }
+    let mut hk = blake3::Hasher::new();
+    let mut kurum_n = 0usize;
+    for a in &adresler {
+        if let Some(k) = st.kurum_sorgula(a) {
+            kurum_n += 1;
+            hk.update(a); hk.update(format!("{k:?}").as_bytes());
+        }
+    }
+    println!("OZET belge_kayit_ozeti n={belge_n} {}", hb.finalize().to_hex());
+    println!("OZET kurum_kayit_ozeti n={kurum_n} {}", hk.finalize().to_hex());
     for a in &adresler {
         println!(
             "OZET adres=0x{} aidag={} lsc={} nonce={}",

@@ -287,6 +287,19 @@ pub fn gas_ucreti_bol(ucret: u64) -> (u64, u64) {
     (yakilan, gelistirme)
 }
 
+/// EVM zincir kimligi (EIP-155 chainId, CHAINID opcode, eth_chainId).
+/// Mainnet (network_id 3474) -> 3474. Diger aglar mainnet ve bilinen EVM
+/// zincirleriyle (1, 56, ...) CAKISMASIN diye ayri bir araliga tasinir:
+/// 3_474_000_000 + network_id. Boylece testnet imzasi mainnet'te, Ethereum/BSC
+/// imzasi AIDAG'da gecersizdir (capraz-zincir replay yok).
+pub fn evm_chain_id(network_id: u32) -> u64 {
+    if network_id == crate::mainnet::MAINNET_NETWORK_ID {
+        3474
+    } else {
+        3_474_000_000u64 + network_id as u64
+    }
+}
+
 /// AVM calistirma sonucu.
 pub struct AvmSonuc {
     pub basarili: bool,
@@ -310,6 +323,22 @@ pub fn avm_calistir(
     data: &[u8],
     zaman: u64,
 ) -> Result<AvmSonuc, &'static str> {
+    avm_calistir_zincir(db, gonderen, hedef, deger, data, zaman, evm_chain_id(crate::mainnet::MAINNET_NETWORK_ID))
+}
+
+/// `avm_calistir` + zincir kimligi (CHAINID opcode'u bu degeri dondurur).
+/// GUVENLIK: revm dogrulama hatasi (ornek: initcode siniri, gas) verse bile db
+/// HER DURUMDA geri yuklenir; aksi halde bos db yerinde kalir ve tum kontrat
+/// kodu/storage silinirdi (denetim bulgusu: gecersiz tx ile toplu silme).
+pub fn avm_calistir_zincir(
+    db: &mut AidagDatabase,
+    gonderen: &[u8; 20],
+    hedef: &[u8; 20],
+    deger: crate::registry::Tutar,
+    data: &[u8],
+    zaman: u64,
+    chain_id: u64,
+) -> Result<AvmSonuc, &'static str> {
     use revm::context::TxEnv;
     use revm::primitives::{Bytes, TxKind};
     use revm::{Context, ExecuteCommitEvm, MainBuilder, MainContext};
@@ -327,13 +356,7 @@ pub fn avm_calistir(
     // sonra okunamaz -> ONCE oku.
     let o_nonce = db.nonce_oku(gonderen);
 
-    // DETERMINIZM: blok timestamp'ini vertex zamanina sabitle.
-    let mut ctx = Context::mainnet().with_db(std::mem::replace(db, AidagDatabase::yeni()));
-    ctx.modify_block(|b| {
-        b.timestamp = U256::from(zaman);
-    });
-    let mut evm = ctx.build_mainnet();
-
+    // tx, db TASINMADAN ONCE kurulur: kurulum hatasi db'yi kaybettirmez.
     let tx = TxEnv::builder()
         .caller(adres_to_evm(gonderen))
         .nonce(o_nonce)
@@ -342,16 +365,27 @@ pub fn avm_calistir(
         .data(Bytes::from(data.to_vec()))
         .gas_limit(AVM_GAS_LIMIT)
         .gas_price(0)
+        .chain_id(Some(chain_id))
         .build()
         .map_err(|_| "tx olusturulamadi")?;
 
-    let sonuc = evm
-        .transact_commit(tx)
-        .map_err(|_| "revm calistirilamadi")?;
+    // DETERMINIZM: blok timestamp'ini vertex zamanina sabitle; CHAINID = ag kimligi.
+    let mut ctx = Context::mainnet().with_db(std::mem::replace(db, AidagDatabase::yeni()));
+    ctx.modify_block(|b| {
+        b.timestamp = U256::from(zaman);
+    });
+    ctx.modify_cfg(|c| {
+        c.chain_id = chain_id;
+    });
+    let mut evm = ctx.build_mainnet();
 
-    // db'yi geri al: evm.ctx uzerinden db_mut() ile eris, mem::replace ile cikar.
+    let sonuc = evm.transact_commit(tx);
+
+    // db'yi HER DURUMDA geri al (basari da hata da). Dogrulama hatasinda revm
+    // hicbir sey commit etmez -> db calistirma oncesiyle ayni kalir.
     use revm::context_interface::ContextTr;
     *db = std::mem::replace(evm.ctx.db_mut(), AidagDatabase::yeni());
+    let sonuc = sonuc.map_err(|_| "revm calistirilamadi")?;
 
     let basarili = sonuc.is_success();
     let gas_used = sonuc.tx_gas_used();
@@ -379,13 +413,27 @@ pub fn avm_call_oku(
     hedef: &[u8; 20],
     data: &[u8],
 ) -> Result<Vec<u8>, &'static str> {
+    avm_call_oku_zincir(db, gonderen, hedef, data, evm_chain_id(crate::mainnet::MAINNET_NETWORK_ID))
+}
+
+/// `avm_call_oku` + zincir kimligi.
+pub fn avm_call_oku_zincir(
+    db: &AidagDatabase,
+    gonderen: &[u8; 20],
+    hedef: &[u8; 20],
+    data: &[u8],
+    chain_id: u64,
+) -> Result<Vec<u8>, &'static str> {
     use revm::context::TxEnv;
     use revm::primitives::{Bytes, TxKind};
     use revm::{Context, ExecuteEvm, MainBuilder, MainContext};
 
     // OKUMA-ONLY: db'nin KOPYASI uzerinde calis (gercek state degismez).
     let db_kopya = db.clone();
-    let ctx = Context::mainnet().with_db(db_kopya);
+    let mut ctx = Context::mainnet().with_db(db_kopya);
+    ctx.modify_cfg(|c| {
+        c.chain_id = chain_id;
+    });
     let mut evm = ctx.build_mainnet();
 
     let tx = TxEnv::builder()
@@ -394,6 +442,7 @@ pub fn avm_call_oku(
         .data(Bytes::from(data.to_vec()))
         .gas_limit(10_000_000)
         .gas_price(0)
+        .chain_id(Some(chain_id))
         .build()
         .map_err(|_| "tx olusturulamadi")?;
 
@@ -418,6 +467,10 @@ pub struct HamEthIslem {
     pub veri: Vec<u8>,
     pub nonce: u64,
     pub gas_limit: u64,
+    /// EIP-155 chainId. None = eski (chainId'siz) imza -> REDDEDILIR.
+    pub chain_id: Option<u64>,
+    /// secp256k1 s <= n/2 (EIP-2). Yuksek-S imza tx hash'ini degistirilebilir kilar.
+    pub s_dusuk: bool,
 }
 
 /// MetaMask/web3'ten gelen RLP-kodlu ham Ethereum tx'i coz + gondereni kurtar.
@@ -447,6 +500,13 @@ pub fn ham_eth_tx_coz(raw: &[u8]) -> Result<HamEthIslem, &'static str> {
     let veri = zarf.input().to_vec();
     let nonce = zarf.nonce();
     let gas_limit = zarf.gas_limit();
+    let chain_id = zarf.chain_id();
+    // secp256k1 grup mertebesinin yarisi (EIP-2 dusuk-S siniri).
+    const N_YARI: U256 = U256::from_be_slice(&[
+        0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0x5D, 0x57, 0x6E, 0x73, 0x57, 0xA4, 0x50, 0x1D, 0xDF, 0xE9, 0x2F, 0x46, 0x68, 0x1B, 0x20, 0xA0,
+    ]);
+    let s_dusuk = zarf.signature().s() <= N_YARI;
 
     Ok(HamEthIslem {
         gonderen,
@@ -455,7 +515,22 @@ pub fn ham_eth_tx_coz(raw: &[u8]) -> Result<HamEthIslem, &'static str> {
         veri,
         nonce,
         gas_limit,
+        chain_id,
+        s_dusuk,
     })
+}
+
+/// Ham ETH tx konsensus kabul kurali: chainId TAM OLARAK bu agin chainId'si
+/// olmali (chainId'siz eski imza ve baska zincirin imzasi REDDEDILIR) ve imza
+/// dusuk-S olmali. Hem konsensus (node) hem RPC on-kontrolu ayni kurali kullanir.
+pub fn ham_eth_tx_kabul_edilir(islem: &HamEthIslem, beklenen_chain_id: u64) -> Result<(), &'static str> {
+    if islem.chain_id != Some(beklenen_chain_id) {
+        return Err("chainId bu aga ait degil (EIP-155 zorunlu)");
+    }
+    if !islem.s_dusuk {
+        return Err("yuksek-S imza (EIP-2) reddedildi");
+    }
+    Ok(())
 }
 
 /// eth_sendRawTransaction cekirdegi: ham tx'i coz -> AVM'de calistir.
@@ -465,18 +540,20 @@ pub fn ham_eth_tx_isle(
     db: &mut AidagDatabase,
     raw: &[u8],
     zaman: u64,
+    chain_id: u64,
 ) -> Result<([u8; 32], AvmSonuc), &'static str> {
     use revm::primitives::keccak256;
 
     // 1) Coz + gonderen kurtar (imzadan)
     let islem = ham_eth_tx_coz(raw)?;
+    ham_eth_tx_kabul_edilir(&islem, chain_id)?;
 
     // 2) tx hash = keccak256(raw bytes) - Ethereum standardi
     let tx_hash: [u8; 32] = keccak256(raw).into();
 
     // 3) AVM'de calistir: hedef None -> deploy, dolu -> call
     let hedef = islem.hedef.unwrap_or([0u8; 20]);
-    let sonuc = avm_calistir(db, &islem.gonderen, &hedef, islem.deger, &islem.veri, zaman)?;
+    let sonuc = avm_calistir_zincir(db, &islem.gonderen, &hedef, islem.deger, &islem.veri, zaman, chain_id)?;
 
     Ok((tx_hash, sonuc))
 }
@@ -1389,7 +1466,7 @@ mod tests {
         let raw = zarf.encoded_2718();
 
         // ISLE (coz + AVM'de calistir)
-        let (tx_hash, sonuc) = ham_eth_tx_isle(&mut db, &raw, 200).expect("isle");
+        let (tx_hash, sonuc) = ham_eth_tx_isle(&mut db, &raw, 200, 3474).expect("isle");
         println!(
             "ISLE testi: tx_hash=0x{} basarili={}",
             hex_encode(&tx_hash),

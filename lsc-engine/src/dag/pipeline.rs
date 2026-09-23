@@ -22,6 +22,8 @@ pub enum IngestError {
     Decode(WireError),
     /// Vertex çözüldü ama graf'a eklenemedi (atomik ret).
     Graph(GraphError),
+    /// Yapisal islem kurali (bilinmeyen tip / cozulemeyen / asiri buyuk payload).
+    Islem(&'static str),
 }
 
 impl From<WireError> for IngestError {
@@ -39,6 +41,7 @@ impl std::fmt::Display for IngestError {
         match self {
             IngestError::Decode(e) => write!(f, "wire decode failed: {:?}", e),
             IngestError::Graph(e) => write!(f, "graph insert rejected vertex: {}", e),
+            IngestError::Islem(e) => write!(f, "islem kurali reddetti: {}", e),
         }
     }
 }

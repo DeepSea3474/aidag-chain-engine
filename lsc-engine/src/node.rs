@@ -83,6 +83,8 @@ pub struct NodeState {
     compute_reward_verildi: std::collections::HashSet<u64>,
     /// tip=16 kumulatif LSC emisyonu. Tavan: mainnet::COMPUTE_REWARD_EMISYON_TAVAN.
     compute_reward_emitted: u128,
+    /// DENETIM: gunluk odul sayaci (gun = zincir_saati/86400, miktar).
+    compute_reward_gunluk: (u64, u128),
     /// MAINNET modu mu? new_mainnet()=true, new_devnet()=false. Deterministik launch
     /// konfigu (network_id ile korele). Faucet (tip=6, MINT) mainnet'te KAPALI ->
     /// 21M sabit AIDAG arzi korunur (yoktan bakiye basilmaz).
@@ -212,6 +214,7 @@ impl NodeState {
             faucet_verildi: std::collections::HashSet::new(),
             compute_reward_verildi: std::collections::HashSet::new(),
             compute_reward_emitted: 0,
+            compute_reward_gunluk: (0, 0),
             avm_db: crate::avm::AidagDatabase::yeni(),
             baslangic_bakiyeler: Vec::new(),
             baslangic_lsc: Vec::new(),
@@ -771,6 +774,20 @@ impl NodeState {
         // dogrudan isle (tum graf taramasi yok; O(n^2) -> O(n)).
         let yeni_id: VertexId = *vertex.id();
 
+        // DENETIM DUZELTMESI (yapisal islem kurali, KONSENSUS): genesis disindaki
+        // her vertex'in payload'i bilinen bir islem tipi olmali, o tipin cozucusunden
+        // gecmeli ve MAX_ISLEM_PAYLOAD'u asmamali. Yalniz vertex'in KENDI verisine
+        // bakar (durumdan bagimsiz) -> tum dugumlerde ayni karar. Cop/bilinmeyen
+        // tip ve 1 MiB'lik vertex'ler artik DAG'a giremez.
+        // Yalniz MAINNET'te (devnet testleri serbest payload kullanir); gecmisteki
+        // tek ihlal id ile muaf (mainnet::YAPISAL_KURAL_ISTISNALARI).
+        if self.mainnet
+            && !vertex.parents().is_empty()
+            && !crate::mainnet::YAPISAL_KURAL_ISTISNALARI.contains(&yeni_id)
+        {
+            crate::tx::yapisal_islem_kurali(vertex.payload()).map_err(IngestError::Islem)?;
+        }
+
         if synced {
             // skip_sig=true: imza ZATEN paralel toplu dogrulandi -> insert_synced_preverified
             // (ATLAMA DEGIL; bir kez dogrula). Diger TUM kontroller calisir. SADECE
@@ -871,6 +888,7 @@ impl NodeState {
         self.faucet_verildi = std::collections::HashSet::new();
         self.compute_reward_verildi = std::collections::HashSet::new();
         self.compute_reward_emitted = 0;
+        self.compute_reward_gunluk = (0, 0);
         self.avm_db = crate::avm::AidagDatabase::yeni();
 
         // 2) BASLANGIC DURUMU (genesis/test) — DAG'da vertex karsiligi YOK.
@@ -905,8 +923,84 @@ impl NodeState {
     /// ON-SATIS TGE (Unix sn): owner tip=15 ile ayarladiysa o deger, yoksa pinli
     /// sabit (MAINNET_VESTING_BASLANGIC). Claim + goruntuleme bunu kullanir.
     pub fn on_satis_tge(&self) -> u64 {
-        self.on_satis_tge
-            .unwrap_or(crate::mainnet::MAINNET_VESTING_BASLANGIC)
+        match self.on_satis_tge {
+            Some(t) => t,
+            // KURUCU KARARI: mainnet'te TGE yalniz kurucunun zincire yazdigi
+            // tip=15 karariyla belirlenir; karar yoksa TGE BELIRSIZ (u64::MAX):
+            // hicbir claim ve genesis vesting'i acilmaz, tarih kendiliginden
+            // kesinlesmez. Devnet/testnet eski varsayilani korur.
+            None if self.mainnet => u64::MAX,
+            None => crate::mainnet::MAINNET_VESTING_BASLANGIC,
+        }
+    }
+
+    /// Kurucu TGE karari verildi mi (mainnet: tip=15 ile zincirde ilan).
+    pub fn tge_karari_var_mi(&self) -> bool {
+        self.on_satis_tge.is_some()
+    }
+
+    /// Kilitleri zincir durumuna gore guncelle: (1) vesting tabani = kurucu TGE
+    /// karari (karar yoksa hicbir genesis dilimi acilmaz), (2) escrow rezervi =
+    /// satilmis ama claim edilmemis on-satis AIDAG'i (owner harcayamaz).
+    fn kilitleri_guncelle(&mut self) {
+        self.bakiye_registry.vesting_tge_tabani_ayarla(self.on_satis_tge());
+        let mut ek = std::collections::HashMap::new();
+        if let Some(owner) = self.faucet_owner {
+            let rezerv = self.on_satis_registry.rezerve_toplam();
+            if rezerv > 0 {
+                ek.insert(owner, rezerv);
+            }
+        }
+        self.bakiye_registry.ek_kilit_ayarla(ek);
+    }
+
+    /// Gecersiz (revm dogrulamasindan gecemeyen) AVM islemi: durum degismez ama
+    /// taban gas (21000) LSC olarak kesilir ve nonce ilerler. Boylece ayni
+    /// gecersiz islem bedavaya tekrar tekrar calistirilamaz.
+    fn avm_gecersiz_ucret(&mut self, gonderen: &[u8; 20]) {
+        let ucret = crate::avm::gas_ucreti_hesapla(21_000);
+        let (yak, gel) = crate::avm::gas_ucreti_bol(ucret);
+        let _ = self.lsc_registry.transfer(gonderen, &crate::avm::YAKIM_ADRESI, yak as crate::registry::Tutar);
+        let _ = self.lsc_registry.transfer(gonderen, &crate::avm::GELISTIRME_HAVUZU, gel as crate::registry::Tutar);
+        self.nonce_registry.ilerlet(gonderen);
+    }
+
+    /// Harcanabilir AIDAG (bakiye - vesting - rezerv). RPC on-kontrolu icin.
+    pub fn harcanabilir(&self, adres: &[u8; 20]) -> crate::registry::Tutar {
+        self.bakiye_registry.harcanabilir(adres)
+    }
+
+    /// Bu agin EVM chainId'si (eth_chainId, EIP-155, CHAINID opcode).
+    pub fn evm_chain_id(&self) -> u64 {
+        crate::avm::evm_chain_id(self.graph.network_id())
+    }
+
+    /// AVM'i KILIT KORUMALI calistir: EVM'e yalniz HARCANABILIR bakiyeler
+    /// yuklenir (vesting + rezerv kilidi disarida kalir), basarida EVM sonucu
+    /// deftere aynalanir ve kilitler geri eklenir. Boylece EVM yolu (tip=9/12)
+    /// kilitli AIDAG'i ASLA hareket ettiremez (denetim bulgusu: vesting atlatma).
+    fn avm_kilitli_calistir<R>(
+        &mut self,
+        f: impl FnOnce(&mut crate::avm::AidagDatabase) -> Result<R, &'static str>,
+    ) -> Result<R, &'static str> {
+        let kilitler = self.bakiye_registry.kilit_haritasi();
+        let mut tohum = self.bakiye_registry.tum_bakiyeler().clone();
+        for (a, k) in &kilitler {
+            if let Some(b) = tohum.get_mut(a) {
+                *b = b.saturating_sub(*k);
+            }
+        }
+        self.avm_db.aidag_yukle_hepsi(&tohum);
+        let r = f(&mut self.avm_db);
+        if r.is_ok() {
+            let mut son = self.avm_db.aidag_tumu().clone();
+            for (a, k) in kilitler {
+                let b = son.entry(a).or_insert(0);
+                *b = b.saturating_add(k);
+            }
+            self.bakiye_registry.aidag_aynala(&son);
+        }
+        r
     }
 
     /// ON-SATIS CLAIM ortak yolu — tip=13 (ed25519 native) ve tip=14 (EVM/EIP-712)
@@ -927,7 +1021,7 @@ impl NodeState {
                     if let Some(owner) = self.faucet_owner {
                         let aidag_ok = matches!(
                             self.bakiye_registry
-                                .transfer(&owner, &cagiran, cekilebilir),
+                                .transfer_rezervden(&owner, &cagiran, cekilebilir),
                             crate::registry::TransferSonuc::Basarili { .. }
                         );
                         if aidag_ok {
@@ -973,6 +1067,14 @@ impl NodeState {
         self.bakiye_registry.zaman_ayarla(zaman);
         // ZINCIR SAATI: bu vertex dahil, sira boyunca gorulen en buyuk zaman (monoton).
         self.zincir_saati = self.zincir_saati.max(zaman);
+        // Kilitler (kurucu TGE tabani + escrow rezervi) her islemden once guncel.
+        self.kilitleri_guncelle();
+        // Kayit zamani: etkinlesmeden sonra ZINCIR SAATI (monoton; geriye tarihleme yok).
+        let kayit_zamani = if self.zincir_saati >= crate::mainnet::GUVENLIK_V2_AKTIVASYON {
+            self.zincir_saati
+        } else {
+            zaman
+        };
         match payload.first() {
             // tip=2: token kimlik kaydi -> KALKAN (STAKE-KONTROLLU + taklit reddi)
             Some(&crate::tx::TX_TYPE_TOKEN) => {
@@ -994,14 +1096,35 @@ impl NodeState {
                     if let crate::registry::KayitSonucu::TaklitReddedildi { .. } =
                         self.token_registry.kaydet(token)
                     {
-                        let _yakilan = self.stake_registry.slash(&kaydeden);
+                        let yakilan = self.stake_registry.slash(&kaydeden);
+                        if yakilan > 0 {
+                            let _ = self.bakiye_registry.transfer(
+                                &crate::mainnet::STAKE_KASASI,
+                                &crate::mainnet::AIDAG_YAKIM_ADRESI,
+                                yakilan,
+                            );
+                        }
                     }
                 }
             }
             // tip=3: stake kaydi -> STAKING defteri (teminat birikir)
             Some(&crate::tx::TX_TYPE_STAKE) => {
                 if let Ok(stake) = crate::tx::StakeKaydi::decode(payload) {
-                    let _yeni_toplam = self.stake_registry.stake_ekle(stake);
+                    // DENETIM DUZELTMESI: stake BEDAVA ve BASKASI ADINA degil.
+                    // (1) staker == imzalayan, (2) miktar imzalayanin HARCANABILIR
+                    // bakiyesinden STAKE_KASASI'na gercekten aktarilir; aktarim
+                    // basarisizsa stake kaydi olusmaz.
+                    let imzalayan = crate::registry::public_key_to_adres(signer);
+                    if stake.staker == imzalayan && stake.miktar > 0 {
+                        let s = self.bakiye_registry.transfer(
+                            &imzalayan,
+                            &crate::mainnet::STAKE_KASASI,
+                            stake.miktar,
+                        );
+                        if matches!(s, crate::registry::TransferSonuc::Basarili { .. }) {
+                            let _yeni_toplam = self.stake_registry.stake_ekle(stake);
+                        }
+                    }
                 }
             }
             // tip=4: transfer (odeme) -> BAKIYE defteri.
@@ -1052,7 +1175,7 @@ impl NodeState {
             Some(&crate::tx::TX_TYPE_EVM_TRANSFER) => {
                 if let Ok(t) = crate::tx::EvmTransfer::decode(payload) {
                     // ecrecover: imzadan gondereni kurtar (Secenek B). Gecersizse None.
-                    if let Some(gonderen) = t.gonderen_adres() {
+                    if let Some(gonderen) = t.gonderen_adres(self.evm_chain_id()) {
                         // Replay korumasi: kendi nonce sistemimiz (tip=4 ile AYNI).
                         if self.nonce_registry.dogru_mu(&gonderen, t.nonce) {
                             let sonuc =
@@ -1071,6 +1194,11 @@ impl NodeState {
             // eslesme geri gelir (transfer gibi). BIR KERELIK + anti-Sybil registry'de.
             Some(&crate::tx::TX_TYPE_ESLESTIRME) => {
                 if let Ok(e) = crate::tx::EslestirmeKaydi::decode(payload) {
+                    // DENETIM DUZELTMESI: yalniz test adresinin SAHIBI (imzalayan)
+                    // kendi test adresini eslestirebilir (odul gaspi kapali).
+                    if e.test_adresi != crate::registry::public_key_to_adres(signer) {
+                        return;
+                    }
                     let _yeni = self
                         .eslestirme_registry
                         .eslestir(e.test_adresi, e.gercek_adres);
@@ -1095,7 +1223,7 @@ impl NodeState {
                         if c.data.is_empty() {
                             // --- DATA BOS: basit LSC deger transferi (ESKI YOL, korunur) ---
                             let lsc_gerekli = ucret as crate::registry::Tutar;
-                            if self.bakiye_registry.bakiye(&gonderen) >= c.deger
+                            if self.bakiye_registry.harcanabilir(&gonderen) >= c.deger
                                 && self.lsc_registry.bakiye(&gonderen) >= lsc_gerekli
                             {
                                 let s1 =
@@ -1126,31 +1254,29 @@ impl NodeState {
                             let azami_ucret =
                                 crate::avm::gas_ucreti_hesapla(crate::avm::AVM_GAS_LIMIT)
                                     as crate::registry::Tutar;
-                            if self.bakiye_registry.bakiye(&gonderen) >= c.deger
+                            if self.bakiye_registry.harcanabilir(&gonderen) >= c.deger
                                 && self.lsc_registry.bakiye(&gonderen) >= azami_ucret
                             {
-                                // B1 (SEED): EVM'e TAM AIDAG gorunumu ver. Yalniz gonderen
-                                // degil, TUM hesaplar yuklenir ki kontrat-ici hareketler
-                                // (payable/withdraw/ucuncu-tarafa odeme) dogru bakiyelerle
-                                // yurusun. gas_price=0 -> EVM native yaratmaz/yakmaz.
-                                self.avm_db
-                                    .aidag_yukle_hepsi(self.bakiye_registry.tum_bakiyeler());
                                 // B6: CREATE nonce'unu BIRLESIK nonce_registry'ye senkronla
                                 // (c.nonce == beklenen, dogru_mu ile dogrulandi). Boylece
                                 // CREATE adresi = keccak(gonderen, birlesik_nonce) =
                                 // eth_getTransactionCount -> MetaMask/arac adres tahmini tutar.
-                                // (Aksi halde native tx'ler avm_db nonce'undan ayrisirdi.)
                                 self.avm_db.nonce_koy(gonderen, c.nonce);
-                                // KONTRAT calistir: deploy (hedef=sifir) ya da call. deger EVM'e
-                                // verilir ki kontrat mantigi (payable vb.) dogru tetiklensin.
-                                let sonuc = crate::avm::avm_calistir(
-                                    &mut self.avm_db,
-                                    &gonderen,
-                                    &c.hedef,
-                                    c.deger,
-                                    &c.data,
-                                    zaman,
-                                );
+                                // KONTRAT calistir (KILIT KORUMALI: EVM yalniz harcanabilir
+                                // bakiyeleri gorur). EVM zamani = ZINCIR SAATI (monoton).
+                                let chain_id = self.evm_chain_id();
+                                let evm_zaman = self.zincir_saati;
+                                let (hedef, deger, data) = (c.hedef, c.deger, c.data.clone());
+                                let sonuc = self.avm_kilitli_calistir(|db| {
+                                    crate::avm::avm_calistir_zincir(
+                                        db, &gonderen, &hedef, deger, &data, evm_zaman, chain_id,
+                                    )
+                                });
+                                if sonuc.is_err() {
+                                    // Gecersiz tx (revm dogrulamasi): durum degismez ama taban
+                                    // gas kesilir ve nonce ilerler -> bedava tekrar/spam yok.
+                                    self.avm_gecersiz_ucret(&gonderen);
+                                }
                                 if let Ok(r) = sonuc {
                                     // GERCEK gas_used'dan ucret (basari/basarisiz FARK ETMEZ).
                                     let ucret_ger = crate::avm::gas_ucreti_hesapla(r.gas_used);
@@ -1167,14 +1293,8 @@ impl NodeState {
                                     );
                                     // nonce HER DURUMDA ilerler (basarisiz tx replay'i de engellenir).
                                     self.nonce_registry.ilerlet(&gonderen);
-                                    // B1 (MIRROR): EVM'in urettigi TUM AIDAG state-diff'i
-                                    // gercek deftere geri aynala. Ust-seviye `deger` dahil TUM
-                                    // kontrat-ici hareketler burada yansir -> fon donmasi biter.
-                                    // Basarisiz/revert'te EVM state'i geri sarilmis olur ->
-                                    // aynalama seed ile ayni kalir (guvenli no-op). Eski
-                                    // ust-seviye `transfer` KALDIRILDI (deger'i EVM zaten tasidi;
-                                    // aksi halde CIFT sayim olurdu).
-                                    self.bakiye_registry.aidag_aynala(self.avm_db.aidag_tumu());
+                                    // B1 (MIRROR): aynalama avm_kilitli_calistir icinde yapildi
+                                    // (kilitler geri eklenerek).
                                 }
                             }
                         }
@@ -1300,7 +1420,7 @@ impl NodeState {
             Some(&crate::tx::TX_TYPE_RECORD) => {
                 if let Ok(rec) = crate::tx::Record::decode(payload) {
                     let kaydeden = crate::registry::public_key_to_adres(signer);
-                    let _yeni = self.record_registry.kaydet(rec.data_hash, kaydeden, zaman);
+                    let _yeni = self.record_registry.kaydet(rec.data_hash, kaydeden, kayit_zamani);
                 }
             }
             // tip=5: kurum/firma kimlik kaydi -> KURUM defteri.
@@ -1314,7 +1434,7 @@ impl NodeState {
                     } else {
                         crate::registry::KurumKategori::Ozel
                     };
-                    let _yeni = self.kurum_registry.kaydet(kaydeden, k.ad, kategori, zaman);
+                    let _yeni = self.kurum_registry.kaydet(kaydeden, k.ad, kategori, kayit_zamani);
                 }
             }
             // tip=6: FAUCET (TESTNET test AIDAG). GUVENLIK: sadece imzalayan ==
@@ -1356,10 +1476,22 @@ impl NodeState {
                         && !self.compute_reward_verildi.contains(&r.reward_id)
                     {
                         let yeni = self.compute_reward_emitted.saturating_add(r.lsc);
-                        if yeni <= crate::mainnet::COMPUTE_REWARD_EMISYON_TAVAN {
+                        // DENETIM DUZELTMESI: gunluk tavan (anahtar calinsa bile
+                        // tek gunde tum emisyon basilamaz). Gun zincir saatinden.
+                        let bugun = self.zincir_saati / 86_400;
+                        let gunluk = if self.compute_reward_gunluk.0 == bugun {
+                            self.compute_reward_gunluk.1
+                        } else {
+                            0
+                        };
+                        let gunluk_yeni = gunluk.saturating_add(r.lsc);
+                        if yeni <= crate::mainnet::COMPUTE_REWARD_EMISYON_TAVAN
+                            && gunluk_yeni <= crate::mainnet::COMPUTE_REWARD_GUNLUK_TAVAN
+                        {
                             self.lsc_registry.test_bakiye_ekle(r.worker, r.lsc);
                             self.compute_reward_verildi.insert(r.reward_id);
                             self.compute_reward_emitted = yeni;
+                            self.compute_reward_gunluk = (bugun, gunluk_yeni);
                         }
                     }
                 }
@@ -1372,6 +1504,13 @@ impl NodeState {
                 if let Some(raw) = crate::tx::ham_eth_tx_coz_payload(payload) {
                     if let Ok(islem) = crate::avm::ham_eth_tx_coz(raw) {
                         let gonderen = islem.gonderen;
+                        let chain_id = self.evm_chain_id();
+                        // DENETIM DUZELTMESI: chainId TAM bu agin chainId'si olmali
+                        // (chainId'siz eski imza ve BSC/Ethereum tx replay'i REDDEDILIR)
+                        // ve imza dusuk-S olmali. Aksi halde islem hic etkisizdir.
+                        if crate::avm::ham_eth_tx_kabul_edilir(&islem, chain_id).is_err() {
+                            return;
+                        }
                         // Nonce replay korumasi (canli+replay ayni)
                         if self.nonce_registry.dogru_mu(&gonderen, islem.nonce) {
                             // B2: upfront affordability gas TAVANINA (AVM_GAS_LIMIT) gore;
@@ -1379,19 +1518,24 @@ impl NodeState {
                             let azami_ucret =
                                 crate::avm::gas_ucreti_hesapla(crate::avm::AVM_GAS_LIMIT)
                                     as crate::registry::Tutar;
-                            if self.bakiye_registry.bakiye(&gonderen) >= islem.deger
+                            if self.bakiye_registry.harcanabilir(&gonderen) >= islem.deger
                                 && self.lsc_registry.bakiye(&gonderen) >= azami_ucret
                             {
-                                // B1 (SEED): EVM'e TAM AIDAG gorunumu ver (kontrat-ici
-                                // hareketler ucuncu-taraflar dahil dogru bakiyelerle yurusun).
-                                self.avm_db
-                                    .aidag_yukle_hepsi(self.bakiye_registry.tum_bakiyeler());
                                 // B6: CREATE nonce'unu BIRLESIK nonce_registry'ye senkronla
                                 // (islem.nonce == beklenen). CREATE adresi eth_getTransactionCount
                                 // ile tutarli olur -> MetaMask/arac adres tahmini dogru.
                                 self.avm_db.nonce_koy(gonderen, islem.nonce);
-                                if let Ok((_h, r)) =
-                                    crate::avm::ham_eth_tx_isle(&mut self.avm_db, raw, zaman)
+                                // KILIT KORUMALI calistirma (vesting/rezerv EVM'e girmez);
+                                // EVM zamani = ZINCIR SAATI.
+                                let evm_zaman = self.zincir_saati;
+                                let raw_kopya = raw.to_vec();
+                                let sonuc = self.avm_kilitli_calistir(|db| {
+                                    crate::avm::ham_eth_tx_isle(db, &raw_kopya, evm_zaman, chain_id)
+                                });
+                                if sonuc.is_err() {
+                                    self.avm_gecersiz_ucret(&gonderen);
+                                }
+                                if let Ok((_h, r)) = sonuc
                                 {
                                     // B2: GERCEK gas_used (basari/basarisiz FARK ETMEZ) -> LSC.
                                     let ucret_ger = crate::avm::gas_ucreti_hesapla(r.gas_used);
@@ -1408,10 +1552,7 @@ impl NodeState {
                                     );
                                     // nonce HER DURUMDA ilerler (basarisiz tx replay'i de engellenir).
                                     self.nonce_registry.ilerlet(&gonderen);
-                                    // B1 (MIRROR): EVM'in urettigi TUM AIDAG state-diff'i (ust
-                                    // seviye deger dahil) gercek deftere aynala -> fon donmasi biter.
-                                    // Eski ust-seviye transfer KALDIRILDI (cift sayim olurdu).
-                                    self.bakiye_registry.aidag_aynala(self.avm_db.aidag_tumu());
+                                    // B1 (MIRROR): aynalama avm_kilitli_calistir icinde yapildi.
                                 }
                             }
                         }
@@ -1607,6 +1748,8 @@ mod tests {
         // Gercek USDC kaydeden (sk_a): once STAKE vertex'i, sonra token kaydi
         let sk_a = SigningKey::from_bytes(&[10u8; 32]);
         let adr_a = public_key_to_adres(&sk_a.verifying_key().to_bytes());
+        // Stake artik bedava degil: teminat bakiyeden STAKE_KASASI'na aktarilir.
+        node.test_bakiye_ekle(adr_a, 1000);
         let ps_a = StakeKaydi::new(adr_a, 1000).encode();
         let vs_a = Vertex::new_signed(NET, vec![gid], ps_a, now, &sk_a).expect("vs_a");
         node.ingest_networked(&wire::encode(&vs_a), now);
@@ -1624,6 +1767,7 @@ mod tests {
         // Sahteci (sk_b): STAKE vertex'i (5000), sonra TAKLIT USDC kaydi
         let sk_b = SigningKey::from_bytes(&[11u8; 32]);
         let adr_b = public_key_to_adres(&sk_b.verifying_key().to_bytes());
+        node.test_bakiye_ekle(adr_b, 5000);
         let ps_b = StakeKaydi::new(adr_b, 5000).encode();
         let vs_b = Vertex::new_signed(NET, vec![*v1.id()], ps_b, now + 2, &sk_b).expect("vs_b");
         node.ingest_networked(&wire::encode(&vs_b), now + 2);
@@ -1640,6 +1784,9 @@ mod tests {
         assert!(!node.stake_var_mi(&adr_b));
         // KANIT 3: durust kaydedicinin (adr_a) stake'i DOKUNULMADI
         assert_eq!(node.stake_miktari(&adr_a), 1000);
+        // KANIT 4: yakilan teminat gercekten YAKIM adresine gitti (kasada adr_a'nin 1000'i kaldi)
+        assert_eq!(node.bakiye(&crate::mainnet::AIDAG_YAKIM_ADRESI), 5000);
+        assert_eq!(node.bakiye(&crate::mainnet::STAKE_KASASI), 1000);
     }
 
     // STAKING node-seviyesi: dogrudan stake_ekle + sorgu
@@ -1666,16 +1813,21 @@ mod tests {
         assert_eq!(node.toplam_stake(), 0);
 
         let sk = SigningKey::from_bytes(&[5u8; 32]);
-        let payload = StakeKaydi::new([0xAA; 20], 5000).encode();
+        let staker = crate::registry::public_key_to_adres(&sk.verifying_key().to_bytes());
+        node.test_bakiye_ekle(staker, 5000);
+        let payload = StakeKaydi::new(staker, 5000).encode();
         let v = Vertex::new_signed(NET, vec![gid], payload, now, &sk).expect("stake vertex");
         assert!(matches!(
             node.ingest_networked(&wire::encode(&v), now),
             NetworkIngestOutcome::Integrated(_)
         ));
 
-        assert_eq!(node.stake_miktari(&[0xAA; 20]), 5000);
-        assert!(node.stake_var_mi(&[0xAA; 20]));
+        assert_eq!(node.stake_miktari(&staker), 5000);
+        assert!(node.stake_var_mi(&staker));
         assert_eq!(node.toplam_stake(), 5000);
+        // teminat gercekten kilitlendi: bakiyeden kasaya
+        assert_eq!(node.bakiye(&staker), 0);
+        assert_eq!(node.bakiye(&crate::mainnet::STAKE_KASASI), 5000);
     }
     use crate::dag::vertex::Vertex;
     use crate::dag::wire;
@@ -2830,7 +2982,7 @@ mod tests {
         // imzali raw eth tx (EIP-2718) uret.
         let raw_eth = |nonce: u64, to: ATxKind, value: u128, input: Vec<u8>| -> Vec<u8> {
             let tx = TxLegacy {
-                chain_id: Some(NET as u64),
+                chain_id: Some(crate::avm::evm_chain_id(NET)),
                 nonce,
                 gas_price: 0,
                 gas_limit: 3_000_000,
@@ -4032,7 +4184,7 @@ mod tests {
         // 3) EVM transferi olustur + secp256k1 ile imzala (nonce=0)
         let miktar = 30_000u128;
         let nonce = 0u64;
-        let mesaj = evm_transfer_mesaji(&alici, miktar, nonce);
+        let mesaj = evm_transfer_mesaji(crate::avm::evm_chain_id(NET), &alici, miktar, nonce);
         let prehash = Keccak256::digest(&mesaj);
         let (sig, recid): (K256Sig, RecoveryId) = k_sk.sign_prehash(&prehash).expect("imza");
         let evm_t = EvmTransfer {
@@ -4388,8 +4540,15 @@ mod tests {
             .ingest(&crate::mainnet::genesis_wire(), simdi)
             .expect("pinli genesis yuklenmeli");
         let sk = SigningKey::from_bytes(&[0x33u8; 32]);
-        let v = Vertex::new_signed(crate::mainnet::MAINNET_NETWORK_ID, vec![gid], b"ilk".to_vec(), simdi, &sk)
-            .unwrap();
+        // Yapisal islem kurali: mainnet'te payload gecerli bir islem olmali (belge kaydi).
+        let v = Vertex::new_signed(
+            crate::mainnet::MAINNET_NETWORK_ID,
+            vec![gid],
+            crate::tx::Record::new([0x11; 32]).encode(),
+            simdi,
+            &sk,
+        )
+        .unwrap();
         assert!(matches!(
             node.ingest_networked(&wire::encode(&v), simdi),
             NetworkIngestOutcome::Integrated(_)

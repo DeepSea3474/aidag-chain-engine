@@ -163,7 +163,8 @@ impl StakeRegistry {
 
     /// Defterdeki toplam kilitli AIDAG.
     pub fn toplam_stake(&self) -> Tutar {
-        self.stakelar.values().copied().sum()
+        // Tasma guvenli (release'de sessiz sarma / debug'da panik yok).
+        self.stakelar.values().fold(0, |a: Tutar, &m| a.saturating_add(m))
     }
 
     /// Kac farkli adres stake etmis.
@@ -192,6 +193,14 @@ pub struct BakiyeRegistry {
     vesting: HashMap<[u8; 20], VestingKaydi>,
     /// Su anki zincir zamani (transfer'de vesting kontrolu icin).
     simdi_zaman: u64,
+    /// KURUCU TGE KARARI: hicbir vesting plani bu zamandan ONCE acilmaya
+    /// baslamaz (etkin baslangic = max(plan baslangici, taban)). Dugum, zincirde
+    /// kurucunun ilan ettigi TGE'yi buraya yazar; karar yoksa taban = u64::MAX
+    /// (hicbir kilitli dilim acilmaz). 0 = eski davranis (yalniz plan baslangici).
+    vesting_tge_tabani: u64,
+    /// EK KILIT (vesting disi): ornek, satilmis ama claim edilmemis on-satis
+    /// AIDAG'i escrow'da REZERVE (owner harcayamaz). Dugum her islemde gunceller.
+    ek_kilit: HashMap<[u8; 20], Tutar>,
 }
 
 /// Vesting plani: (TGE-acik) + cliff + dogrusal acilim (blok/zaman bazli).
@@ -229,6 +238,15 @@ impl VestingKaydi {
     pub fn kilitli(&self, simdi: u64) -> Tutar {
         self.toplam.saturating_sub(self.acilmis(simdi))
     }
+    /// Kurucu TGE kararina bagli kilit: etkin baslangic = max(baslangic, taban).
+    pub fn kilitli_tabanli(&self, simdi: u64, taban: u64) -> Tutar {
+        if taban <= self.baslangic {
+            return self.kilitli(simdi);
+        }
+        let mut k = self.clone();
+        k.baslangic = taban;
+        k.kilitli(simdi)
+    }
 }
 
 impl BakiyeRegistry {
@@ -237,6 +255,8 @@ impl BakiyeRegistry {
             bakiyeler: HashMap::new(),
             vesting: HashMap::new(),
             simdi_zaman: 0,
+            vesting_tge_tabani: 0,
+            ek_kilit: HashMap::new(),
         }
     }
 
@@ -276,12 +296,43 @@ impl BakiyeRegistry {
             }
         }
     }
-    /// Bir adresin su an KILITLI miktari.
+    /// Bir adresin su an KILITLI (vesting) miktari. Kurucu TGE kararindan
+    /// once hicbir plan acilmaz (vesting_tge_tabani).
     pub fn vesting_kilitli(&self, adres: &[u8; 20], simdi: u64) -> Tutar {
         self.vesting
             .get(adres)
-            .map(|v| v.kilitli(simdi))
+            .map(|v| v.kilitli_tabanli(simdi, self.vesting_tge_tabani))
             .unwrap_or(0)
+    }
+    /// Kurucu TGE kararini (vesting tabani) ayarla. u64::MAX = karar yok.
+    pub fn vesting_tge_tabani_ayarla(&mut self, taban: u64) {
+        self.vesting_tge_tabani = taban;
+    }
+    /// Ek kilitleri (vesting disi rezervler) topluca ayarla.
+    pub fn ek_kilit_ayarla(&mut self, kilitler: HashMap<[u8; 20], Tutar>) {
+        self.ek_kilit = kilitler;
+    }
+    /// Toplam kilit = vesting + ek kilit.
+    pub fn toplam_kilit(&self, adres: &[u8; 20], simdi: u64) -> Tutar {
+        self.vesting_kilitli(adres, simdi)
+            .saturating_add(self.ek_kilit.get(adres).copied().unwrap_or(0))
+    }
+    /// HARCANABILIR bakiye = bakiye - (vesting + ek kilit). Transfer, AVM ve
+    /// RPC on-kontrolu AYNI tanimi kullanir.
+    pub fn harcanabilir(&self, adres: &[u8; 20]) -> Tutar {
+        self.bakiye(adres).saturating_sub(self.toplam_kilit(adres, self.simdi_zaman))
+    }
+    /// Kilidi olan tum adreslerin kilit miktari (AVM'e harcanabilir bakiye
+    /// yuklemek ve sonra kilidi geri eklemek icin). Siralama onemsiz (toplama).
+    pub fn kilit_haritasi(&self) -> HashMap<[u8; 20], Tutar> {
+        let mut m: HashMap<[u8; 20], Tutar> = HashMap::new();
+        for a in self.vesting.keys().chain(self.ek_kilit.keys()) {
+            let k = self.toplam_kilit(a, self.simdi_zaman).min(self.bakiye(a));
+            if k > 0 {
+                m.insert(*a, k);
+            }
+        }
+        m
     }
     /// Zincir zamanini ayarla (transfer'de vesting kontrolu icin).
     pub fn zaman_ayarla(&mut self, simdi: u64) {
@@ -305,8 +356,8 @@ impl BakiyeRegistry {
             return TransferSonuc::GecersizMiktar;
         }
         let gonderen_bakiye = self.bakiye(gonderen);
-        // VESTING KILIT: kilitli kisim harcanamaz.
-        let kilitli = self.vesting_kilitli(gonderen, self.simdi_zaman);
+        // KILIT: vesting + ek kilit (on-satis rezervi) harcanamaz.
+        let kilitli = self.toplam_kilit(gonderen, self.simdi_zaman);
         let harcanabilir = gonderen_bakiye.saturating_sub(kilitli);
         if harcanabilir < miktar {
             return TransferSonuc::YetersizBakiye {
@@ -326,6 +377,23 @@ impl BakiyeRegistry {
         TransferSonuc::Basarili {
             gonderen_yeni_bakiye: gonderen_bakiye - miktar,
         }
+    }
+
+    /// REZERVDEN TRANSFER: yalniz on-satis CLAIM yolu kullanir. Ek kilit
+    /// (rezerv) tam da bu odeme icin tutuldugundan yok sayilir; vesting kilidi
+    /// yine uygulanir. Diger tum kurallar `transfer` ile ayni.
+    pub fn transfer_rezervden(
+        &mut self,
+        gonderen: &[u8; 20],
+        alici: &[u8; 20],
+        miktar: Tutar,
+    ) -> TransferSonuc {
+        let yedek = self.ek_kilit.remove(gonderen);
+        let sonuc = self.transfer(gonderen, alici, miktar);
+        if let Some(k) = yedek {
+            self.ek_kilit.insert(*gonderen, k);
+        }
+        sonuc
     }
 
     /// KOPRU 2 (AVM): TUM AIDAG bakiyelerini (adres->tutar) dondur.
@@ -1387,7 +1455,15 @@ impl OnSatisRegistry {
 
     /// Toplam dagitilan AIDAG (denetim/seffaflik icin).
     pub fn toplam_aidag(&self) -> u128 {
-        self.kayitlar.values().map(|k| k.aidag).sum()
+        self.kayitlar.values().fold(0u128, |a, k| a.saturating_add(k.aidag))
+    }
+
+    /// REZERV: satilmis ama henuz claim edilmemis toplam AIDAG. Escrow (owner)
+    /// bu kadarini harcayamaz; yalniz alicilarin claim'i cekebilir.
+    pub fn rezerve_toplam(&self) -> u128 {
+        self.kayitlar
+            .values()
+            .fold(0u128, |a, k| a.saturating_add(k.aidag.saturating_sub(k.claimlenen)))
     }
 
     /// Tum kayitlar (diske yazma / mainnet gecisi icin).

@@ -368,6 +368,46 @@ pub const ON_SATIS_GUNLUK_CAP: u128 = 100_000 * crate::genesis::ONDALIK;
 /// (acilmis kilitler geri kilitlenemez). Deterministik: tum dugumler ayni.
 pub const TGE_MIN_BILDIRIM_SURESI: u64 = 3 * 86_400;
 
+/// DENETIM DUZELTMESI: kurucu (owner) anahtariyla GUNLUK basilabilecek azami
+/// hesaplama odulu (tip=16). Anahtar ele gecse bile tek islemde/gunde tum
+/// emisyon tavani basilamaz. Gun = zincir saati / 86400 (deterministik).
+/// Gecmis mainnet toplami 87 LSC; sinir gecmisi etkilemez.
+pub const COMPUTE_REWARD_GUNLUK_TAVAN: u128 = 10_000 * crate::genesis::ONDALIK;
+
+/// DENETIM DUZELTMESI: yapisal islem kurali — bir vertex payload'inin azami
+/// boyutu (gossip mesaj siniriyla uyumlu; 1 MiB vertex'ler senkronu kilitliyordu).
+/// EVM initcode siniri (49152) + zarf payi.
+pub const MAX_ISLEM_PAYLOAD: usize = 60 * 1024;
+
+/// YAPISAL KURAL ISTISNALARI: yapisal islem kuralindan ONCE mainnet'e girmis ve
+/// kurala uymayan vertex'ler. Taranan mainnet gecmisinde (3901 vertex) tek ihlal:
+/// eski bicimli bir tip=10 kaydi (61 bayt; bugunku cozucu okuyamaz, durum etkisi
+/// zaten yoktu). Istisna id ile (icerik hash'i) — deterministik, genisletilemez.
+pub const YAPISAL_KURAL_ISTISNALARI: &[[u8; 32]] = &[[
+    0xae, 0x35, 0x93, 0xed, 0xe2, 0x19, 0x4b, 0x02, 0x33, 0x1a, 0x8d, 0x12, 0x9c, 0xf7, 0x5b, 0xc1,
+    0x0b, 0x73, 0xc7, 0x14, 0x21, 0x5a, 0x14, 0x88, 0x4d, 0x18, 0x02, 0xf9, 0x1a, 0xc7, 0x38, 0x3b,
+]];
+
+/// DENETIM DUZELTMESI (zamana bagli kurallarin etkinlesmesi): ZINCIR SAATI bu
+/// degere ulastiktan sonra belge (tip=1) ve kurum (tip=5) kayit zamani vertex
+/// zamani yerine ZINCIR SAATI olur (geriye tarihleme kapanir). Zincir saati
+/// monotondur, imzalayan geri alamaz. Gecmis kayitlar degismez.
+/// 2026-10-01 00:00 UTC. DEPLOY BU TARIHTEN ONCE yapilmali (yoksa tarihi ileri al).
+pub const GUVENLIK_V2_AKTIVASYON: u64 = 1_790_812_800;
+
+/// DENETIM DUZELTMESI: stake (tip=3) teminatinin tutuldugu kasa adresi.
+/// Stake artik bedava degil: miktar imzalayanin bakiyesinden buraya aktarilir;
+/// slash edilen teminat YAKIM adresine gider.
+pub const STAKE_KASASI: [u8; 20] = [
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0xA1, 0xD5,
+];
+/// Slash edilen AIDAG'in gittigi yakim adresi (kimsenin anahtari yok).
+pub const AIDAG_YAKIM_ADRESI: [u8; 20] = [
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0xDE, 0xAD,
+];
+
 /// TGE "BELIRLENMEDI" isareti (2100-01-01 00:00 UTC). Tarih acik birakilirken owner
 /// TGE'yi bu degere ayarlar: vesting acilmaz (hak edilen = 0), RPC/arayuz bunu
 /// tarih olarak DEGIL "belirlenmedi" olarak gosterir. Karar alininca owner gercek

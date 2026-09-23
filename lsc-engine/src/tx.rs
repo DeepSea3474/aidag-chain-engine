@@ -1149,12 +1149,20 @@ pub struct EvmTransfer {
 
 /// EVM transferinde IMZALANAN mesaj: [alici:20][miktar:8] (transferin ozu).
 /// Gonderen bu mesaji secp256k1 ile imzalar; biz ecrecover ile gondereni buluruz.
+/// tip=11 imza mesajinin alan etiketi (surum 2: chainId icerir).
+pub const EVM_TRANSFER_ALAN: &[u8] = b"AIDAG-EvmTransfer-v2\0";
+
 pub fn evm_transfer_mesaji(
+    chain_id: u64,
     alici: &[u8; ADDR_LEN],
     miktar: crate::registry::Tutar,
     nonce: u64,
 ) -> Vec<u8> {
-    let mut m = Vec::with_capacity(ADDR_LEN + 16 + 8);
+    // ALAN AYRIMI + AG KIMLIGI: imza baska bir AIDAG aginda (testnet) veya baska
+    // bir protokol mesaji olarak yeniden oynatilamaz (capraz-ag replay kapali).
+    let mut m = Vec::with_capacity(EVM_TRANSFER_ALAN.len() + 8 + ADDR_LEN + 16 + 8);
+    m.extend_from_slice(EVM_TRANSFER_ALAN);
+    m.extend_from_slice(&chain_id.to_be_bytes());
     m.extend_from_slice(alici);
     m.extend_from_slice(&miktar.to_be_bytes());
     m.extend_from_slice(&nonce.to_be_bytes());
@@ -1208,11 +1216,11 @@ impl EvmTransfer {
 
     /// ecrecover: imzadan GONDERENIN 0x adresini kurtar (Secenek B, POC 4).
     /// Imza gecersizse None. Bu DILIM bakiyeye/transfer'e DOKUNMAZ.
-    pub fn gonderen_adres(&self) -> Option<[u8; ADDR_LEN]> {
+    pub fn gonderen_adres(&self, chain_id: u64) -> Option<[u8; ADDR_LEN]> {
         use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
         use sha3::{Digest, Keccak256};
 
-        let mesaj = evm_transfer_mesaji(&self.alici, self.miktar, self.nonce);
+        let mesaj = evm_transfer_mesaji(chain_id, &self.alici, self.miktar, self.nonce);
         // Ethereum standardi: mesaj keccak256'lanir, o hash imzalanir/kurtarilir.
         // Imzalama (sign_prehash) ile birebir ayni olmali (yoksa gonderen yanlis cikar).
         let prehash = Keccak256::digest(&mesaj);
@@ -1476,7 +1484,7 @@ mod evm_transfer_tests {
         miktar: crate::registry::Tutar,
         nonce: u64,
     ) -> EvmTransfer {
-        let mesaj = evm_transfer_mesaji(&alici, miktar, nonce);
+        let mesaj = evm_transfer_mesaji(3474, &alici, miktar, nonce);
         let prehash = Keccak256::digest(&mesaj);
         let (sig, recid): (Signature, RecoveryId) = sk.sign_prehash(&prehash).expect("imza");
         EvmTransfer {
@@ -1514,7 +1522,7 @@ mod evm_transfer_tests {
         let t = imzali_transfer(&sk, [0x44u8; ADDR_LEN], 123, 0);
         // ecrecover ile gonderen, gercek adresle ayni olmali
         assert_eq!(
-            t.gonderen_adres(),
+            t.gonderen_adres(3474),
             Some(gercek),
             "ecrecover gondereni dogru bulmali"
         );
@@ -1524,10 +1532,10 @@ mod evm_transfer_tests {
     fn evm_transfer_tahrif_edilmis_imza_reddedilir_veya_farkli_adres() {
         let sk = SigningKey::random(&mut rand::rngs::OsRng);
         let mut t = imzali_transfer(&sk, [0x55u8; ADDR_LEN], 999, 0);
-        let dogru = t.gonderen_adres();
+        let dogru = t.gonderen_adres(3474);
         // miktari degistir (imza eski miktara aitti) -> gonderen ya None ya farkli
         t.miktar = 1;
-        let bozuk = t.gonderen_adres();
+        let bozuk = t.gonderen_adres(3474);
         assert_ne!(
             bozuk, dogru,
             "tahrif edilen transfer ayni gondereni vermemeli"
@@ -1608,4 +1616,42 @@ mod evm_transfer_tests {
         }
         eprintln!("KALKAN OK: {} tur, sahte token korumasi tuttu", turlar);
     }
+}
+
+// ============================================================================
+// DENETIM DUZELTMESI: YAPISAL ISLEM KURALI (konsensus, durumdan bagimsiz).
+// ============================================================================
+
+/// Genesis disindaki her vertex payload'i icin yapisal kabul kurali:
+///  (1) boyut <= MAX_ISLEM_PAYLOAD (gossip siniriyla uyumlu; buyuk vertex'ler
+///      senkronu kilitliyordu), (2) ilk bayt BILINEN bir islem tipi,
+///  (3) o tipin cozucusunden gecer (bozuk/cop payload DAG'a giremez).
+/// Durum (bakiye/nonce) KONTROL EDILMEZ: DAG'da siralama kesinlesmeden durum
+/// bilinemez; durum kurallari total-order uygulamasinda (kalkana_yonlendir).
+pub fn yapisal_islem_kurali(payload: &[u8]) -> Result<(), &'static str> {
+    if payload.len() > crate::mainnet::MAX_ISLEM_PAYLOAD {
+        return Err("payload azami boyutu asiyor");
+    }
+    let ok = match payload.first() {
+        Some(&TX_TYPE_RECORD) => Record::decode(payload).is_ok(),
+        Some(&TX_TYPE_TOKEN) => TokenKaydi::decode(payload).is_ok(),
+        Some(&TX_TYPE_STAKE) => StakeKaydi::decode(payload).is_ok(),
+        Some(&TX_TYPE_TRANSFER) => TransferKaydi::decode(payload).is_ok(),
+        Some(&TX_TYPE_KURUM) => KurumKaydiTx::decode(payload).is_ok(),
+        Some(&TX_TYPE_FAUCET) => FaucetKaydi::decode(payload).is_ok(),
+        Some(&TX_TYPE_LSC_TRANSFER) => LscTransferKaydi::decode(payload).is_ok(),
+        Some(&TX_TYPE_ESLESTIRME) => EslestirmeKaydi::decode(payload).is_ok(),
+        Some(&TX_TYPE_AVM_CAGRI) => AvmCagri::decode(payload).is_ok(),
+        Some(&TX_TYPE_ON_SATIS) => OnSatisDagitim::decode(payload).is_ok(),
+        Some(&TX_TYPE_EVM_TRANSFER) => EvmTransfer::decode(payload).is_ok(),
+        Some(&TX_TYPE_HAM_ETH_TX) => ham_eth_tx_coz_payload(payload)
+            .map(|raw| crate::avm::ham_eth_tx_coz(raw).is_ok())
+            .unwrap_or(false),
+        Some(&TX_TYPE_ON_SATIS_CLAIM) => ClaimTalebi::decode(payload).is_ok(),
+        Some(&TX_TYPE_EVM_ON_SATIS_CLAIM) => EvmClaimTalebi::decode(payload).is_ok(),
+        Some(&TX_TYPE_TGE_AYARLA) => TgeAyarla::decode(payload).is_ok(),
+        Some(&TX_TYPE_COMPUTE_REWARD) => ComputeReward::decode(payload).is_ok(),
+        _ => return Err("bilinmeyen islem tipi"),
+    };
+    if ok { Ok(()) } else { Err("payload islem tipine gore cozulemedi") }
 }
