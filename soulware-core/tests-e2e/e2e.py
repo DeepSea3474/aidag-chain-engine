@@ -18,14 +18,22 @@ def post(u,b):
     except urllib.error.HTTPError as e: return {"_http":e.code, **json.loads(e.read())}
 def sse(u,b):
     r=urllib.request.Request(u,json.dumps(b).encode(),{"content-type":"application/json"})
-    ev=None; done=None; toks=[]
-    for l in urllib.request.urlopen(r,timeout=60).read().decode().splitlines():
-        if l.startswith("event:"): ev=l[6:].strip()
-        elif l.startswith("data:"):
-            d=l[5:]; d=d[1:] if d.startswith(" ") else d
-            if ev=="token": toks.append(d)
-            if ev=="done": done=json.loads(d)
+    done=None; toks=[]
+    for blok in urllib.request.urlopen(r,timeout=60).read().decode().split("\n\n"):
+        ev="message"; dl=[]
+        for l in blok.split("\n"):
+            if l.startswith("event:"): ev=l[6:].strip()
+            elif l.startswith("data:"): d=l[5:]; dl.append(d[1:] if d.startswith(" ") else d)
+        d="\n".join(dl)   # SSE: cok satirli data \n ile birlesir
+        if ev=="token": toks.append(d)
+        if ev=="done": done=json.loads(d)
     return "".join(toks),done
+def sayfa_kanit(proof,soru,metin):
+    """ask.html'deki GERCEK kanitVerisi() fonksiyonunu node ile calistir."""
+    html=open(os.environ.get("ASK_HTML",S+"/ask.html"),encoding="utf-8").read()
+    fn=html[html.index("// KANIT-BASLA"):html.index("// KANIT-BITIS")]
+    js=fn+"\nconst a=JSON.parse(require('fs').readFileSync(0,'utf8'));process.stdout.write(JSON.stringify(kanitVerisi(a[0],a[1],a[2])));"
+    return json.loads(subprocess.run(["node","-e",js],input=json.dumps([proof,soru,metin]),capture_output=True,text=True,check=True).stdout)
 def bekle(u):
     for _ in range(120):
         try: return get(u)
@@ -87,6 +95,15 @@ try:
         kontrol(f"YENI {ad}: salt OLMADAN dogrulanmaz", not v["dogrulandi"] and v["proof_eslesir"] is False)
         v=post(KUB+"/v1/verify",dict(q,salt="00"*32))
         kontrol(f"YENI {ad}: yanlis salt ile dogrulanmaz", not v["dogrulandi"])
+    kontrol("YENI akis: done.answer == hash'lenen metin (satir sonlari dahil)", y3["answer"]==y3_metin and "\n" in y3["answer"])
+    for ad,r,soru,metin in (("akis-beyin",y3,"Merhaba, akis testi",y3_metin),("akis-arac",y4,"7 çarpı 8",y4_metin)):
+        veri=sayfa_kanit(r,soru,metin)
+        kontrol(f"SAYFA kanit dosyasi alanlari tam ({ad})", all(veri.get(k) for k in ("prompt","answer","model","ts","salt","proof_hash")))
+        v=post(KUB+"/v1/verify",{k:veri[k] for k in ("ts","prompt","answer","model","salt","proof_hash")})
+        kontrol(f"SAYFA kanit dosyasi /v1/verify'da dogrulanir ({ad})", v["dogrulandi"])
+    # eski sunucu (prompt/answer alani yok) -> sayfa kendi metnine duser
+    veri=sayfa_kanit({"proof_hash":"ab"*32,"salt":"cd"*32,"ts":5,"model":"m"},"soru","metin")
+    kontrol("SAYFA: done'da answer yoksa sayfadaki metin kullanilir", veri["prompt"]=="soru" and veri["answer"]=="metin")
     kontrol("YENI: ayni soru (7 carpi 8) iki kez -> farkli hash (tahmin edilemez)", y1["proof_hash"]!=y4["proof_hash"])
     kontrol("YENI: tum tuzlar birbirinden farkli", len(set(tuzlar))==len(tuzlar))
     v=post(KUB+"/v1/verify",{"ts":1,"prompt":"a","answer":"b","model":"m","salt":"zz"})

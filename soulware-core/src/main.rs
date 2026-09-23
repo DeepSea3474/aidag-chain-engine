@@ -845,7 +845,9 @@ async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) ->
             }
             // Zincire yaz + proof
             let (data_hash, chain, tuz) = arac_kanit(&st, &req.prompt, &sonuc, arac_ad, ts).await;
-            let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "model": arac_ad, "brain": "arac", "chain": chain});
+            // prompt/answer: hash'e giren metnin BIREBIR kopyasi (SSE parcalarindan yeniden kurmak
+            // satir sonlarini kaybedebilir; kanit dosyasi bunu kullanir).
+            let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "prompt": req.prompt, "answer": sonuc, "model": arac_ad, "brain": "arac", "chain": chain});
             let _ = tx.send(Ok(Event::default().event("done").data(proof.to_string()))).await;
             return;
         }
@@ -895,7 +897,7 @@ async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) ->
                 let data_hash = kanit::kanit_hash(st.cfg.net_id, ts,
                     &[req.prompt.as_bytes(), metin.as_bytes(), st.cfg.remote_model.as_bytes()], Some(&tuz));
                 let chain = zincire_yaz(&st, data_hash, ts).await;
-                let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "model": st.cfg.remote_model, "brain": "kubra-gpu", "grounded": !kaynaklar.is_empty(), "chain": chain});
+                let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "prompt": req.prompt, "answer": metin, "model": st.cfg.remote_model, "brain": "kubra-gpu", "grounded": !kaynaklar.is_empty(), "chain": chain});
                 let _ = tx.send(Ok(Event::default().event("done").data(proof.to_string()))).await;
             }
             Err(e) => { let _ = tx.send(Ok(Event::default().event("error").data(e))).await; }

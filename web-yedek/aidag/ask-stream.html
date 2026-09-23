@@ -48,6 +48,11 @@
   }
   .proof:hover { background:rgba(212,162,78,.16); }
   .proof .h { color:var(--dim); font-family:ui-monospace,monospace; }
+  .kanit { margin-top:8px; font-size:.7rem; color:var(--dim); line-height:1.5; }
+  .kanit code { font-family:ui-monospace,monospace; word-break:break-all; color:var(--acc); }
+  .kanit .not { margin-top:4px; }
+  .kanitBtn { margin-top:6px; font-size:.72rem; cursor:pointer; color:var(--acc2); background:transparent;
+    border:1px solid var(--acc2); border-radius:999px; padding:4px 12px; }
   .dusun { display:flex; align-items:center; gap:11px; color:var(--acc2); font-size:.9rem; }
   .spiral { width:26px; height:26px; flex:none; animation:spin 1.4s linear infinite; }
   @keyframes spin { to { transform:rotate(360deg); } }
@@ -107,6 +112,7 @@ const I18N = {
     err:"Something went wrong. Please try again.", empty:"Type a question first.",
     noanswer:"No answer yet — try again.",
     proof:"written to chain", verify:"verify",
+    proofDl:"⬇ Download proof", proofNote:"Only the hash is on-chain. Keep this file: without the salt the answer cannot be verified.",
     genOpen:"Sure — I can create that for you. Type what you want and press Generate:",
     genPh:"e.g. a funny cat with sunglasses, cartoon", genBtn:"Generate", genThink:"KUBRA is creating…",
     genWarn:"⚠️ AI-generated & public. It may be misused; I never depict anyone without consent. Ownership is recorded on-chain.",
@@ -126,6 +132,7 @@ const I18N = {
     err:"Bir şeyler ters gitti. Tekrar dene.", empty:"Önce bir soru yaz.",
     noanswer:"Henüz cevap yok — tekrar dene.",
     proof:"zincire yazıldı", verify:"doğrula",
+    proofDl:"⬇ Kanıtı indir", proofNote:"Zincirde yalnız özet (hash) var. Bu dosyayı sakla: tuz (salt) olmadan cevap doğrulanamaz.",
     genOpen:"Tabii — senin için üretebilirim. Ne istediğini yaz ve Üret'e bas:",
     genPh:"örn: güneş gözlüklü komik bir kedi, çizgi film", genBtn:"Üret", genThink:"KUBRA üretiyor…",
     genWarn:"⚠️ AI üretimi ve herkese açık. Kötüye kullanılabilir; kimseyi rızasız tasvir etmem. Sahiplik zincirde kayıtlı.",
@@ -155,6 +162,30 @@ function linkify(txt){
   s = s.replace(/(^|[^"=\/])((https?:\/\/)[^\s<)]+)/g,'$1<a href="$2" target="_blank">$2</a>');
   s = s.replace(/(^|[\s(>])((?:www\.)?aidag-chain\.com\/[a-zA-Z]+)/g,'$1<a href="https://$2" target="_blank">$2</a>');
   return s;
+}
+// KANIT-BASLA — kanıt dosyası içeriği (saf fonksiyon; sunucunun hash'lediği metin önceliklidir)
+function kanitVerisi(proof, soru, metin){
+  return {
+    sema: "tuzlu-v1",
+    net_id: 3474,
+    prompt: (typeof proof.prompt === "string") ? proof.prompt : soru,
+    answer: (typeof proof.answer === "string") ? proof.answer : metin,
+    model: proof.model,
+    ts: proof.ts,
+    salt: proof.salt,
+    proof_hash: proof.proof_hash,
+    zincir: "https://aidag-chain.com/rpc/belge/" + proof.proof_hash,
+    dogrulama: "POST https://aidag-chain.com/kubra-brain/v1/verify  (bu dosyanin prompt, answer, model, ts, salt, proof_hash alanlari)"
+  };
+}
+// KANIT-BITIS
+function kanitIndir(veri){
+  const blob = new Blob([JSON.stringify(veri, null, 2)], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "kubra-kanit-" + veri.proof_hash.slice(0,16) + ".json";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
 }
 function ekleSoru(txt){ const d=document.createElement("div"); d.className="msg soru"; d.textContent=txt; konusma.appendChild(d); kaydir(); return d; }
 function kaydir(){ konusma.scrollTop = konusma.scrollHeight; }
@@ -214,6 +245,17 @@ async function sor(){
             p.href = vp; p.target="_blank";
             p.innerHTML = '⛓ '+t("proof")+' · <span class="h">'+proof.proof_hash.slice(0,16)+'…</span>';
             cevap.appendChild(p);
+            // Tuzlu kanıt (salt + ts geldiyse). Gelmezse eski davranış.
+            if(typeof proof.salt === "string" && /^[0-9a-f]{64}$/.test(proof.salt) && proof.ts){
+              const k=document.createElement("div"); k.className="kanit";
+              k.innerHTML = '<div>ts <code>'+esc(String(proof.ts))+'</code></div>'
+                + '<div>salt <code>'+esc(proof.salt)+'</code></div>'
+                + '<div class="not">'+t("proofNote")+'</div>';
+              const b=document.createElement("button"); b.type="button"; b.className="kanitBtn"; b.textContent=t("proofDl");
+              const veri = kanitVerisi(proof, q, metin);
+              b.onclick = ()=>kanitIndir(veri);
+              k.appendChild(b); cevap.appendChild(k);
+            }
           }
           const nn = metin.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g,"").replace(/ı/g,"i");
           if(nn.includes("gorsel studyo")||nn.includes("/gorsel")){

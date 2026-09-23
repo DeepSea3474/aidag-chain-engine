@@ -6,7 +6,7 @@ class H(http.server.BaseHTTPRequestHandler):
         b=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
         if b.get("stream"):
             self.send_response(200); self.send_header("content-type","text/event-stream"); self.end_headers()
-            for p in ["Bu sahte ","beyin cevabidir: ","AIDAG testi."]:
+            for p in ["Bu sahte"," beyin\ncevabidir:\n\n"," AIDAG testi."]:
                 self.wfile.write(("data: "+json.dumps({"choices":[{"delta":{"content":p}}]})+"\n\n").encode())
             self.wfile.write(b"data: [DONE]\n\n")
         else:
