@@ -155,14 +155,67 @@ const BRAIN = window.KUBRA_BRAIN || "https://aidag-chain.com/kubra-brain";
 const $ = id => document.getElementById(id);
 const konusma = $("konusma");
 const SPIRAL = '<svg class="spiral" viewBox="0 0 24 24" fill="none" stroke="var(--acc2)" stroke-width="2" stroke-linecap="round"><path d="M12 3a9 9 0 1 1-9 9"/><path d="M12 7a5 5 0 1 0 5 5" opacity=".6"/></svg>';
-function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
-function linkify(txt){
-  let s = esc(txt);
-  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank">$1</a>');
-  s = s.replace(/(^|[^"=\/])((https?:\/\/)[^\s<)]+)/g,'$1<a href="$2" target="_blank">$2</a>');
-  s = s.replace(/(^|[\s(>])((?:www\.)?aidag-chain\.com\/[a-zA-Z]+)/g,'$1<a href="https://$2" target="_blank">$2</a>');
-  return s;
+// GUVENLI-BASLA — KUBRA cevabını DOM API ile işler: HTML string YOK, innerHTML YOK.
+// Aynı blok ask.html, ask-stream.html ve soulware-web/ask.html'de birebir aynıdır;
+// web-yedek/aidag/test/xss.test.js bu bloğu saldırı girdileriyle çalıştırır.
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
+const GUVENLI_KOK = "https://aidag-chain.com";
+// Yalnız https: mutlak adres veya site-içi göreli yol ("/..."). Diğer her şey (javascript:, data:,
+// http:, //baska-site, kontrol/bidi karakteri, tırnak, ters bölü) -> null (link yapılmaz, düz metin kalır).
+function guvenliUrl(ham){
+  if(typeof ham !== "string") return null;
+  const s = ham.trim();
+  if(!s || s.length > 2048) return null;
+  if(/[\u0000-\u0020\u007f-\u00a0\u00ad\u061c\u115f\u1160\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\u3000\ufeff\ufff9-\ufffb"'<>`\\]/.test(s)) return null;
+  let u;
+  try {
+    if(s[0] === "/"){
+      if(s[1] === "/") return null;
+      u = new URL(s, GUVENLI_KOK);
+      if(u.origin !== GUVENLI_KOK) return null;
+      const yol = u.pathname + u.search + u.hash;
+      return (yol[0] === "/" && yol[1] !== "/") ? yol : null;
+    }
+    u = new URL(s);
+  } catch(e){ return null; }
+  if(u.protocol !== "https:" || u.username || u.password || !u.hostname) return null;
+  return u.href;
 }
+function linkEkle(kap, metin, href){
+  const a = document.createElement("a");
+  a.href = href; a.target = "_blank"; a.rel = "noopener noreferrer"; a.title = href;
+  a.textContent = metin;
+  kap.appendChild(a);
+}
+// [metin](url) · https://… · (www.)aidag-chain.com/yol  -> <a>; geri kalan her şey metin düğümü.
+const LINK_RE = /\[([^\]\n]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>()"'`\[\]{}]+)|((?:www\.)?aidag-chain\.com\/[a-zA-Z]+)/g;
+function linkifyDom(kap, txt){
+  const s = String(txt == null ? "" : txt);
+  kap.textContent = "";
+  let son = 0, m;
+  LINK_RE.lastIndex = 0;
+  while((m = LINK_RE.exec(s))){
+    let metin, href;
+    if(m[1] !== undefined){ metin = m[1]; href = guvenliUrl(m[2]); }
+    else if(m[3] !== undefined){
+      let u = m[3];
+      const kuyruk = u.match(/[.,;:!?]+$/);
+      if(kuyruk){ u = u.slice(0, -kuyruk[0].length); LINK_RE.lastIndex -= kuyruk[0].length; }
+      metin = u; href = guvenliUrl(u);
+    } else {
+      const once = m.index > 0 ? s[m.index - 1] : "";
+      if(once && !/[\s(>]/.test(once)) continue;
+      metin = m[4]; href = guvenliUrl("https://" + m[4]);
+    }
+    if(!href) continue;
+    if(m.index > son) kap.appendChild(document.createTextNode(s.slice(son, m.index)));
+    linkEkle(kap, metin, href);
+    son = LINK_RE.lastIndex;
+  }
+  if(son < s.length) kap.appendChild(document.createTextNode(s.slice(son)));
+  return kap;
+}
+// GUVENLI-BITIS
 // KANIT-BASLA — kanıt dosyası içeriği (saf fonksiyon; sunucunun hash'lediği metin önceliklidir)
 function kanitVerisi(proof, soru, metin){
   return {
@@ -206,7 +259,7 @@ async function sor(){
     cevap.innerHTML = t("genOpen")+' <a href="/gorsel">'+t("genStudio")+'</a>';
     $("sor").disabled=false; $("soru").focus(); return;
   }
-  let metin = "", govde = null, kaynaklar = null;
+  let metin = "", govde = null, kaynaklar = null, hataVar = false;
   try {
     const r = await fetch(BRAIN+"/v1/ask-stream", {
       method:"POST", headers:{"Content-Type":"application/json"},
@@ -229,7 +282,7 @@ async function sor(){
         if(ev==="sources"){ try { kaynaklar = JSON.parse(data); } catch(e){} }
         else if(ev==="token"){
           if(!govde){ cevap.innerHTML=""; govde=document.createElement("div"); govde.className="cursor"; cevap.appendChild(govde); }
-          metin += data; govde.innerHTML = linkify(metin); kaydir();
+          metin += data; linkifyDom(govde, metin); kaydir();
         }
         else if(ev==="done"){
           if(govde) govde.classList.remove("cursor");
@@ -239,11 +292,13 @@ async function sor(){
             src.textContent = t("srcs")+": "+kaynaklar.map(k=>k.baslik).join(" · ");
             cevap.appendChild(src);
           }
-          if(proof && proof.proof_hash){
+          // proof_hash yalnız 64 hex; verify_path yalnız https:/site-içi yol (guvenliUrl) — yoksa zincir sorgusu.
+          if(proof && typeof proof.proof_hash === "string" && /^[0-9a-f]{64}$/.test(proof.proof_hash)){
             const p=document.createElement("a"); p.className="proof";
-            const vp = (proof.chain && proof.chain.verify_path) ? proof.chain.verify_path : ("/rpc/belge/"+proof.proof_hash);
-            p.href = vp; p.target="_blank";
-            p.innerHTML = '⛓ '+t("proof")+' · <span class="h">'+proof.proof_hash.slice(0,16)+'…</span>';
+            const vp = guvenliUrl(proof.chain && proof.chain.verify_path) || ("/rpc/belge/"+proof.proof_hash);
+            p.href = vp; p.target="_blank"; p.rel="noopener noreferrer";
+            p.appendChild(document.createTextNode('⛓ '+t("proof")+' · '));
+            const ph=document.createElement("span"); ph.className="h"; ph.textContent=proof.proof_hash.slice(0,16)+'…'; p.appendChild(ph);
             cevap.appendChild(p);
             // Tuzlu kanıt (salt + ts geldiyse). Gelmezse eski davranış.
             if(typeof proof.salt === "string" && /^[0-9a-f]{64}$/.test(proof.salt) && proof.ts){
@@ -265,10 +320,10 @@ async function sor(){
           }
           kaydir();
         }
-        else if(ev==="error"){ cevap.innerHTML = '<span style="color:#ff8a6a">'+esc(data||t("err"))+'</span>'; }
+        else if(ev==="error"){ hataVar = true; cevap.textContent=""; const e2=document.createElement("span"); e2.style.color="#ff8a6a"; e2.textContent=data||t("err"); cevap.appendChild(e2); }
       }
     }
-    if(!metin && !govde){ cevap.innerHTML='<span class="note">'+t("noanswer")+'</span>'; }
+    if(!metin && !govde && !hataVar){ cevap.innerHTML='<span class="note">'+t("noanswer")+'</span>'; }
   } catch(e){ cevap.innerHTML = '<span style="color:#ff8a6a">'+t("err")+'</span>'; }
   $("sor").disabled=false; $("soru").focus();
 }

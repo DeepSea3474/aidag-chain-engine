@@ -84,10 +84,43 @@
     throw new Error("bilinmeyen şablon: " + tur);
   }
 
-  function kurumSatiri(k) {
-    if (!k || !k.kayitli) return "Kaydeden adres zincirde kurum olarak kayıtlı değil.";
-    var ek = k.dogrulanmis === true ? " — doğrulanmış kurum" : " — beyan (doğrulanmamış)";
-    return (k.ad || "?") + (k.kategori ? " (" + k.kategori + ")" : "") + ek;
+  // Kurum adı/kategorisi zincirde BEYANDIR (saldırgan yazabilir). Gösterimden önce:
+  //  - Unicode yön (bidi) ve görünmez/kontrol karakterleri silinir (U+202A-202E, U+2066-2069, U+200E/F,
+  //    U+061C, C0/C1, sıfır genişlikli...) -> "beyan" etiketinin yönü/yeri değiştirilemez;
+  //  - çift tırnak benzerleri tek tırnağa indirilir -> ad, bizim koyduğumuz “…” tırnağını kapatamaz;
+  //  - uzunluk sınırlanır. Ad her zaman “tırnak içinde”, durum etiketi AYRI satırda yazılır:
+  //    adın içinde "doğrulanmış kurum" geçse bile bizim etiketimiz ayrı ve görünür kalır.
+  var KONTROL_RE = /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u115f\u1160\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\u3164\ufeff\ufff9-\ufffb]/g;
+  var TIRNAK_RE = /["\u201c\u201d\u201e\u201f\u00ab\u00bb\u2033\u301d\u301e\u301f\uff02]/g;
+  var KURUM_AD_MAX = 80, KATEGORI_MAX = 16, SATIR_MAX = 42; // SATIR_MAX: en geniş harfle (W) bile A4 çerçevesine sığar
+  function kurumMetni(s, max) {
+    var t = String(s == null ? "" : s);
+    if (t.normalize) t = t.normalize("NFC");
+    t = t.replace(KONTROL_RE, " ").replace(TIRNAK_RE, "'").replace(/\s+/g, " ").trim();
+    var h = Array.from(t);
+    if (h.length > max) t = h.slice(0, max - 1).join("") + "…";
+    return t;
+  }
+  function kurumAdi(ad) { return "\u201c" + (kurumMetni(ad, KURUM_AD_MAX) || "?") + "\u201d"; }
+  function kurumDurumu(k) { return (k && k.dogrulanmis === true) ? "doğrulanmış kurum" : "beyan (doğrulanmamış)"; }
+  // Uzun adı kelime sınırından SATIR_MAX'lık satırlara böler (tek kelime uzunsa keser).
+  function sar(metin, max) {
+    var out = [], satir = [];
+    metin.split(" ").forEach(function (kelime) {
+      var h = Array.from(kelime);
+      while (h.length > max) { if (satir.length) { out.push(satir.join(" ")); satir = []; } out.push(h.slice(0, max).join("")); h = h.slice(max); }
+      kelime = h.join("");
+      if (!kelime) return;
+      if (Array.from(satir.concat(kelime).join(" ")).length > max && satir.length) { out.push(satir.join(" ")); satir = []; }
+      satir.push(kelime);
+    });
+    if (satir.length) out.push(satir.join(" "));
+    return out;
+  }
+  function kurumSatirlari(k) {
+    if (!k || !k.kayitli) return ["Kaydeden adres zincirde kurum olarak kayıtlı değil."];
+    var kat = kurumMetni(k.kategori, KATEGORI_MAX);
+    return sar(kurumAdi(k.ad), SATIR_MAX).concat(["Durum: " + kurumDurumu(k) + (kat ? " · kategori \u201c" + kat + "\u201d" : "")]);
   }
 
   function kapak(v, h, bwip) {
@@ -106,7 +139,7 @@
     alan("Belge özeti (BLAKE3, 32 bayt)", [h.slice(0, 32), h.slice(32)], true);
     alan("Zincire kayıt zamanı", utc(v.zincir.zaman));
     alan("Kaydeden adres", v.zincir.kaydeden || "?");
-    alan("Kurum", kurumSatiri(v.kurum));
+    alan("Kurum", kurumSatirlari(v.kurum));
     alan("Ağ", "AIDAG-Chain Mainnet (Chain ID 3474)");
     alan("Kısa referans", kisaRefGoster(h));
     var qBoyut = 62, qx = (W - qBoyut) / 2, qy = y + 2;
@@ -192,5 +225,6 @@
   function dosyaAdi(s, hash) { return "aidag-belge-" + s.tur + "-" + kisaRef(hash).toLowerCase() + ".pdf"; }
 
   return { SITE: SITE, KURUM_UYARI: KURUM_UYARI, dogrulamaUrl: dogrulamaUrl, kisaRef: kisaRef, kisaRefGoster: kisaRefGoster,
-    utc: utc, sema: sema, svg: svg, pdf: pdf, dosyaAdi: dosyaAdi };
+    utc: utc, sema: sema, svg: svg, pdf: pdf, dosyaAdi: dosyaAdi,
+    kurumMetni: kurumMetni, kurumAdi: kurumAdi, kurumDurumu: kurumDurumu, kurumSatirlari: kurumSatirlari };
 });

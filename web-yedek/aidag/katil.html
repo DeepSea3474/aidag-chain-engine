@@ -273,6 +273,8 @@ async function katkiAdim(){
   } catch(e){ mesgul=false; durum(t("connErr"),""); }
 }
 
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
+// m: yalnız sabit metin + esc() edilmiş dinamik veri
 function hataGoster(m){ const h=$("hata"); h.innerHTML=m; h.classList.remove("hidden"); }
 function hataGizle(){ $("hata").classList.add("hidden"); }
 $("baslat").onclick = async () => {
@@ -299,7 +301,7 @@ $("baslat").onclick = async () => {
     $("soru").focus();
   } catch(e){
     $("yukdurum").textContent="";
-    hataGoster(t("startFail")(e.message)+"<br><span style='color:#93a1b3'>"+t("startTips")+"</span>");
+    hataGoster(t("startFail")(esc(e && e.message || e))+"<br><span style='color:#93a1b3'>"+t("startTips")+"</span>");
     $("baslat").disabled=false;
   }
 };
