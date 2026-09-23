@@ -462,7 +462,7 @@ impl YonetimRegistry {
 
     /// Imzaci/esik eylemini uygula. KENDINI KILITLEME KORUMASI: imzaci sayisi
     /// esigin altina dusurulemez; esik [ASGARI, imzaci sayisi] disina cikamaz.
-    /// Rol eylemi burada degil (node.rs).
+    /// Rol ve kurum dogrulama eylemleri burada degil (node.rs).
     pub fn yapi_degistir(&mut self, eylem: &crate::tx::YonetimEylemi) -> Result<(), YonetimHatasi> {
         use crate::tx::YonetimEylemi as E;
         match eylem {
@@ -493,7 +493,7 @@ impl YonetimRegistry {
                 }
                 self.esik = *m;
             }
-            E::Rol(_) => {}
+            E::Rol(_) | E::KurumDogrula { .. } => {}
         }
         Ok(())
     }

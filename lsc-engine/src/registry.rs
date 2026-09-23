@@ -456,6 +456,18 @@ pub struct KurumRegistry {
     /// acik (kendi kendine kayit); YETKI ise yalniz tip=17 ile verilir. BTreeMap:
     /// gezinme sirasi tum dugumlerde ayni (deterministik).
     yetkiler: BTreeMap<([u8; 20], u8, u32), RolKaydi>,
+    /// KURUM DOGRULAMA (yalniz M-of-N yonetim, tip=17): kurum -> son durum.
+    /// GOSTERIM bilgisidir: kurum/belge kayitlarini silmez, reddetmez; kaydi
+    /// olmayan kurum "dogrulanmamis" sayilir (geriye uyum).
+    dogrulamalar: BTreeMap<[u8; 20], KurumDogrulama>,
+}
+
+/// Bir kurumun dogrulama durumu (son degisiklik).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KurumDogrulama {
+    pub dogrulanmis: bool,
+    /// Son degisikligin zincir saati.
+    pub zaman: u64,
 }
 
 /// Bir kurumun bir roldeki durumu. Rol, `etkin` zincir saatinden itibaren ve
@@ -473,7 +485,35 @@ impl KurumRegistry {
         KurumRegistry {
             kayitlar: HashMap::new(),
             yetkiler: BTreeMap::new(),
+            dogrulamalar: BTreeMap::new(),
         }
+    }
+
+    /// Kurum dogrulama bayragini ayarla. Yalniz KAYITLI kurum (dogrulanan kimlik =
+    /// ilk kayitta sabitlenen ad + kategori). Durum ayniysa DOKUNULMAZ.
+    /// Donus: true = durum degisti.
+    pub fn dogrulama_ayarla(&mut self, kurum: [u8; 20], dogrulanmis: bool, zaman: u64) -> bool {
+        if !self.kayitlar.contains_key(&kurum) {
+            return false;
+        }
+        if self.dogrulamalar.get(&kurum).map(|d| d.dogrulanmis) == Some(dogrulanmis) {
+            return false;
+        }
+        if !dogrulanmis && !self.dogrulamalar.contains_key(&kurum) {
+            return false; // hic dogrulanmamis kurumdan kaldirilacak bir sey yok
+        }
+        self.dogrulamalar.insert(kurum, KurumDogrulama { dogrulanmis, zaman });
+        true
+    }
+
+    /// Kurumun dogrulama kaydi (hic islem gormediyse None = dogrulanmamis).
+    pub fn dogrulama(&self, kurum: &[u8; 20]) -> Option<KurumDogrulama> {
+        self.dogrulamalar.get(kurum).copied()
+    }
+
+    /// Kurum SU AN dogrulanmis mi?
+    pub fn dogrulanmis_mi(&self, kurum: &[u8; 20]) -> bool {
+        self.dogrulamalar.get(kurum).is_some_and(|d| d.dogrulanmis)
     }
 
     /// Kuruma rol ver; `etkin` zincir saatinden itibaren gecerli. Kurum

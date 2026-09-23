@@ -413,6 +413,17 @@ impl NodeState {
         self.kurum_registry.sorgula(adres)
     }
 
+    /// Kurum dogrulama kaydi (yalniz M-of-N yonetim verir/geri alir).
+    /// None = hic dogrulanmamis. Kurum kaydi yoksa da None.
+    pub fn kurum_dogrulama(&self, adres: &[u8; 20]) -> Option<crate::registry::KurumDogrulama> {
+        self.kurum_registry.dogrulama(adres)
+    }
+
+    /// Kurum SU AN "dogrulanmis kurum" mu? (kayitsiz/hic dogrulanmamis -> false)
+    pub fn kurum_dogrulanmis_mi(&self, adres: &[u8; 20]) -> bool {
+        self.kurum_registry.dogrulanmis_mi(adres)
+    }
+
     /// Kayitli kurum/firma sayisi.
     pub fn kurum_sayisi(&self) -> usize {
         self.kurum_registry.len()
@@ -1595,8 +1606,18 @@ impl NodeState {
                             y.yetkilendir(&islem, self.network_id, self.zincir_saati).is_ok()
                         });
                     if yetkili {
-                        if let crate::tx::YonetimEylemi::Rol(r) = &islem.eylem {
-                            self.rwa_rol_eylemi(r);
+                        match &islem.eylem {
+                            crate::tx::YonetimEylemi::Rol(r) => self.rwa_rol_eylemi(r),
+                            // Kurum dogrulama: yalniz GOSTERIM bayragi (belge/kurum
+                            // kayitlarina dokunmaz). Kayitsiz kurum -> etkisiz.
+                            crate::tx::YonetimEylemi::KurumDogrula { kurum, dogrulanmis } => {
+                                self.kurum_registry.dogrulama_ayarla(
+                                    *kurum,
+                                    *dogrulanmis,
+                                    self.zincir_saati,
+                                );
+                            }
+                            _ => {}
                         }
                         if let Some(y) = self.rwa_yonetim.as_mut() {
                             // Imzaci/esik eylemi: kilitleme korumasi ihlalinde etkisiz.
@@ -5985,6 +6006,172 @@ mod rwa_tests {
         // 4) Bir bayat_sn sonra yine bayatlar (eski tarihli vertex sureyi uzatmaz).
         k.ilerle(3_601);
         assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::Bayat);
+    }
+
+    // ===== KURUM DOGRULAMA (M-of-N, yalniz gosterim; geriye uyumlu) =====
+
+    fn dogrula(kurum: [u8; 20], d: bool) -> YonetimEylemi {
+        YonetimEylemi::KurumDogrula { kurum, dogrulanmis: d }
+    }
+
+    #[test]
+    fn rwa_kurum_dogrulama_m_of_n_ile_verilir_ve_geri_alinir() {
+        let mut k = Kurulum::yeni();
+        let r = anahtar(0xA1);
+        k.kurum_kaydet(&r, "Tapu Mudurlugu");
+        k.gonder(&r, crate::tx::Record::new([0x11; 32]).encode());
+        assert!(!k.node.kurum_dogrulanmis_mi(&adres(&r)), "baslangic: dogrulanmamis");
+        // Tek imza: RED.
+        k.yonet(dogrula(adres(&r), true), &[0]);
+        assert!(!k.node.kurum_dogrulanmis_mi(&adres(&r)));
+        assert_eq!(k.nonce(), 0);
+        // 2-of-3: dogrulanmis.
+        let ver = k.islem(dogrula(adres(&r), true), &[1, 2]);
+        k.gonder(&anahtar(0x77), ver.encode());
+        assert!(k.node.kurum_dogrulanmis_mi(&adres(&r)));
+        assert_eq!(k.node.kurum_dogrulama(&adres(&r)).unwrap().zaman, k.t);
+        // Geri alma da 2-of-3; tek imza geri ALAMAZ.
+        k.yonet(dogrula(adres(&r), false), &[2]);
+        assert!(k.node.kurum_dogrulanmis_mi(&adres(&r)), "tek imza geri alamaz");
+        k.yonet(dogrula(adres(&r), false), &[0, 2]);
+        assert!(!k.node.kurum_dogrulanmis_mi(&adres(&r)));
+        // REPLAY: eski "dogrula" islemi yeniden gonderilir -> etkisiz.
+        k.gonder(&anahtar(0x78), ver.encode());
+        assert!(!k.node.kurum_dogrulanmis_mi(&adres(&r)), "replay reddedildi");
+        // Belge kaydi tum bu surecte AYNEN duruyor.
+        let b = k.node.belge_dogrula(&[0x11; 32]).unwrap();
+        assert_eq!(b.kaydeden, adres(&r));
+    }
+
+    #[test]
+    fn rwa_kurum_dogrulama_owner_kurum_ve_kayitsiz_adrese_verilmez() {
+        let mut k = Kurulum::yeni();
+        let r = anahtar(0xA2);
+        k.kurum_kaydet(&r, "Kendini Dogrulayan AS");
+        // Kurum kendini (kendi imzasiyla, iki kez) dogrulayamaz.
+        k.gonder(&r, imzali(dogrula(adres(&r), true), 0, k.t + 60, &[&r, &r]).encode());
+        // Owner + bir yonetim imzacisi = 1 gecerli imza < 2.
+        let osk = k.osk.clone();
+        k.gonder(&osk, imzali(dogrula(adres(&r), true), 0, k.t + 60, &[&osk, &k.ys[0]]).encode());
+        assert!(!k.node.kurum_dogrulanmis_mi(&adres(&r)));
+        assert_eq!(k.nonce(), 0);
+        // Kayitsiz adres: 2-of-3 imzayla bile dogrulanmis OLMAZ (kimlik yok).
+        let kayitsiz = [0xD7; 20];
+        k.yonet(dogrula(kayitsiz, true), &[0, 1]);
+        assert!(!k.node.kurum_dogrulanmis_mi(&kayitsiz));
+        assert!(k.node.kurum_dogrulama(&kayitsiz).is_none());
+    }
+
+    /// GERIYE UYUM: dogrulama mevcut kurum/belge kayitlarini SILMEZ, REDDETMEZ,
+    /// DEGISTIRMEZ; dogrulanmamis kurumun yeni belgesi de kabul edilir.
+    #[test]
+    fn rwa_kurum_dogrulama_mevcut_kayitlari_bozmaz() {
+        let mut k = Kurulum::yeni();
+        let a = anahtar(0xA3);
+        let b = anahtar(0xA4);
+        let bireysel = anahtar(0xA5); // kurum kaydi olmayan belge sahibi
+        k.gonder(&a, KurumKaydiTx::new(0, "Nufus Mudurlugu".into()).encode());
+        k.gonder(&b, KurumKaydiTx::new(1, "Ozel Lab".into()).encode());
+        for (sk, h) in [(&a, 0x21u8), (&b, 0x22), (&bireysel, 0x23)] {
+            k.gonder(sk, crate::tx::Record::new([h; 32]).encode());
+        }
+        let hashler = [[0x21u8; 32], [0x22; 32], [0x23; 32]];
+        let adresler = [adres(&a), adres(&b), adres(&bireysel)];
+        let goruntu = |n: &NodeState| {
+            (
+                hashler.iter().map(|h| n.belge_dogrula(h)).collect::<Vec<_>>(),
+                adresler.iter().map(|x| n.kurum_sorgula(x).cloned()).collect::<Vec<_>>(),
+                n.belge_sayisi(),
+                n.kurum_sayisi(),
+            )
+        };
+        let once = goruntu(&k.node);
+        assert!(once.0.iter().all(|x| x.is_some()));
+        // a dogrulanir, b dogrulanir sonra geri alinir, bireysel denenir (kayitsiz).
+        k.yonet(dogrula(adres(&a), true), &[0, 1]);
+        k.yonet(dogrula(adres(&b), true), &[0, 1]);
+        k.yonet(dogrula(adres(&b), false), &[1, 2]);
+        k.yonet(dogrula(adres(&bireysel), true), &[0, 2]);
+        assert_eq!(goruntu(&k.node), once, "kayitlar birebir ayni");
+        assert!(k.node.kurum_dogrulanmis_mi(&adres(&a)));
+        assert!(!k.node.kurum_dogrulanmis_mi(&adres(&b)));
+        assert!(!k.node.kurum_dogrulanmis_mi(&adres(&bireysel)));
+        // Dogrulanmamis kurumun YENI belgesi reddedilmez; ilk kayit kazanir kurali ayni.
+        k.gonder(&b, crate::tx::Record::new([0x24; 32]).encode());
+        assert_eq!(k.node.belge_dogrula(&[0x24; 32]).unwrap().kaydeden, adres(&b));
+        k.gonder(&a, crate::tx::Record::new([0x22; 32]).encode());
+        assert_eq!(k.node.belge_dogrula(&[0x22; 32]).unwrap().kaydeden, adres(&b), "ilk kayit korunur");
+        // Taze dugum (replay) ayni sonucu uretir.
+        let pks: Vec<[u8; 32]> = k.ys.iter().map(yonetim_pk).collect();
+        let mut taze = NodeState::new_devnet(NET);
+        taze.faucet_owner_ayarla(adres(&k.osk));
+        taze.rwa_yonetim_kur(&pks, 2).unwrap();
+        for vb in k.node.export_vertices() {
+            taze.ingest_synced(&vb);
+        }
+        assert_eq!(goruntu(&taze), goruntu(&k.node));
+        for x in &adresler {
+            assert_eq!(taze.kurum_dogrulama(x), k.node.kurum_dogrulama(x));
+        }
+    }
+
+    /// MAINNET: pinli genesis + mevcut tipte vertex'ler (belge, kurum) ve bir kurum
+    /// dogrulama denemesi. Genesis id ayni; kayitlar, dogrulama denemesi olmayan
+    /// dugumle BIREBIR ayni; mainnet'te yonetim kurulmamis/RWA kapali -> hic kimse
+    /// dogrulanmis olmaz.
+    #[test]
+    fn rwa_mainnet_genesis_ve_mevcut_vertexler_kurum_dogrulamadan_etkilenmez() {
+        let net = crate::mainnet::MAINNET_NETWORK_ID;
+        let t0 = crate::mainnet::ON_SATIS_BASLANGIC;
+        let kurum = anahtar(0xB1);
+        let ys = yonetim_anahtarlari();
+        let yukle = |dogrulama_denemesi: bool| {
+            let mut m = NodeState::new_mainnet();
+            let gid = m.ingest(&crate::mainnet::genesis_wire(), t0).expect("pinli genesis");
+            assert_eq!(gid, crate::mainnet::genesis_id());
+            let mut son = gid;
+            // (imzalayan, payload, SABIT zaman): iki dugumde ayni vertex'ler ayni zamanda.
+            let mut payloadlar = vec![
+                (kurum.clone(), KurumKaydiTx::new(0, "Tapu Mudurlugu".into()).encode(), t0),
+                (kurum.clone(), crate::tx::Record::new([0x31; 32]).encode(), t0 + 1),
+                (anahtar(0xB2), crate::tx::Record::new([0x32; 32]).encode(), t0 + 2),
+            ];
+            if dogrulama_denemesi {
+                let mut y = YonetimIslemi {
+                    nonce: 0,
+                    son_gecerlilik: u64::MAX,
+                    eylem: dogrula(adres(&kurum), true),
+                    imzalar: vec![],
+                };
+                let msg = y.imza_mesaji(net);
+                y.imzalar = ys[..2].iter().map(|sk| (yonetim_pk(sk), sk.sign(&msg).to_bytes())).collect();
+                payloadlar.push((anahtar(0x77), y.encode(), t0 + 3));
+            }
+            payloadlar.push((anahtar(0xB2), crate::tx::Record::new([0x33; 32]).encode(), t0 + 4));
+            for (sk, p, zt) in payloadlar {
+                let v = Vertex::new_signed(net, vec![son], p, zt, &sk).unwrap();
+                assert!(matches!(
+                    m.ingest_networked(&wire::encode(&v), t0 + 10),
+                    NetworkIngestOutcome::Integrated(_)
+                ));
+                son = *v.id();
+            }
+            m
+        };
+        let temiz = yukle(false);
+        let denemeli = yukle(true);
+        for h in [[0x31u8; 32], [0x32; 32], [0x33; 32]] {
+            assert!(denemeli.belge_dogrula(&h).is_some());
+            assert_eq!(denemeli.belge_dogrula(&h), temiz.belge_dogrula(&h));
+        }
+        assert_eq!(denemeli.kurum_sorgula(&adres(&kurum)), temiz.kurum_sorgula(&adres(&kurum)));
+        assert_eq!((denemeli.belge_sayisi(), denemeli.kurum_sayisi()), (3, 1));
+        assert!(!denemeli.kurum_dogrulanmis_mi(&adres(&kurum)), "mainnet: dogrulama etkisiz");
+        assert!(denemeli.kurum_dogrulama(&adres(&kurum)).is_none());
+        // Dagitim bakiyeleri de ayni.
+        for a in crate::mainnet::dagitim_adresleri() {
+            assert_eq!(denemeli.bakiye(&a), temiz.bakiye(&a));
+        }
     }
 
     #[test]

@@ -77,4 +77,29 @@ fn mainnet_replay_ozet() {
             hex::encode(a), st.bakiye(a), st.lsc_bakiye(a), st.beklenen_nonce(a)
         );
     }
+    // BELGE / KURUM KAYITLARI (tek tek): dosyadaki her tip=1 hash'i ve her tip=5
+    // imzalayani icin turetilmis kayit. Yalniz main'de de var olan API kullanilir
+    // -> eski ve yeni kodla AYNI dosyada birebir karsilastirilabilir.
+    let mut belge_hashleri: BTreeSet<[u8; 32]> = BTreeSet::new();
+    let mut kurum_adresleri: BTreeSet<[u8; 20]> = BTreeSet::new();
+    for b in &ham {
+        let Ok(v) = lsc_engine::dag::wire::decode(b) else { continue };
+        match v.payload().first() {
+            Some(&lsc_engine::TX_TYPE_RECORD) => {
+                if let Ok(r) = lsc_engine::Record::decode(v.payload()) {
+                    belge_hashleri.insert(r.data_hash);
+                }
+            }
+            Some(&5) => {
+                kurum_adresleri.insert(lsc_engine::public_key_to_adres(v.public_key()));
+            }
+            _ => {}
+        }
+    }
+    for h in &belge_hashleri {
+        println!("OZET belge hash={} {:?}", hex::encode(h), st.belge_dogrula(h));
+    }
+    for a in &kurum_adresleri {
+        println!("OZET kurum adres=0x{} {:?}", hex::encode(a), st.kurum_sorgula(a));
+    }
 }

@@ -1737,6 +1737,7 @@ const YONETIM_EYLEM_ROL: u8 = 0;
 const YONETIM_EYLEM_IMZACI_EKLE: u8 = 1;
 const YONETIM_EYLEM_IMZACI_CIKAR: u8 = 2;
 const YONETIM_EYLEM_ESIK: u8 = 3;
+const YONETIM_EYLEM_KURUM_DOGRULA: u8 = 4;
 const YONETIM_IMZA_LEN: usize = 32 + 64;
 
 /// M-of-N yonetim eylemi.
@@ -1750,6 +1751,9 @@ pub enum YonetimEylemi {
     ImzaciCikar([u8; 32]),
     /// Esigi (M) degistir.
     Esik(u8),
+    /// Kurumu "dogrulanmis" isaretle (`true`) ya da isareti kaldir (`false`).
+    /// Yalniz GOSTERIM bilgisidir: mevcut belge/kurum kayitlarini silmez/reddetmez.
+    KurumDogrula { kurum: [u8; ADDR_LEN], dogrulanmis: bool },
 }
 
 /// tip=17 cozulmus: yonetim eylemi + cevrimdisi imzalar.
@@ -1790,6 +1794,11 @@ impl YonetimIslemi {
             YonetimEylemi::Esik(m) => {
                 out.push(YONETIM_EYLEM_ESIK);
                 out.push(*m);
+            }
+            YonetimEylemi::KurumDogrula { kurum, dogrulanmis } => {
+                out.push(YONETIM_EYLEM_KURUM_DOGRULA);
+                out.extend_from_slice(kurum);
+                out.push(u8::from(*dogrulanmis));
             }
         }
         out
@@ -1842,6 +1851,16 @@ impl YonetimIslemi {
                 (e, 32)
             }
             YONETIM_EYLEM_ESIK => (YonetimEylemi::Esik(*bytes.get(govde_bas).ok_or_else(kisa)?), 1),
+            YONETIM_EYLEM_KURUM_DOGRULA => {
+                let g = bytes.get(govde_bas..govde_bas + ADDR_LEN + 1).ok_or_else(kisa)?;
+                let dogrulanmis = match g[ADDR_LEN] {
+                    0 => false,
+                    1 => true,
+                    _ => return Err(TxError::GecersizAlan("dogrulama 0/1 olmali")),
+                };
+                let kurum = oku::<ADDR_LEN>(g, 0);
+                (YonetimEylemi::KurumDogrula { kurum, dogrulanmis }, ADDR_LEN + 1)
+            }
             _ => return Err(TxError::GecersizAlan("bilinmeyen yonetim eylemi")),
         };
         let say_i = govde_bas + govde_len;
@@ -2064,6 +2083,8 @@ mod rwa_tx_tests {
             YonetimEylemi::ImzaciEkle([0xB2; 32]),
             YonetimEylemi::ImzaciCikar([0xB3; 32]),
             YonetimEylemi::Esik(2),
+            YonetimEylemi::KurumDogrula { kurum: [0xC4; 20], dogrulanmis: true },
+            YonetimEylemi::KurumDogrula { kurum: [0xC4; 20], dogrulanmis: false },
         ];
         for e in eylemler {
             for k in [1, 2, RWA_YONETIM_AZAMI_IMZA] {
@@ -2105,6 +2126,10 @@ mod rwa_tx_tests {
         let mut islem = yonetim(YonetimEylemi::Rol(KurumYetki::new([1; 20], 2, 0, true)), 2).encode();
         islem[18 + 25] = 2;
         assert!(matches!(YonetimIslemi::decode(&islem), Err(TxError::GecersizAlan(_))));
+        // kurum dogrulama bayragi yalniz 0/1
+        let mut d = yonetim(YonetimEylemi::KurumDogrula { kurum: [1; 20], dogrulanmis: true }, 2).encode();
+        d[18 + 20] = 2;
+        assert!(matches!(YonetimIslemi::decode(&d), Err(TxError::GecersizAlan(_))));
     }
 
     #[test]

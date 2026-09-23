@@ -105,13 +105,30 @@ async fn kurum(State(st): State<RpcState>, Path(adres_hex): Path<String>) -> Jso
                 "kategori": kat,
                 "zaman": k.zaman,
                 "roller": rol_listesi(&node, &adres),
+                "dogrulanmis": node.kurum_dogrulanmis_mi(&adres),
+                "dogrulama_durumu": kurum_durumu_metni(&node, &adres),
+                "dogrulama_zamani": node.kurum_dogrulama(&adres).map(|d| d.zaman),
             }))
         }
         None => Json(json!({
             "ok": true,
             "kayitli": false,
             "adres": adres_hex.trim(),
+            "dogrulanmis": false,
+            "dogrulama_durumu": kurum_durumu_metni(&node, &adres),
         })),
+    }
+}
+
+/// Kurum dogrulama durumunun okunur metni (GERIYE UYUMLU ek bilgi; hicbir kaydi
+/// reddetmez). Dogrulama yalniz M-of-N yonetimce verilir (tip=17).
+fn kurum_durumu_metni(node: &lsc_engine::NodeState, adres: &[u8; 20]) -> &'static str {
+    if node.kurum_sorgula(adres).is_none() {
+        "kurum kaydi yok"
+    } else if node.kurum_dogrulanmis_mi(adres) {
+        "dogrulanmis kurum"
+    } else {
+        "dogrulanmamis kurum"
     }
 }
 
@@ -248,13 +265,29 @@ async fn belge(State(st): State<RpcState>, Path(hash_hex): Path<String>) -> Json
     h.copy_from_slice(&hash_bytes);
     let node = st.node.read().await;
     match node.belge_dogrula(&h) {
-        Some(kayit) => Json(json!({
-            "ok": true,
-            "kayitli": true,
-            "hash": hash_hex.trim(),
-            "kaydeden": hex::encode(kayit.kaydeden),
-            "zaman": kayit.zaman,
-        })),
+        Some(kayit) => {
+            // EK (geriye uyumlu): kaydeden adresin kurum kimligi ve SU ANKI dogrulama
+            // durumu. Belge kaydi dogrulamadan bagimsiz olarak aynen gecerlidir.
+            let kurum = node.kurum_sorgula(&kayit.kaydeden).map(|k| {
+                json!({
+                    "ad": k.ad,
+                    "kategori": match k.kategori {
+                        lsc_engine::KurumKategori::Devlet => "devlet",
+                        lsc_engine::KurumKategori::Ozel => "ozel",
+                    },
+                    "dogrulanmis": node.kurum_dogrulanmis_mi(&kayit.kaydeden),
+                })
+            });
+            Json(json!({
+                "ok": true,
+                "kayitli": true,
+                "hash": hash_hex.trim(),
+                "kaydeden": hex::encode(kayit.kaydeden),
+                "zaman": kayit.zaman,
+                "kaydeden_kurum": kurum,
+                "kurum_durumu": kurum_durumu_metni(&node, &kayit.kaydeden),
+            }))
+        }
         None => Json(json!({
             "ok": true,
             "kayitli": false,
@@ -1430,10 +1463,41 @@ mod rwa_rpc_testleri {
         assert_eq!(v["roller"].as_array().unwrap().len(), 2, "{v}");
         assert!(v["roller"].as_array().unwrap().iter().all(|r| r["aktif"] == true));
 
+        // KURUM DOGRULAMA gosterimi (geriye uyumlu): eski alanlar aynen, ek alanlar yeni.
+        let Json(v) = super::kurum(State(st.clone()), Path(hex::encode(kurum_adr))).await;
+        assert_eq!(v["dogrulanmis"], false);
+        assert_eq!(v["dogrulama_durumu"], "dogrulanmamis kurum");
+        assert_eq!(v["ad"], "Rafineri");
+        {
+            let mut n = st.node.write().await;
+            let mut g = lsc_engine::Vertex::new_signed(NET, n.tips(), lsc_engine::tx::Record::new([0x99; 32]).encode(), t, &kurum).unwrap();
+            n.ingest_networked(&lsc_engine::dag::wire::encode(&g), t);
+            let mut i = YonetimIslemi {
+                nonce: 2,
+                son_gecerlilik: u64::MAX,
+                eylem: YonetimEylemi::KurumDogrula { kurum: kurum_adr, dogrulanmis: true },
+                imzalar: vec![],
+            };
+            let m = i.imza_mesaji(NET);
+            i.imzalar = ys[1..].iter().map(|k| (k.verifying_key().to_bytes(), k.sign(&m).to_bytes())).collect();
+            g = lsc_engine::Vertex::new_signed(NET, vec![*g.id()], i.encode(), t, &owner).unwrap();
+            n.ingest_networked(&lsc_engine::dag::wire::encode(&g), t);
+        }
+        let Json(v) = super::kurum(State(st.clone()), Path(hex::encode(kurum_adr))).await;
+        assert_eq!(v["dogrulanmis"], true, "{v}");
+        assert_eq!(v["dogrulama_durumu"], "dogrulanmis kurum");
+        let Json(v) = belge(State(st.clone()), Path(hex::encode([0x99u8; 32]))).await;
+        assert_eq!(v["kayitli"], true, "{v}");
+        assert_eq!(v["kaydeden"], hex::encode(kurum_adr));
+        assert_eq!(v["kurum_durumu"], "dogrulanmis kurum");
+        assert_eq!(v["kaydeden_kurum"]["ad"], "Rafineri");
+        let Json(v) = super::kurum(State(st.clone()), Path("ee".repeat(20))).await;
+        assert_eq!((v["kayitli"].clone(), v["dogrulama_durumu"].clone()), (json!(false), json!("kurum kaydi yok")));
+
         let Json(v) = rwa_yonetim(State(st.clone())).await;
         assert_eq!(v["kurulu"], true, "{v}");
         assert_eq!(v["esik"], 2);
-        assert_eq!(v["sonraki_nonce"], 2);
+        assert_eq!(v["sonraki_nonce"], 3);
         assert_eq!(v["imzacilar"].as_array().unwrap().len(), 3);
     }
 }

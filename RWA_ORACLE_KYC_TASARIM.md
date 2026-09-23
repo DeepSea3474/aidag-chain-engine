@@ -20,7 +20,8 @@ Dal: `rwa-oracle-kyc` · Durum: GELISTIRME (mainnet'te KAPALI, `RWA_MAINNET_AKTI
 | 20 | KYC_KAYIT | kyc rolu aktif kurum | adres:20, durum:1, kanit_hash:32 — 54 B |
 
 ## M-of-N yonetim (tip=17)
-- Eylemler: 0=rol (kurum:20, rol:1, kapsam:4, islem:1), 1=imzaci ekle (pk:32), 2=imzaci cikar (pk:32), 3=esik (1 B).
+- Eylemler: 0=rol (kurum:20, rol:1, kapsam:4, islem:1), 1=imzaci ekle (pk:32), 2=imzaci cikar (pk:32), 3=esik (1 B),
+  4=kurum dogrula (kurum:20, dogrulanmis:1).
 - Baslangic 2-of-3. Imzaci ve esik degisikligi de AYNI M-of-N ile.
 - Imzalanan mesaj: `"AIDAG-RWA-YONETIM-v1" || network_id(4) || nonce || son_gecerlilik || eylem`.
   Imzalar cevrimdisi uretilir; ozel anahtarlar sunucuda TUTULMAZ. Vertex'i herkes aktarabilir.
@@ -49,6 +50,16 @@ Dal: `rwa-oracle-kyc` · Durum: GELISTIRME (mainnet'te KAPALI, `RWA_MAINNET_AKTI
   Durmus akis, ardisik bir tur adayi `kesici_bps` icinde dogrularsa yeniden acilir (owner mudahalesi yok).
 - Okuma (`latestRoundData` karsiligi): durmus ya da `zincir_saati - guncelleme > bayat_sn` ise HATA.
 - Akis basina son 1024 tur saklanir.
+
+## Kurum dogrulama (belge dogrulama icin, geriye uyumlu)
+- `dogrulanmis` bayragi YALNIZ M-of-N yonetimle (tip=17 eylem 4) verilir/geri alinir; yalniz kayitli kuruma.
+- Yalniz GOSTERIM bilgisidir: mevcut belge (tip=1) ve kurum (tip=5) kayitlari silinmez, reddedilmez,
+  degismez; dogrulanmamis kurumun yeni belgesi de kabul edilir. Hic islem gormemis kurum = dogrulanmamis.
+- RPC (yalniz EK alanlar, mevcut alanlar aynen):
+  `/kurum/:adres` -> `dogrulanmis`, `dogrulama_durumu` ("dogrulanmis kurum" / "dogrulanmamis kurum" /
+  "kurum kaydi yok"), `dogrulama_zamani`; `/belge/:hash` -> `kaydeden_kurum`, `kurum_durumu`.
+- Gosterilen durum SU ANKI durumdur (belge anindaki degil).
+- Mainnet: RWA kapali + yonetim kurulmamis -> etkisiz. Replay (3850 vertex, 3736 belge, 0 kurum) main ile birebir.
 
 ## KYC
 - Kayit anahtari (adres, kurum): her kurum yalniz KENDI onayini verir/iptal eder.
