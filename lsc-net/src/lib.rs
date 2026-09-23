@@ -57,7 +57,7 @@ struct LscBehaviour {
     /// Otomatik peer kesfi (yerel ag, mDNS). Manuel IP girmeden node'lar
     /// birbirini bulur. NOT: sadece yerel ag (LAN); internet-olcegi kesif
     /// (bootstrap/Kademlia) ileride.
-    mdns: mdns::tokio::Behaviour,
+    mdns: libp2p::swarm::behaviour::toggle::Toggle<mdns::tokio::Behaviour>,
 }
 
 /// Vertex'lerin yayinlandigi gossipsub topic adi.
@@ -152,6 +152,9 @@ pub async fn run_node(
             };
             let gossipsub_config = gossipsub::ConfigBuilder::default()
                 .heartbeat_interval(Duration::from_secs(10))
+                // Islem payload siniri (MAX_ISLEM_PAYLOAD=60 KiB) + vertex zarfi.
+                // Acikca: varsayilan 64 KiB sinirda gecerli vertex'i dusurebiliyordu.
+                .max_transmit_size(128 * 1024)
                 .validation_mode(gossipsub::ValidationMode::Strict)
                 .message_id_fn(message_id_fn)
                 .build()
@@ -177,8 +180,15 @@ pub async fn run_node(
             // Otomatik peer kesfi (mDNS, yerel ag). Manuel IP girmeden node'lar
             // birbirini bulur; kesfedilen peer'a otomatik dial edilir (event
             // kolunda). NOT: sadece yerel ag (LAN); internet-olcegi kesif ileride.
-            let mdns =
-                mdns::tokio::Behaviour::new(mdns::Config::default(), key.public().to_peer_id())?;
+            // DENETIM DUZELTMESI: MAINNET'te mDNS KAPALI (yerel agdaki yabanci
+            // dugumlere otomatik baglanma yok; hickory-proto mDNS DoS aciklari
+            // RUSTSEC-2026-0118/0119 yuzeyi de kapanir). Devnet/testnet'te acik.
+            let mdns_ac = std::env::var("LSC_MAINNET").ok().as_deref() != Some("1");
+            let mdns = libp2p::swarm::behaviour::toggle::Toggle::from(if mdns_ac {
+                Some(mdns::tokio::Behaviour::new(mdns::Config::default(), key.public().to_peer_id())?)
+            } else {
+                None
+            });
 
             Ok(LscBehaviour {
                 gossipsub,
@@ -440,10 +450,22 @@ pub async fn run_node(
                     // girer -> gecemeyen ASLA eklenmez (guvenlik korunur). Verify
                     // burada BIR KEZ yapilir; ingest_synced_preverified tekrar etmez.
                     use rayon::prelude::*;
+                    // DENETIM DUZELTMESI: diskte (eski surumun yazdigi) GELECEK
+                    // tarihli vertex varsa yukleme reddeder (duvar saati + kayma payi).
+                    // Mesru gecmis hic gelecekte olamaz; boylece gelecek tarihli orphan
+                    // restart'ta zincir saatini ileri itemez.
+                    let duvar = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    let ust_sinir = duvar.saturating_add(lsc_engine::MAX_CLOCK_SKEW_SECS);
                     let decoded: Vec<DecodedVertex> = vertices
                         .par_iter()
                         .filter_map(|bytes| {
                             let v = lsc_engine::dag::wire::decode(bytes).ok()?;
+                            if v.timestamp() > ust_sinir {
+                                return None;
+                            }
                             // KRITIK: imza+butunluk dogrula; gecmezse None -> elenir.
                             v.verify().ok()?;
                             let id = *v.id();
@@ -622,6 +644,9 @@ pub async fn run_node(
     // ileride operasyon icin: node sagligi/senkronu bir bakista gorunur.
     let mut status_tick = tokio::time::interval(Duration::from_secs(15));
     status_tick.tick().await; // ilk tick'i atla
+    // DENETIM DUZELTMESI: push-sync hiz siniri (yeni peer kimlikleriyle tekrar
+    // tekrar abone olunarak tum DAG'in yeniden yayinlatilmasi = buyutme DoS'u).
+    let mut son_push_sync: Option<std::time::Instant> = None;
 
     loop {
         tokio::select! {
@@ -779,6 +804,15 @@ pub async fn run_node(
                 }
             }
             _ = status_tick.tick() => {
+                // DENETIM DUZELTMESI: orphan havuzu TTL temizligi (eskiden hic
+                // cagrilmiyordu; sahte-ebeveynli vertex'ler havuzu kalici doldurabiliyordu).
+                {
+                    let mut st = node_state.write().await;
+                    let silinen = st.clean_orphans(Duration::from_secs(600));
+                    if silinen > 0 {
+                        tracing::info!("Orphan temizligi: {silinen} suresi dolan vertex silindi");
+                    }
+                }
                 let (vc, oc, tc, ts, sn) = {
                     let st = node_state.read().await;
                     (
@@ -919,6 +953,11 @@ pub async fn run_node(
                         // TODO(olceklenme): Bu, her yeni peer'da TUM gecmisi TUM aga
                         // yeniden yayinlar (verimsiz). Gercek testnet oncesi PULL SYNC
                         // (request-response) ile degistirilmeli.
+                        if son_push_sync.is_some_and(|t| t.elapsed() < Duration::from_secs(60)) {
+                            tracing::info!("Push sync atlandi (hiz siniri, <60 sn); peer pull-sync kullanir: {peer_id}");
+                            continue;
+                        }
+                        son_push_sync = Some(std::time::Instant::now());
                         let all_vertices = {
                             let st = node_state.read().await;
                             st.export_vertices()
@@ -956,8 +995,21 @@ pub async fn run_node(
                                     let st = node_state.read().await;
                                     let all = st.export_vertices();
                                     let total = all.len() as u64;
-                                    let parca: Vec<Vec<u8>> =
-                                        all.into_iter().skip(off).take(SYNC_CHUNK).collect();
+                                    // DENETIM DUZELTMESI: parca BAYT butcesiyle de sinirli
+                                    // (CBOR ~2x buyutur; request-response yanit siniri 10 MiB).
+                                    // Buyuk vertex'ler senkronu kilitlemesin; en az 1 vertex.
+                                    const SYNC_BAYT_BUTCESI: usize = 4 * 1024 * 1024;
+                                    let mut toplam_bayt = 0usize;
+                                    let parca: Vec<Vec<u8>> = all
+                                        .into_iter()
+                                        .skip(off)
+                                        .take(SYNC_CHUNK)
+                                        .take_while(|v| {
+                                            let ilk = toplam_bayt == 0;
+                                            toplam_bayt += v.len();
+                                            ilk || toplam_bayt <= SYNC_BAYT_BUTCESI
+                                        })
+                                        .collect();
                                     (parca, total)
                                 };
                                 let n = parca.len();

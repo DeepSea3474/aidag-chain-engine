@@ -37,7 +37,7 @@ pub use dag::vertex::{
     Vertex, VertexError, VertexId, DOMAIN_TAG, FORMAT_VERSION, MAX_PARENTS, MAX_PAYLOAD_BYTES,
 };
 
-pub use node::{NetworkIngestOutcome, NodeState};
+pub use node::{EthIslemKaydi, NetworkIngestOutcome, NodeState};
 pub use registry::{
     public_key_to_adres, KayitSonucu, KurumKategori, KurumKaydi, StakeRegistry, TokenRegistry,
 };

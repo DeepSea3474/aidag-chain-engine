@@ -85,6 +85,9 @@ pub struct NodeState {
     compute_reward_emitted: u128,
     /// DENETIM: gunluk odul sayaci (gun = zincir_saati/86400, miktar).
     compute_reward_gunluk: (u64, u128),
+    /// DENETIM: ham ETH (tip=12) islem dizini: tx hash -> gercek sonuc.
+    /// eth_getTransactionByHash/Receipt uydurma "basarili" yerine bunu doner.
+    eth_islemleri: std::collections::HashMap<[u8; 32], EthIslemKaydi>,
     /// MAINNET modu mu? new_mainnet()=true, new_devnet()=false. Deterministik launch
     /// konfigu (network_id ile korele). Faucet (tip=6, MINT) mainnet'te KAPALI ->
     /// 21M sabit AIDAG arzi korunur (yoktan bakiye basilmaz).
@@ -215,6 +218,7 @@ impl NodeState {
             compute_reward_verildi: std::collections::HashSet::new(),
             compute_reward_emitted: 0,
             compute_reward_gunluk: (0, 0),
+            eth_islemleri: std::collections::HashMap::new(),
             avm_db: crate::avm::AidagDatabase::yeni(),
             baslangic_bakiyeler: Vec::new(),
             baslangic_lsc: Vec::new(),
@@ -581,6 +585,18 @@ impl NodeState {
         let has_missing_parent = vertex.parents().iter().any(|p| !self.graph.contains(p));
 
         if has_missing_parent {
+            // DENETIM DUZELTMESI: orphan da ag kaynaklidir -> SAAT POLITIKASI ve
+            // (mainnet) yapisal kural havuza/diske girmeden ONCE uygulanir. Eskiden
+            // gelecek tarihli vertex orphan olarak diske yazilip restart'ta kabul
+            // ediliyor, zincir saatini ileri itip dugumleri ayristiriyordu.
+            if let Err(e) = self.graph.saat_politikasi(&vertex, now) {
+                return NetworkIngestOutcome::Rejected(IngestError::Graph(e));
+            }
+            if self.mainnet {
+                if let Err(e) = crate::tx::yapisal_islem_kurali(vertex.payload()) {
+                    return NetworkIngestOutcome::Rejected(IngestError::Islem(e));
+                }
+            }
             // Henuz islenemez -> yetim havuzuna al (reddetme!).
             return match self.orphans.add_orphan(vertex) {
                 Ok(()) => NetworkIngestOutcome::Buffered(id),
@@ -889,6 +905,7 @@ impl NodeState {
         self.compute_reward_verildi = std::collections::HashSet::new();
         self.compute_reward_emitted = 0;
         self.compute_reward_gunluk = (0, 0);
+        self.eth_islemleri = std::collections::HashMap::new();
         self.avm_db = crate::avm::AidagDatabase::yeni();
 
         // 2) BASLANGIC DURUMU (genesis/test) — DAG'da vertex karsiligi YOK.
@@ -1515,9 +1532,24 @@ impl NodeState {
                         // DENETIM DUZELTMESI: chainId TAM bu agin chainId'si olmali
                         // (chainId'siz eski imza ve BSC/Ethereum tx replay'i REDDEDILIR)
                         // ve imza dusuk-S olmali. Aksi halde islem hic etkisizdir.
+                        let tx_hash = crate::avm::eth_tx_hash(raw);
+                        let mut kayit = EthIslemKaydi {
+                            gonderen,
+                            hedef: islem.hedef,
+                            deger: islem.deger,
+                            nonce: islem.nonce,
+                            basarili: false,
+                            gas_used: 0,
+                            olusan_adres: None,
+                            sira: self.eth_islemleri.len() as u64,
+                            neden: "",
+                        };
                         if crate::avm::ham_eth_tx_kabul_edilir(&islem, chain_id).is_err() {
+                            kayit.neden = "chainId/imza gecersiz";
+                            self.eth_islemleri.entry(tx_hash).or_insert(kayit);
                             return;
                         }
+                        kayit.neden = "nonce/bakiye/gas yetersiz";
                         // Nonce replay korumasi (canli+replay ayni)
                         if self.nonce_registry.dogru_mu(&gonderen, islem.nonce) {
                             // B2: upfront affordability gas TAVANINA (AVM_GAS_LIMIT) gore;
@@ -1542,6 +1574,15 @@ impl NodeState {
                                 if sonuc.is_err() {
                                     self.avm_gecersiz_ucret(&gonderen);
                                 }
+                                match &sonuc {
+                                    Ok((_h, r)) => {
+                                        kayit.basarili = r.basarili;
+                                        kayit.gas_used = r.gas_used;
+                                        kayit.olusan_adres = r.olusan_adres;
+                                        kayit.neden = if r.basarili { "" } else { "EVM revert" };
+                                    }
+                                    Err(_) => kayit.neden = "EVM dogrulama hatasi",
+                                }
                                 if let Ok((_h, r)) = sonuc
                                 {
                                     // B2: GERCEK gas_used (basari/basarisiz FARK ETMEZ) -> LSC.
@@ -1563,11 +1604,185 @@ impl NodeState {
                                 }
                             }
                         }
+                        // Dizin: ayni hash'in ILK islenisi kaydedilir (tekrar
+                        // gonderim/replay ilk sonucu ezmez).
+                        self.eth_islemleri.entry(tx_hash).or_insert(kayit);
                     }
                 }
             }
             _ => {}
         }
+    }
+
+    /// Ham ETH tx sonucunu hash ile sorgula (eth_getTransactionByHash/Receipt).
+    /// Bilinmeyen hash -> None (RPC null doner; uydurma "basarili" YOK).
+    pub fn eth_islem_sorgula(&self, tx_hash: &[u8; 32]) -> Option<&EthIslemKaydi> {
+        self.eth_islemleri.get(tx_hash)
+    }
+
+    /// RPC KAPI KONTROLU (yerel politika, konsensus DEGIL): bu dugumun kendi
+    /// RPC'sinden gelen bir vertex, MEVCUT durumda etkili olacaksa kabul edilir.
+    /// Gecersiz (bakiyesiz, yanlis nonce, yetkisiz, tekrar, bilinmeyen tip,
+    /// bilinmeyen ebeveyn) islem DAG'a hic girmez ve istemci ok:false alir.
+    /// Gossip/senkron yolunu ETKILEMEZ (gecmis ve diger dugumler degismez).
+    pub fn islem_on_kontrol(&self, v: &Vertex) -> Result<(), String> {
+        use crate::registry::public_key_to_adres;
+        if v.network_id() != self.graph.network_id() {
+            return Err("baska aga ait vertex".into());
+        }
+        if v.parents().is_empty() {
+            return Err("genesis RPC'den kabul edilmez".into());
+        }
+        for p in v.parents() {
+            if !self.graph.contains(p) {
+                return Err("bilinmeyen ebeveyn (once /tips'ten guncel uclari alin)".into());
+            }
+        }
+        let payload = v.payload();
+        crate::tx::yapisal_islem_kurali(payload).map_err(|e| e.to_string())?;
+        let imzalayan = public_key_to_adres(v.public_key());
+        let owner_mu = self.faucet_owner == Some(imzalayan);
+        let hata = |m: &str| Err(m.to_string());
+        match payload[0] {
+            crate::tx::TX_TYPE_RECORD => {
+                let r = crate::tx::Record::decode(payload).map_err(|e| format!("{e:?}"))?;
+                if self.record_registry.dogrula(&r.data_hash).is_some() {
+                    return hata("bu ozet zaten kayitli");
+                }
+            }
+            crate::tx::TX_TYPE_TOKEN => {
+                if !self.stake_registry.stake_var_mi(&imzalayan) {
+                    return hata("token kaydi icin stake gerekli");
+                }
+            }
+            crate::tx::TX_TYPE_STAKE => {
+                let k = crate::tx::StakeKaydi::decode(payload).map_err(|e| format!("{e:?}"))?;
+                if k.staker != imzalayan {
+                    return hata("stake yalniz imzalayan adina yapilir");
+                }
+                if k.miktar == 0 || self.bakiye_registry.harcanabilir(&imzalayan) < k.miktar {
+                    return hata("stake icin harcanabilir bakiye yetersiz");
+                }
+            }
+            crate::tx::TX_TYPE_TRANSFER => {
+                let t = crate::tx::TransferKaydi::decode(payload).map_err(|e| format!("{e:?}"))?;
+                if !self.nonce_registry.dogru_mu(&imzalayan, t.nonce) {
+                    return hata("nonce beklenenden farkli");
+                }
+                if t.miktar == 0 || t.alici == imzalayan || self.bakiye_registry.harcanabilir(&imzalayan) < t.miktar {
+                    return hata("harcanabilir AIDAG yetersiz ya da gecersiz miktar/alici");
+                }
+            }
+            crate::tx::TX_TYPE_KURUM => {
+                if self.kurum_registry.sorgula(&imzalayan).is_some() {
+                    return hata("bu adres zaten kurum olarak kayitli");
+                }
+            }
+            crate::tx::TX_TYPE_FAUCET => {
+                if self.mainnet || !owner_mu {
+                    return hata("faucet kapali ya da yetkisiz");
+                }
+            }
+            crate::tx::TX_TYPE_LSC_TRANSFER => {
+                let t = crate::tx::LscTransferKaydi::decode(payload).map_err(|e| format!("{e:?}"))?;
+                if !self.nonce_registry.dogru_mu(&imzalayan, t.nonce) {
+                    return hata("nonce beklenenden farkli");
+                }
+                if t.miktar == 0 || t.alici == imzalayan || self.lsc_registry.bakiye(&imzalayan) < t.miktar {
+                    return hata("LSC bakiyesi yetersiz ya da gecersiz miktar/alici");
+                }
+            }
+            crate::tx::TX_TYPE_ESLESTIRME => {
+                let e = crate::tx::EslestirmeKaydi::decode(payload).map_err(|e| format!("{e:?}"))?;
+                if e.test_adresi != imzalayan {
+                    return hata("yalniz test adresinin sahibi eslestirebilir");
+                }
+                if self.eslestirme_registry.sorgula(&e.test_adresi).is_some() {
+                    return hata("test adresi zaten eslesmis");
+                }
+            }
+            crate::tx::TX_TYPE_AVM_CAGRI => {
+                let c = crate::tx::AvmCagri::decode(payload).map_err(|e| format!("{e:?}"))?;
+                if !self.nonce_registry.dogru_mu(&imzalayan, c.nonce) {
+                    return hata("nonce beklenenden farkli");
+                }
+                let gas = if c.data.is_empty() { 21_000 } else { crate::avm::AVM_GAS_LIMIT };
+                if self.bakiye_registry.harcanabilir(&imzalayan) < c.deger
+                    || self.lsc_registry.bakiye(&imzalayan) < crate::avm::gas_ucreti_hesapla(gas) as crate::registry::Tutar
+                {
+                    return hata("harcanabilir AIDAG ya da gas (LSC) yetersiz");
+                }
+            }
+            crate::tx::TX_TYPE_ON_SATIS => {
+                let d = crate::tx::OnSatisDagitim::decode(payload).map_err(|e| format!("{e:?}"))?;
+                if !owner_mu {
+                    return hata("on-satis tahsisi yalniz owner");
+                }
+                if self.on_satis_registry.kullanilmis(d.odeme_ref) {
+                    return hata("odeme_ref zaten kullanilmis");
+                }
+            }
+            crate::tx::TX_TYPE_EVM_TRANSFER => {
+                let t = crate::tx::EvmTransfer::decode(payload).map_err(|e| format!("{e:?}"))?;
+                let g = t.gonderen_adres(self.evm_chain_id()).ok_or("EVM imzasi gecersiz")?;
+                if !self.nonce_registry.dogru_mu(&g, t.nonce) {
+                    return hata("nonce beklenenden farkli");
+                }
+                if t.miktar == 0 || self.bakiye_registry.harcanabilir(&g) < t.miktar {
+                    return hata("harcanabilir AIDAG yetersiz");
+                }
+            }
+            crate::tx::TX_TYPE_HAM_ETH_TX => {
+                let raw = crate::tx::ham_eth_tx_coz_payload(payload).ok_or("ham tx yok")?;
+                let i = crate::avm::ham_eth_tx_coz(raw).map_err(|e| e.to_string())?;
+                crate::avm::ham_eth_tx_kabul_edilir(&i, self.evm_chain_id()).map_err(|e| e.to_string())?;
+                if !self.nonce_registry.dogru_mu(&i.gonderen, i.nonce) {
+                    return hata("nonce beklenenden farkli");
+                }
+                if self.bakiye_registry.harcanabilir(&i.gonderen) < i.deger
+                    || self.lsc_registry.bakiye(&i.gonderen)
+                        < crate::avm::gas_ucreti_hesapla(crate::avm::AVM_GAS_LIMIT) as crate::registry::Tutar
+                {
+                    return hata("harcanabilir AIDAG ya da gas (LSC) yetersiz");
+                }
+            }
+            crate::tx::TX_TYPE_ON_SATIS_CLAIM | crate::tx::TX_TYPE_EVM_ON_SATIS_CLAIM => {
+                let (odeme_ref, cagiran) = if payload[0] == crate::tx::TX_TYPE_ON_SATIS_CLAIM {
+                    (crate::tx::ClaimTalebi::decode(payload).map_err(|e| format!("{e:?}"))?.odeme_ref, imzalayan)
+                } else {
+                    let c = crate::tx::EvmClaimTalebi::decode(payload).map_err(|e| format!("{e:?}"))?;
+                    let a = c.claim_eden_adres(self.graph.network_id() as u64).ok_or("EVM imzasi gecersiz")?;
+                    (c.odeme_ref, a)
+                };
+                let k = self.on_satis_registry.sorgula(odeme_ref).ok_or("tahsis bulunamadi")?;
+                if k.alici != cagiran {
+                    return hata("tahsis baskasina ait");
+                }
+                if k.claim_edilebilir(v.timestamp(), self.on_satis_tge()) == 0 {
+                    return hata("su an claim edilebilir miktar yok (TGE/vesting)");
+                }
+            }
+            crate::tx::TX_TYPE_TGE_AYARLA => {
+                let t = crate::tx::TgeAyarla::decode(payload).map_err(|e| format!("{e:?}"))?;
+                if !owner_mu {
+                    return hata("TGE karari yalniz kurucu (owner)");
+                }
+                if self.zincir_saati >= self.on_satis_tge() {
+                    return hata("TGE kesinlesmis; degistirilemez");
+                }
+                if t.tge < self.zincir_saati.saturating_add(crate::mainnet::TGE_MIN_BILDIRIM_SURESI) {
+                    return hata("TGE en az 3 gun onceden ilan edilmeli");
+                }
+            }
+            crate::tx::TX_TYPE_COMPUTE_REWARD => {
+                let r = crate::tx::ComputeReward::decode(payload).map_err(|e| format!("{e:?}"))?;
+                if !owner_mu || self.compute_reward_verildi.contains(&r.reward_id) {
+                    return hata("odul yetkisiz ya da reward_id kullanilmis");
+                }
+            }
+            _ => return hata("bilinmeyen islem tipi"),
+        }
+        Ok(())
     }
 
     /// `parent_id` entegre olduktan sonra, onu bekleyen yetimleri zincirleme
@@ -1589,6 +1804,22 @@ impl NodeState {
             }
         }
     }
+}
+
+/// Ham ETH (tip=12) islem sonucu (RPC makbuzu icin).
+#[derive(Debug, Clone)]
+pub struct EthIslemKaydi {
+    pub gonderen: [u8; 20],
+    pub hedef: Option<[u8; 20]>,
+    pub deger: u128,
+    pub nonce: u64,
+    pub basarili: bool,
+    pub gas_used: u64,
+    pub olusan_adres: Option<[u8; 20]>,
+    /// Dizine giris sirasi (MetaMask "blockNumber" gostergesi icin).
+    pub sira: u64,
+    /// Basarisizsa kisa neden.
+    pub neden: &'static str,
 }
 
 /// `ingest_networked` sonucu. Her durum acikca ayrilir (sahte/sessiz yok).

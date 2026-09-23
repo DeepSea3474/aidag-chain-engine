@@ -44,7 +44,9 @@ async fn status(State(st): State<RpcState>) -> Json<Value> {
         "vertex_count": node.vertex_count(),
         "orphan_count": node.orphan_count(),
         "token_count": node.token_sayisi(),
-        "toplam_stake": node.toplam_stake(),
+        // u128 -> metin (JSON sayisi u64'u asinca serde panik atiyordu; tek
+        // bir stake ile /status kalici cokerdi).
+        "toplam_stake": node.toplam_stake().to_string(),
         "staker_count": node.staker_sayisi(),
         "genesis": genesis,
         "tip_count": node.tips().len(),
@@ -247,50 +249,6 @@ async fn tips(State(st): State<RpcState>) -> Json<Value> {
 }
 
 /// Faucet basina sabit test AIDAG miktari (testnet kolayligi).
-/// POST /eslestir — test adresini gercek (mainnet odul) adresine BIR KERELIK baglar.
-/// Govde: {"test":"<40hex>","gercek":"<40hex>"}. Zaten eslesmisse degistirmez.
-async fn eslestir(State(st): State<RpcState>, Json(govde): Json<Value>) -> Json<Value> {
-    let test_hex = govde
-        .get("test")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    let gercek_hex = govde
-        .get("gercek")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .trim_start_matches("0x")
-        .trim_start_matches("0X")
-        .to_lowercase();
-    let test_b = match hex::decode(&test_hex) {
-        Ok(b) if b.len() == 20 => b,
-        _ => return Json(json!({ "ok": false, "hata": "test adresi 40 hex olmali" })),
-    };
-    let gercek_b = match hex::decode(&gercek_hex) {
-        Ok(b) if b.len() == 20 => b,
-        _ => return Json(json!({ "ok": false, "hata": "gercek adres 40 hex olmali" })),
-    };
-    let mut test = [0u8; 20];
-    test.copy_from_slice(&test_b);
-    let mut gercek = [0u8; 20];
-    gercek.copy_from_slice(&gercek_b);
-    let (yeni, mevcut) = {
-        let mut node = st.node.write().await;
-        let yeni = node.eslestir(test, gercek);
-        let mevcut = node.eslesme_sorgula(&test);
-        (yeni, mevcut)
-    };
-    Json(json!({
-        "ok": true,
-        "yeni_eslesme": yeni,
-        "test": test_hex,
-        "gercek": mevcut.map(hex::encode),
-        "not": if yeni { "Eslesme kaydedildi (bir kerelik)." } else { "Bu test adresi zaten eslesmis; degistirilmedi." },
-    }))
-}
-
 /// GET /eslesme/:adres — bir test adresinin eslesmis gercek odul adresi.
 async fn eslesme(State(st): State<RpcState>, Path(adres_hex): Path<String>) -> Json<Value> {
     let b = match hex::decode(adres_hex.trim()) {
@@ -650,7 +608,7 @@ async fn faucet(State(st): State<RpcState>, Path(adres_hex): Path<String>) -> Js
             return Json(json!({
                 "ok": false,
                 "adres": adres_hex.trim(),
-                "mevcut_bakiye": mevcut,
+                "mevcut_bakiye": mevcut.to_string(),
                 "hata": "Zaten yeterli TEST AIDAG'in var. Once harca veya transfer et, sonra tekrar iste.",
             }));
         }
@@ -793,30 +751,46 @@ async fn submit(State(st): State<RpcState>, body: String) -> Json<Value> {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
+    // DENETIM DUZELTMESI: KAPI KONTROLU. Vertex once cozulur ve MEVCUT durumda
+    // etkili olup olmayacagi denetlenir (bakiye, nonce, yetki, tekrar, tip,
+    // bilinmeyen ebeveyn). Etkisiz/gecersiz islem DAG'a HIC girmez ve istemci
+    // ok:false + neden alir. Eskiden her sey "ok:true" donup kalici yaziliyordu.
+    let vertex = match lsc_engine::dag::wire::decode(&bytes) {
+        Ok(v) => v,
+        Err(e) => return Json(json!({ "ok": false, "hata": format!("vertex cozulemedi: {e:?}") })),
+    };
+    {
+        let node = st.node.read().await;
+        if let Err(e) = node.islem_on_kontrol(&vertex) {
+            return Json(json!({ "ok": false, "hata": e, "vertex_count": node.vertex_count() }));
+        }
+    }
     let (sonuc, vc) = {
         let mut node = st.node.write().await;
         let sonuc = node.ingest_networked(&bytes, now);
         (sonuc, node.vertex_count())
     };
-    // ingest kabul ettiyse AGA yayinla (ag dongusu gossipsub publish eder).
-    // Red/orphan olsa bile ag dongusune birakmak zararsiz; ama net olsun diye
-    // sadece "kabul/ingest" durumunda yayinla. Sonuc string'inde "Rejected" yoksa yayinla.
-    let kabul = !format!("{sonuc:?}").contains("Rejected");
+    // Yalniz gercekten graf'a GIREN vertex basari sayilir ve aga yayinlanir.
+    let kabul = matches!(sonuc, lsc_engine::NetworkIngestOutcome::Integrated(_));
     let mut yayinlandi = false;
     if kabul && st.submit_tx.send(bytes).is_ok() {
         yayinlandi = true;
     }
-    Json(json!({
-        "ok": true,
+    let mut yanit = json!({
+        "ok": kabul,
         "sonuc": format!("{sonuc:?}"),
         "vertex_count": vc,
         "aga_yayinlandi": yayinlandi,
-    }))
+    });
+    if !kabul {
+        yanit["hata"] = json!("vertex graf'a girmedi");
+    }
+    Json(yanit)
 }
 
-/// AIDAG Chain ID (EVM uyumu). 3474 = 0xD92. MetaMask bu ID ile agi tanir.
-/// NOT: mainnet'te chainlist.org'da rezerve edilmeli (cakisma kontrolu).
-const AIDAG_CHAIN_ID: u64 = 3474;
+// AIDAG Chain ID artik agdan turetilir: NodeState::evm_chain_id()
+// (mainnet 3474; diger aglar 3_474_000_000 + network_id — testnet imzasi
+// mainnet'te gecersiz). Eski sabit (her agda 3474) kaldirildi.
 
 /// eth_ JSON-RPC params dizisinin ILK elemanindan 20 baytlik adres cikar.
 /// "0x<40 hex>" bekler. Hatali ise None.
@@ -876,9 +850,15 @@ async fn eth_rpc(State(st): State<RpcState>, Json(istek): Json<Value>) -> Json<V
 
     match method {
         // Agin kimligi: MetaMask baglanirken ILK bunu sorar. Hex string.
-        "eth_chainId" => ok(&id, json!(format!("0x{:x}", AIDAG_CHAIN_ID))),
+        "eth_chainId" => {
+            let c = st.node.read().await.evm_chain_id();
+            ok(&id, json!(format!("0x{:x}", c)))
+        }
         // Ag versiyonu: chainId'nin ondalik string hali.
-        "net_version" => ok(&id, json!(AIDAG_CHAIN_ID.to_string())),
+        "net_version" => {
+            let c = st.node.read().await.evm_chain_id();
+            ok(&id, json!(c.to_string()))
+        }
         // En son blok numarasi. Bizde "blok" = vertex sayisi (yaklasik gosterge).
         "eth_blockNumber" => {
             let n = st.node.read().await.vertex_count() as u64;
@@ -965,10 +945,15 @@ async fn eth_rpc(State(st): State<RpcState>, Json(istek): Json<Value>) -> Json<V
                                 Ok(v) => v,
                                 Err(_) => return err(&id, -32000, "vertex uretilemedi"),
                             };
+                            // KAPI: chainId (EIP-155), dusuk-S, nonce, harcanabilir bakiye
+                            // (vesting/rezerv dusulmus) ve gas. Gecersiz tx zincire yazilmaz.
+                            if let Err(e) = st.node.read().await.islem_on_kontrol(&vertex) {
+                                return err(&id, -32000, &e);
+                            }
                             let bytes = lsc_engine::dag::wire::encode(&vertex);
                             let sonuc = st.node.write().await.ingest_networked(&bytes, now);
-                            if format!("{sonuc:?}").contains("Rejected") {
-                                return err(&id, -32000, "vertex reddedildi");
+                            if !matches!(sonuc, lsc_engine::NetworkIngestOutcome::Integrated(_)) {
+                                return err(&id, -32000, "vertex graf'a girmedi");
                             }
                             let _ = st.submit_tx.send(bytes); // aga yayinla
                             ok(&id, json!(format!("0x{}", hex::encode(tx_hash))))
@@ -980,67 +965,67 @@ async fn eth_rpc(State(st): State<RpcState>, Json(istek): Json<Value>) -> Json<V
             }
         }
 
-        // eth_getTransactionByHash: MetaMask islem takibi icin sorar.
-        // Islem sendRawTransaction'da vertex'e girdi; hash'i geri dogrularz.
-        "eth_getTransactionByHash" => {
+        // eth_getTransactionByHash / eth_getTransactionReceipt: GERCEK dizinden
+        // (NodeState::eth_islem_sorgula). DENETIM DUZELTMESI: eskiden HER hash icin
+        // uydurma bir kayit ve status=0x1 donuyordu; MetaMask basarisiz/uydurma
+        // islemi "onaylandi" gosteriyordu. Bilinmeyen hash -> null; basarisiz -> 0x0.
+        "eth_getTransactionByHash" | "eth_getTransactionReceipt" => {
             let h = istek
                 .get("params")
                 .and_then(|p| p.as_array())
                 .and_then(|a| a.first())
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let bn = {
-                let node = st.node.read().await;
-                node.vertex_count() as u64
+            let hash: Option<[u8; 32]> = hex::decode(h.trim().trim_start_matches("0x"))
+                .ok()
+                .and_then(|b| b.try_into().ok());
+            let Some(hash) = hash else {
+                return err(&id, -32602, "gecersiz tx hash");
             };
-            ok(
-                &id,
-                json!({
-                    "hash": h,
-                    "blockNumber": format!("0x{:x}", bn),
-                    "blockHash": format!("0x{:064x}", bn),
-                    "transactionIndex": "0x0",
-                    "from": "0x0000000000000000000000000000000000000000",
-                    "to": "0x0000000000000000000000000000000000000000",
-                    "value": "0x0",
-                    "gas": "0x5208",
-                    "gasPrice": "0x3b9aca00",
-                    "nonce": "0x0",
-                    "input": "0x"
-                }),
-            )
-        }
-
-        // eth_getTransactionReceipt: MetaMask "islem onaylandi mi?" icin sorar.
-        // Islem zaten kabul edildi (vertex'e girdi) -> status=0x1 (basarili).
-        "eth_getTransactionReceipt" => {
-            let h = istek
-                .get("params")
-                .and_then(|p| p.as_array())
-                .and_then(|a| a.first())
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let bn = {
-                let node = st.node.read().await;
-                node.vertex_count() as u64
+            let node = st.node.read().await;
+            let Some(k) = node.eth_islem_sorgula(&hash) else {
+                return ok(&id, Value::Null);
             };
-            ok(
-                &id,
-                json!({
-                    "transactionHash": h,
-                    "blockNumber": format!("0x{:x}", bn),
-                    "blockHash": format!("0x{:064x}", bn),
-                    "transactionIndex": "0x0",
-                    "from": "0x0000000000000000000000000000000000000000",
-                    "to": "0x0000000000000000000000000000000000000000",
-                    "cumulativeGasUsed": "0x5208",
-                    "gasUsed": "0x5208",
-                    "contractAddress": serde_json::Value::Null,
-                    "logs": [],
-                    "logsBloom": format!("0x{}", "0".repeat(512)),
-                    "status": "0x1"
-                }),
-            )
+            let adr = |a: &[u8; 20]| format!("0x{}", hex::encode(a));
+            let bn = format!("0x{:x}", k.sira + 1);
+            let bh = format!("0x{}", hex::encode(hash));
+            if method == "eth_getTransactionByHash" {
+                ok(
+                    &id,
+                    json!({
+                        "hash": format!("0x{}", hex::encode(hash)),
+                        "blockNumber": bn,
+                        "blockHash": bh,
+                        "transactionIndex": "0x0",
+                        "from": adr(&k.gonderen),
+                        "to": k.hedef.as_ref().map(adr),
+                        "value": format!("0x{:x}", k.deger),
+                        "nonce": format!("0x{:x}", k.nonce),
+                        "gas": format!("0x{:x}", lsc_engine::avm::AVM_GAS_LIMIT),
+                        "gasPrice": "0x3b9aca00",
+                        "input": "0x"
+                    }),
+                )
+            } else {
+                ok(
+                    &id,
+                    json!({
+                        "transactionHash": format!("0x{}", hex::encode(hash)),
+                        "blockNumber": bn,
+                        "blockHash": bh,
+                        "transactionIndex": "0x0",
+                        "from": adr(&k.gonderen),
+                        "to": k.hedef.as_ref().map(adr),
+                        "cumulativeGasUsed": format!("0x{:x}", k.gas_used),
+                        "gasUsed": format!("0x{:x}", k.gas_used),
+                        "contractAddress": k.olusan_adres.as_ref().map(adr),
+                        "logs": [],
+                        "logsBloom": format!("0x{}", "0".repeat(512)),
+                        "status": if k.basarili { "0x1" } else { "0x0" },
+                        "aidag_neden": k.neden
+                    }),
+                )
+            }
         }
 
         // eth_gasPrice: gas fiyati. Testnette dusuk sabit deger (MetaMask sorar).
@@ -1137,7 +1122,10 @@ pub fn router(
         .route("/", post(eth_rpc)) // Ethereum JSON-RPC (MetaMask + tum EVM cuzdanlari)
         .route("/islemlerim/:pubkey", get(islemlerim))
         .route("/testnet-durum/:adres", get(testnet_durum))
-        .route("/eslestir", post(eslestir))
+        // /eslestir KALDIRILDI (denetim): kimliksizdi, baskasinin test adresini
+        // kendi odul adresine baglamaya izin veriyordu ve durum yalniz RAM'deydi.
+        // Eslestirme artik yalniz zincirde tip=8 ile ve test adresinin SAHIBI
+        // tarafindan imzalanarak yapilir.
         .route("/eslesme/:adres", get(eslesme))
         .route("/on-satis/:odeme_ref", get(on_satis_sorgu))
         .route("/on-satis-ozet", get(on_satis_ozet))
@@ -1210,6 +1198,83 @@ mod mainnet_kapisi_testleri {
         assert_eq!(node.vertex_count(), once, "mainnet'e HICBIR vertex yazilmamali");
         assert_eq!(node.bakiye(&[0u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]), 0);
         assert!(rx.try_recv().is_err(), "aga hicbir sey yayinlanmamali");
+    }
+
+    // ===== DENETIM REGRESYON: RPC (2026-09-24) =====
+    // Saldiri: /submit her durumda ok:true donuyor ve gecersiz/cop islemler DAG'a
+    // kalici giriyordu. Beklenen: kapi kontrolu -> ok:false, DAG'a hic girmez.
+
+    fn mainnet_dugum() -> (RpcState, tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>, [u8; 32], u64) {
+        let t = 1_785_024_000;
+        let mut node = lsc_engine::NodeState::new_mainnet();
+        let gid = node.ingest(&lsc_engine::mainnet::genesis_wire(), t).expect("genesis");
+        let (st, rx) = durum(node);
+        (st, rx, gid, t)
+    }
+    fn imzali(net: u32, parent: [u8; 32], payload: Vec<u8>, ts: u64, tohum: u8) -> String {
+        let sk = ed25519_dalek::SigningKey::from_bytes(&[tohum; 32]);
+        let v = lsc_engine::Vertex::new_signed(net, vec![parent], payload, ts, &sk).unwrap();
+        hex::encode(lsc_engine::dag::wire::encode(&v))
+    }
+
+    #[tokio::test]
+    async fn r1_submit_gecersiz_islemler_ok_false_ve_dag_a_girmez() {
+        let (st, mut rx, gid, t) = mainnet_dugum();
+        let once = st.node.read().await.vertex_count();
+        let vakalar: Vec<(&str, String)> = vec![
+            ("bakiyesiz transfer", imzali(3474, gid, lsc_engine::tx::TransferKaydi::new([9; 20], 1000, 0).encode(), t, 0x51)),
+            ("owner-disi TGE", imzali(3474, gid, lsc_engine::tx::TgeAyarla::new(t + 30 * 86_400).encode(), t, 0x52)),
+            ("owner-disi odul", imzali(3474, gid, lsc_engine::tx::ComputeReward::new([9; 20], 1, 1).encode(), t, 0x53)),
+            ("olmayan claim", imzali(3474, gid, lsc_engine::tx::ClaimTalebi::new(12345).encode(), t, 0x54)),
+            ("bilinmeyen tip 60 KB cop", imzali(3474, gid, vec![0xEE; 60_000], t, 0x55)),
+            ("yanlis ag", imzali(7778, gid, lsc_engine::Record::new([1; 32]).encode(), t, 0x56)),
+            ("bilinmeyen ebeveyn", imzali(3474, [0xAB; 32], lsc_engine::Record::new([2; 32]).encode(), t, 0x57)),
+        ];
+        for (ad, hx) in vakalar {
+            let Json(v) = submit(State(st.clone()), hx).await;
+            assert_eq!(v["ok"], false, "{ad}: ok:false beklenir, gelen {v}");
+            assert!(v.get("hata").is_some(), "{ad}: neden donmeli");
+        }
+        let Json(v) = submit(State(st.clone()), "deadbeef".into()).await;
+        assert_eq!(v["ok"], false, "bozuk hex/vertex: {v}");
+        assert_eq!(st.node.read().await.vertex_count(), once, "hicbiri DAG'a girmedi");
+        assert!(rx.try_recv().is_err(), "hicbiri aga yayinlanmadi");
+    }
+
+    #[tokio::test]
+    async fn r2_submit_gecerli_kayit_ok_true_tekrari_ok_false() {
+        let (st, mut rx, gid, t) = mainnet_dugum();
+        let hx = imzali(3474, gid, lsc_engine::Record::new([7; 32]).encode(), t, 0x61);
+        let Json(v) = submit(State(st.clone()), hx).await;
+        assert_eq!(v["ok"], true, "gecerli kayit: {v}");
+        assert!(rx.try_recv().is_ok(), "gecerli kayit aga yayinlandi");
+        let hx2 = imzali(3474, gid, lsc_engine::Record::new([7; 32]).encode(), t + 1, 0x62);
+        let Json(v) = submit(State(st.clone()), hx2).await;
+        assert_eq!(v["ok"], false, "ayni ozet ikinci kez: {v}");
+    }
+
+    #[tokio::test]
+    async fn r3_status_u128_stake_ile_cokmez() {
+        let mut node = lsc_engine::NodeState::new_devnet(1);
+        node.stake_ekle(lsc_engine::StakeKaydi::new([1; 20], u128::MAX - 5));
+        let (st, _rx) = durum(node);
+        let Json(v) = status(State(st)).await;
+        assert_eq!(v["toplam_stake"], (u128::MAX - 5).to_string(), "u128 metin olarak doner: {v}");
+    }
+
+    #[tokio::test]
+    async fn r4_eth_tx_sorgulari_uydurma_donmez_ve_chainid_agdan() {
+        let (st, _rx, _gid, _t) = mainnet_dugum();
+        for m in ["eth_getTransactionByHash", "eth_getTransactionReceipt"] {
+            let istek = json!({"jsonrpc":"2.0","id":1,"method":m,"params":[format!("0x{}", "ab".repeat(32))]});
+            let Json(v) = eth_rpc(State(st.clone()), Json(istek)).await;
+            assert!(v["result"].is_null(), "{m}: bilinmeyen hash null donmeli: {v}");
+        }
+        let Json(v) = eth_rpc(State(st.clone()), Json(json!({"jsonrpc":"2.0","id":1,"method":"eth_chainId"}))).await;
+        assert_eq!(v["result"], "0xd92", "mainnet chainId 3474");
+        let (st2, _rx2) = durum(lsc_engine::NodeState::new_devnet(1));
+        let Json(v) = eth_rpc(State(st2), Json(json!({"jsonrpc":"2.0","id":1,"method":"eth_chainId"}))).await;
+        assert_eq!(v["result"], format!("0x{:x}", 3_474_000_001u64), "testnet chainId mainnet'ten farkli");
     }
 
     #[tokio::test]
