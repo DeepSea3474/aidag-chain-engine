@@ -203,7 +203,7 @@ const BELGE_DOGRULA_YONLENDIR: &str = "Belgeni doğrulamak için https://aidag-c
 ///  2. Kısaltılmış hash ("..." ile) → tam 64 haneyi iste.
 ///  3. Kayıt niyeti ("belge oluşturacağım/kaydetmek istiyorum") → kayıt süreci.
 ///  4. Doğrulama niyeti (açıklama sorusu değilse) → doğrulama sayfasına yönlendir.
-pub async fn belge_dogrula(http: &reqwest::Client, rpc_url: &str, sorgu: &str) -> Option<String> {
+pub async fn belge_dogrula(http: &reqwest::Client, rpc_url: &str, kubra_adres: &[u8; 20], sorgu: &str) -> Option<String> {
     let hash = match belge_hash_bul(sorgu) {
         Some(h) => h,
         None => {
@@ -219,7 +219,8 @@ pub async fn belge_dogrula(http: &reqwest::Client, rpc_url: &str, sorgu: &str) -
             return None;
         }
     };
-    let url = format!("{}/belge/{}", rpc_url.trim_end_matches('/'), hash);
+    let taban = rpc_url.trim_end_matches('/');
+    let url = format!("{taban}/belge/{hash}");
     // Hash verildiyse modele DÜŞME: zincire ulaşılamazsa bunu dürüstçe söyle.
     let v: serde_json::Value = match http.get(&url).send().await {
         Ok(r) => match r.json().await {
@@ -228,33 +229,110 @@ pub async fn belge_dogrula(http: &reqwest::Client, rpc_url: &str, sorgu: &str) -
         },
         Err(_) => return Some("Belge doğrulama şu an yapılamadı: zincire ulaşılamıyor. Lütfen biraz sonra tekrar dene.".to_string()),
     };
+    // Kaydeden KUBRA değilse kurum kaydını sor (/kurum/<40 hex>). Hata → None (belirtilir).
+    let kaydeden = kaydeden_coz(&v);
+    let kubra_hex = hex::encode(kubra_adres);
+    let kurum = match kaydeden.as_deref() {
+        Some(k) if k != kubra_hex => {
+            match http.get(format!("{taban}/kurum/{k}")).send().await {
+                Ok(r) => r.json::<serde_json::Value>().await.ok(),
+                Err(_) => None,
+            }
+        }
+        _ => None,
+    };
+    Some(belge_dogrula_metni(&hash, &v, &kubra_hex, kurum.as_ref()))
+}
 
+/// /belge yanitindaki kaydeden adres (kucuk harf, 0x'siz, 40 hex) — gecersizse None.
+fn kaydeden_coz(v: &serde_json::Value) -> Option<String> {
+    let a = v.get("kaydeden").and_then(|x| x.as_str())?.trim().trim_start_matches("0x").to_lowercase();
+    (a.len() == 40 && a.bytes().all(|b| b.is_ascii_hexdigit())).then_some(a)
+}
+
+/// Belge doğrulama cevabı (SAF: ağ yok). "Birebir aynı" demeden ÖNCE kaydedenin kim
+/// olduğunu açıkça belirtir: KUBRA etkileşim kaydı mı, kayıtlı kurum (beyan) mı,
+/// yoksa kurum olarak kayıtlı olmayan bir adres mi.
+pub fn belge_dogrula_metni(hash: &str, belge: &serde_json::Value, kubra_hex: &str, kurum: Option<&serde_json::Value>) -> String {
     // /belge/:hash yaniti: kayitli + (varsa) kaydeden/zaman.
-    let kayitli = v.get("kayitli").and_then(|x| x.as_bool())
-        .or_else(|| v.get("var").and_then(|x| x.as_bool()))
+    let kayitli = belge.get("kayitli").and_then(|x| x.as_bool())
+        .or_else(|| belge.get("var").and_then(|x| x.as_bool()))
         .unwrap_or(false);
-
-    if kayitli {
-        let kaydeden = v.get("kaydeden").and_then(|x| x.as_str())
-            .map(|a| format!(" Kaydeden adres: 0x{}.", a.trim_start_matches("0x")))
-            .unwrap_or_default();
-        let zaman = v.get("zaman").and_then(|x| x.as_u64())
-            .map(|z| format!(" Kayıt zamanı: {} UTC.", utc_tarih(z)))
-            .unwrap_or_default();
-        Some(format!(
-            "Belge DOĞRULANDI: bu hash AIDAG-Chain'de kayıtlı ({hash}).{kaydeden}{zaman} Bu hash'i üreten belge, zincire kaydedilen belgeyle birebir aynıdır (değiştirilmemiştir)."
-        ))
-    } else {
-        Some(format!(
+    if !kayitli {
+        return format!(
             "Belge BULUNAMADI: bu hash ({hash}) AIDAG-Chain'de kayıtlı DEĞİL. Ya hiç kaydedilmemiş ya da belge değiştirilmiş (hash tutmuyor). Orijinal belgenin hash'iyle tekrar dene."
-        ))
+        );
     }
+    let zaman = belge.get("zaman").and_then(|x| x.as_u64())
+        .map(|z| format!(" Kayıt zamanı: {} UTC.", utc_tarih(z)))
+        .unwrap_or_default();
+    let kaydeden = kaydeden_coz(belge);
+    let adres = kaydeden.as_deref().map(|a| format!("0x{a}")).unwrap_or_else(|| "bilinmiyor".into());
+    let kimlik = match kaydeden.as_deref() {
+        Some(k) if k == kubra_hex => {
+            return format!(
+                "Bu hash ({hash}) AIDAG-Chain'de kayıtlı, ANCAK kaydeden KUBRA'nın kendi adresi ({adres}): bu bir KUBRA etkileşim kaydıdır, belge kaydı DEĞİLDİR.{zaman} Bir kurumun belgeyi kaydettiğini göstermez; KUBRA sohbet kanıtını doğrulamak için /v1/verify (prompt, answer, model, ts, salt) kullanılır."
+            );
+        }
+        None => "Kaydeden adres zincir yanıtında yok; kaydedenin kimliği doğrulanamadı.".to_string(),
+        Some(_) => match kurum {
+            None => format!("Kaydeden: {adres}. Kaydedenin kurum durumu şu an sorgulanamadı; kimliği DOĞRULANMADI."),
+            Some(k) if k.get("kayitli").and_then(|x| x.as_bool()) == Some(true) => {
+                let ad = k.get("ad").and_then(|x| x.as_str()).unwrap_or("(adsız)");
+                let kat = k.get("kategori").and_then(|x| x.as_str()).map(|c| format!(", {c}")).unwrap_or_default();
+                match k.get("dogrulanmis").and_then(|x| x.as_bool()) {
+                    Some(true) => format!("Kaydeden: {adres} — kurum \"{ad}\"{kat} (zincirde DOĞRULANMIŞ kurum)."),
+                    _ => format!("Kaydeden: {adres} — kurum \"{ad}\"{kat}. Kurum kaydı BEYANDIR (doğrulanmamış): kurumun kimliği bağımsız olarak doğrulanmamıştır."),
+                }
+            }
+            Some(_) => format!("Kaydeden: {adres}. Bu adres kurum olarak KAYITLI DEĞİL; kaydedenin kimliği bilinmiyor."),
+        },
+    };
+    format!(
+        "Bu hash AIDAG-Chain'de kayıtlı ({hash}). {kimlik}{zaman} Belge DOĞRULANDI (içerik bütünlüğü): bu hash'i üreten belge, zincire kaydedilen belgeyle birebir aynıdır (değiştirilmemiştir). Bu, belgenin kim tarafından ve hangi yetkiyle kaydedildiğini değil, yalnızca değişmediğini kanıtlar."
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     const H: &str = "0dcce43d9a705bcdeb481f5447a0516d319bbb8cc33031f466f828f10a0c544f";
+
+    #[test]
+    fn belge_dogrula_kaydedeni_belirtir() {
+        use serde_json::json;
+        let kubra = "ab".repeat(20);
+        let baska = "cd".repeat(20);
+        let kayit = |k: &str| json!({ "kayitli": true, "kaydeden": format!("0x{k}"), "zaman": 0 });
+        // KUBRA etkilesim kaydi -> belge kaydi DEGIL, "birebir aynidir" YOK
+        let m = belge_dogrula_metni(H, &kayit(&kubra), &kubra, None);
+        assert!(m.contains("KUBRA etkileşim kaydıdır") && m.contains("belge kaydı DEĞİLDİR"), "{m}");
+        assert!(!m.contains("birebir"), "{m}");
+        assert!(!m.contains("DOĞRULANDI"), "{m}");
+        // Buyuk harf / 0x'li KUBRA adresi de yakalanir
+        let m = belge_dogrula_metni(H, &json!({ "kayitli": true, "kaydeden": format!("0x{}", kubra.to_uppercase()) }), &kubra, None);
+        assert!(m.contains("KUBRA etkileşim kaydıdır"), "{m}");
+        // Kayitli kurum (beyan) -> ad + "beyan (dogrulanmamis)", birebir cumlesinden ONCE
+        let kurum = json!({ "ok": true, "kayitli": true, "ad": "Ornek Belediyesi", "kategori": "devlet" });
+        let m = belge_dogrula_metni(H, &kayit(&baska), &kubra, Some(&kurum));
+        assert!(m.contains("Ornek Belediyesi") && m.contains("BEYANDIR (doğrulanmamış)"), "{m}");
+        assert!(m.find("BEYANDIR").unwrap() < m.find("birebir").unwrap());
+        // Zincir dogrulanmis alani dondururse
+        let kurum_d = json!({ "kayitli": true, "ad": "X Univ", "dogrulanmis": true });
+        let m = belge_dogrula_metni(H, &kayit(&baska), &kubra, Some(&kurum_d));
+        assert!(m.contains("DOĞRULANMIŞ kurum") && !m.contains("BEYANDIR"), "{m}");
+        let kurum_d = json!({ "kayitli": true, "ad": "X Univ", "dogrulanmis": false });
+        assert!(belge_dogrula_metni(H, &kayit(&baska), &kubra, Some(&kurum_d)).contains("BEYANDIR"));
+        // Kurum degil
+        let m = belge_dogrula_metni(H, &kayit(&baska), &kubra, Some(&json!({ "ok": true, "kayitli": false })));
+        assert!(m.contains("kurum olarak KAYITLI DEĞİL"), "{m}");
+        // Kurum sorgusu basarisiz
+        let m = belge_dogrula_metni(H, &kayit(&baska), &kubra, None);
+        assert!(m.contains("sorgulanamadı") && m.contains("DOĞRULANMADI"), "{m}");
+        // Kayitsiz
+        let m = belge_dogrula_metni(H, &json!({ "kayitli": false }), &kubra, None);
+        assert!(m.starts_with("Belge BULUNAMADI"));
+    }
 
     #[test]
     fn tek_basina_hash_bulunur() {

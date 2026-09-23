@@ -1,5 +1,8 @@
 import json, re, urllib.request, os
 KB = "http://127.0.0.1:8646/kb/ingest"
+# Yonetim ucu (/kb/ingest) Bearer token'i: YALNIZ KUBRA'ya gonderilir (GitHub/OpenAlex'e DEGIL).
+YONETIM = ({"Authorization": "Bearer " + os.environ["SOULWARE_YONETIM_TOKEN"]}
+           if os.environ.get("SOULWARE_YONETIM_TOKEN") else {})
 DOSYALAR = ["README.md","ON_SATIS_PLANI.md","TOKENOMICS_TASARIM.md","GENESIS_DAGITIM.md",
             "YOL_HARITASI.md","EKOSISTEM_VIZYONU.md","MAINNET_TEKONOMIK.md","TESTLER.md",
             "DUGUM_CALISTIRMA.md","NOTLAR_BILINEN_SINIRLAR.md"]
@@ -17,7 +20,7 @@ def bol(ad, t):
             yield (f"{ad} - {bas}", icerik[j:j+MAX])
 def gonder(bas, met):
     veri = json.dumps({"baslik": bas, "metin": met}).encode()
-    r = urllib.request.Request(KB, data=veri, headers={"Content-Type":"application/json"}, method="POST")
+    r = urllib.request.Request(KB, data=veri, headers={"Content-Type":"application/json", **YONETIM}, method="POST")
     with urllib.request.urlopen(r, timeout=60) as y: return json.loads(y.read())
 toplam = 0
 for d in DOSYALAR:

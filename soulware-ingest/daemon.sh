@@ -20,7 +20,7 @@ while true; do
   # KUBRA hazir mi bekle (boot sirasi / restart toleransi).
   until curl -s --max-time 5 "$KB/health" >/dev/null 2>&1; do sleep 15; done
   # Yumusak tavan: korpus doluysa bekle (ölçek indeksi gelene kadar sismesin).
-  n=$(curl -s --max-time 8 "$KB/kb/stats" 2>/dev/null | grep -oE '"belge_sayisi":[0-9]+' | grep -oE '[0-9]+' || echo 0)
+  n=$(curl -s --max-time 8 ${SOULWARE_YONETIM_TOKEN:+-H "Authorization: Bearer $SOULWARE_YONETIM_TOKEN"} "$KB/kb/stats" 2>/dev/null | grep -oE '"belge_sayisi":[0-9]+' | grep -oE '[0-9]+' || echo 0)
   if [ "${n:-0}" -ge "$MAX_DOCS" ]; then
     echo "[$(date -u +%FT%TZ)] tavan ($n/$MAX_DOCS) — bekliyor" >> "$LOG"
     sleep "$SLEEP"; continue

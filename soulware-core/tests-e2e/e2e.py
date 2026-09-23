@@ -6,7 +6,9 @@ Kullanim (root; ayri ag ad alani -> mDNS canli dugumu bulamaz):
   cp <lsc-node> $D/lsc-node
   cd $D && unshare -n bash -c 'ip link set lo up && python3 e2e.py'
 Eski ikili tuzsuz kayit uretir; yeni ikili onlari /v1/verify ile dogrular ve
-tuzlu kayit uretir. Tum KUBRA dosya yollari gecici dizindedir.
+tuzlu kayit (tuzlu-v2) uretir. Tum KUBRA dosya yollari gecici dizindedir.
+NOT: YENI ikili fail-closed anahtar ister; ESKI (tuz oncesi) ikili anahtari olusturur.
+v1->v2 gecisi ve denetim duzeltmeleri icin: e2e_v2.py.
 """
 import json,subprocess,time,urllib.request,os,sys,re
 S=os.path.dirname(os.path.abspath(__file__)); os.chdir(S)
@@ -90,7 +92,7 @@ try:
         kontrol(f"YENI {ad}: zincirde kayitli, zaman == ts", b["kayitli"] and b["zaman"]==r["ts"])
         q={"ts":r["ts"],"prompt":prompt,"answer":cevap,"model":r["model"],"proof_hash":r["proof_hash"]}
         v=post(KUB+"/v1/verify",dict(q,salt=s))
-        kontrol(f"YENI {ad}: salt ile dogrulanir", v["dogrulandi"] and v["sema"]=="tuzlu-v1" and v["kubra_imzali"])
+        kontrol(f"YENI {ad}: salt ile dogrulanir", v["dogrulandi"] and v["sema"]=="tuzlu-v2" and v["kubra_imzali"])
         v=post(KUB+"/v1/verify",q)
         kontrol(f"YENI {ad}: salt OLMADAN dogrulanmaz", not v["dogrulandi"] and v["proof_eslesir"] is False)
         v=post(KUB+"/v1/verify",dict(q,salt="00"*32))

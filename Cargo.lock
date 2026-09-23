@@ -6194,11 +6194,13 @@ dependencies = [
  "blake3",
  "ed25519-dalek",
  "hex",
+ "k256",
  "lsc-engine",
  "rand 0.8.5",
  "reqwest",
  "serde",
  "serde_json",
+ "sha3",
  "tokio",
  "tower-http 0.5.2",
 ]
@@ -6230,6 +6232,7 @@ dependencies = [
 name = "soulware-worker"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "ed25519-dalek",
  "hex",
  "lsc-engine",

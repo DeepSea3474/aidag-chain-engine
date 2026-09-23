@@ -10,34 +10,39 @@
 //! Beyin: yerel soulware-core (KUBRA) /v1/ask ucu (deterministic=greedy → doğrulanabilir).
 //! Env: SOULWARE_COORD_URL · SOULWARE_BRAIN_URL · SOULWARE_WORKER_KEY · SOULWARE_POLL_SEC
 
-use ed25519_dalek::SigningKey;
+#[path = "../../soulware-core/src/imza_dosyasi.rs"]
+mod imza_dosyasi; // cüzdan anahtarı: FAIL-CLOSED (soulware-core ile ortak kod)
+#[path = "../../soulware-coordinator/src/worker_mesaj.rs"]
+mod worker_mesaj; // koordinatörün doğruladığı imza mesajı (ortak biçim)
+
+use ed25519_dalek::{Signer, SigningKey};
 use lsc_engine::public_key_to_adres;
 use serde_json::{json, Value};
 use std::time::Duration;
 
 fn ev(k: &str, d: &str) -> String { std::env::var(k).unwrap_or_else(|_| d.to_string()) }
 
-fn anahtar_yukle_veya_uret(path: &str) -> SigningKey {
-    if let Ok(data) = std::fs::read(path) {
-        if data.len() == 33 && data[0] == 1 {
-            let mut seed = [0u8; 32];
-            seed.copy_from_slice(&data[1..33]);
-            return SigningKey::from_bytes(&seed);
-        }
+fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// Cüzdan sahipliği imza alanları (worker_mesaj.rs biçimi, ed25519).
+fn imza_alanlari(key: &SigningKey, wallet: &str, nonce: &str) -> serde_json::Map<String, Value> {
+    let ts = now_secs();
+    let m = worker_mesaj::mesaj(wallet, nonce, ts);
+    let mut o = serde_json::Map::new();
+    o.insert("ts".into(), json!(ts));
+    o.insert("imza".into(), json!(hex::encode(key.sign(m.as_bytes()).to_bytes())));
+    o.insert("pubkey".into(), json!(hex::encode(key.verifying_key().to_bytes())));
+    o
+}
+
+/// Gövdeye imza alanlarını ekle.
+fn imzali(mut govde: Value, key: &SigningKey, wallet: &str, nonce: &str) -> Value {
+    if let Some(o) = govde.as_object_mut() {
+        o.extend(imza_alanlari(key, wallet, nonce));
     }
-    use rand::RngCore;
-    let mut seed = [0u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut seed);
-    let mut dosya = Vec::with_capacity(33);
-    dosya.push(1u8);
-    dosya.extend_from_slice(&seed);
-    let _ = std::fs::write(path, &dosya);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-    }
-    SigningKey::from_bytes(&seed)
+    govde
 }
 
 #[tokio::main]
@@ -48,8 +53,29 @@ async fn main() {
     let poll_sec: u64 = ev("SOULWARE_POLL_SEC", "3").parse().unwrap_or(3);
     let consent = ev("SOULWARE_CONSENT", "no").to_lowercase();
 
-    // Cüzdan (AIDAG adresi) = worker kimliği + ödül alıcısı.
-    let key = anahtar_yukle_veya_uret(&key_path);
+    // Cüzdan (AIDAG adresi) = worker kimliği + ödül alıcısı. FAIL-CLOSED: dosya yoksa
+    // ya da bozuksa BAŞLAMAZ (ödül adresi habersizce değişmesin); ilk kurulumda
+    // `soulware-worker --yeni-anahtar-uret` (dosya 0600, var olanın üzerine yazmaz).
+    let argumanlar: Vec<String> = std::env::args().skip(1).collect();
+    match argumanlar.as_slice() {
+        [] => {}
+        [a] if a == "--yeni-anahtar-uret" => match imza_dosyasi::uret(&key_path) {
+            Ok(k) => {
+                println!("YENI CUZDAN ANAHTARI URETILDI: {key_path}\n   cuzdan: 0x{}",
+                    hex::encode(public_key_to_adres(&k.verifying_key().to_bytes())));
+                return;
+            }
+            Err(e) => { eprintln!("HATA: {e}"); std::process::exit(2); }
+        },
+        _ => {
+            eprintln!("HATA: bilinmeyen arguman: {argumanlar:?}. Gecerli: (yok) | --yeni-anahtar-uret");
+            std::process::exit(2);
+        }
+    }
+    let key = match imza_dosyasi::yukle(&key_path) {
+        Ok(k) => k,
+        Err(e) => { eprintln!("HATA: {e}"); std::process::exit(2); }
+    };
     let wallet = format!("0x{}", hex::encode(public_key_to_adres(&key.verifying_key().to_bytes())));
 
     println!("──────────────────────────────────────────────");
@@ -71,7 +97,8 @@ async fn main() {
     let http = reqwest::Client::builder().timeout(Duration::from_secs(180)).build().expect("http");
 
     // Kaydol.
-    match http.post(format!("{coord}/worker/register")).json(&json!({ "wallet": wallet })).send().await {
+    match http.post(format!("{coord}/worker/register"))
+        .json(&imzali(json!({ "wallet": wallet }), &key, &wallet, worker_mesaj::NONCE_KAYIT)).send().await {
         Ok(r) => match r.json::<Value>().await {
             Ok(v) if v.get("ok").and_then(|o| o.as_bool()).unwrap_or(false) => println!("📝 kaydolundu."),
             _ => { eprintln!("kayıt reddedildi"); return; }
@@ -92,7 +119,7 @@ async fn main() {
                         let (Some(id), Some(soru)) = (q.get("id").and_then(|x| x.as_u64()), q.get("soru").and_then(|x| x.as_str())) else { continue };
                         let t0 = std::time::Instant::now();
                         let cevap = match http.post(format!("{brain}/v1/ask"))
-                            .json(&json!({ "prompt": soru, "deterministic": true, "brain": "auto" }))
+                            .json(&json!({ "prompt": soru, "deterministic": true }))
                             .send().await {
                             Ok(r) => r.json::<Value>().await.ok()
                                 .and_then(|v| v.get("answer").and_then(|a| a.as_str()).map(|s| s.to_string()))
@@ -101,8 +128,11 @@ async fn main() {
                         };
                         cevaplar.push(json!({ "id": id, "cevap": cevap, "ms": t0.elapsed().as_millis() as u64 }));
                     }
+                    let ozet: Vec<(u64, u64, &str)> = cevaplar.iter().filter_map(|c| Some((
+                        c.get("id")?.as_u64()?, c.get("ms")?.as_u64()?, c.get("cevap")?.as_str()?))).collect();
+                    let nonce = worker_mesaj::benchmark_nonce(&ozet);
                     if let Ok(r) = http.post(format!("{coord}/worker/benchmark"))
-                        .json(&json!({ "wallet": wallet, "cevaplar": cevaplar })).send().await {
+                        .json(&imzali(json!({ "wallet": wallet, "cevaplar": cevaplar }), &key, &wallet, &nonce)).send().await {
                         if let Ok(v) = r.json::<Value>().await {
                             println!("🎓 seviye belirlendi: tier={} (doğru {}/{} · {}ms ort.)",
                                 v.get("tier").and_then(|x| x.as_u64()).unwrap_or(0),
@@ -118,7 +148,9 @@ async fn main() {
 
     // Ana döngü: iş çek → KUBRA çalıştır → gönder.
     loop {
-        let is: Option<Value> = match http.get(format!("{coord}/worker/poll/{wallet}")).send().await {
+        let poll_imza: Vec<(String, String)> = imza_alanlari(&key, &wallet, worker_mesaj::NONCE_POLL)
+            .into_iter().map(|(k, v)| (k, v.as_str().map(String::from).unwrap_or_else(|| v.to_string()))).collect();
+        let is: Option<Value> = match http.get(format!("{coord}/worker/poll/{wallet}")).query(&poll_imza).send().await {
             Ok(r) => r.json::<Value>().await.ok(),
             Err(_) => None,
         };
@@ -139,7 +171,7 @@ async fn main() {
         println!("⚙  iş #{job_id} alındı → KUBRA çalıştırılıyor...");
         // KUBRA'yı çağır (deterministic → doğrulanabilir birebir çıktı).
         let cevap = match http.post(format!("{brain}/v1/ask"))
-            .json(&json!({ "prompt": prompt, "deterministic": det, "brain": "auto" }))
+            .json(&json!({ "prompt": prompt, "deterministic": det }))
             .send().await {
             Ok(r) => match r.json::<Value>().await {
                 Ok(v) if v.get("ok").and_then(|o| o.as_bool()).unwrap_or(false) =>
@@ -153,7 +185,8 @@ async fn main() {
 
         // Sonucu gönder.
         match http.post(format!("{coord}/worker/submit"))
-            .json(&json!({ "wallet": wallet, "job_id": job_id, "answer": cevap }))
+            .json(&imzali(json!({ "wallet": wallet, "job_id": job_id, "answer": cevap }), &key, &wallet,
+                &worker_mesaj::is_nonce(job_id, &cevap)))
             .send().await {
             Ok(r) => if let Ok(v) = r.json::<Value>().await {
                 let durum = v.get("durum").and_then(|d| d.as_str()).unwrap_or("?");

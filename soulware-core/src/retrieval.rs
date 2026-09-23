@@ -71,6 +71,28 @@ pub fn sade(s: &str) -> String {
         .join(" ")
 }
 
+/// Başlık kimliği (korumalı başlık ve aynı-başlık eşleştirmesi için): Unicode küçük
+/// harf + Türkçe I/İ/ı katlaması (İ → i, ı → i, I → i) + birleşen nokta (U+0307)
+/// ve görünmez biçim karakterleri (sıfır genişlikli boşluk vb.) atılır + boşluklar
+/// tekleştirilir. Böylece "İSTANBUL", "istanbul", "ıstanbul", "Istanbul\u{200b}" aynı
+/// başlık sayılır (korumalı seed bu varyantlarla EZİLEMEZ).
+/// NOT: NFKC/homoglif (ör. Kiril 'а') normalizasyonu YOK (bağımlılık gerektirir).
+pub fn baslik_anahtar(s: &str) -> String {
+    s.chars()
+        .flat_map(char::to_lowercase)
+        .filter(|c| !matches!(*c, '\u{307}' | '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2064}' | '\u{feff}' | '\u{ad}'))
+        .map(|c| match c {
+            'ı' => 'i',
+            'ß' => 's',
+            'ς' => 'σ',
+            other => other,
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Sade metinde anahtar var mı? Boşluklu anahtar → ifade (kelime sınırlı) eşleşmesi;
 /// tek kelime → token eşitliği, ≥5 harfliyse önek (Türkçe ekler: "zincirde" ~ "zincir").
 /// Kısa anahtarlar önekle eşleşmez ("rwa" ≠ "rwanda", "tps" ≠ "https").
@@ -125,8 +147,9 @@ impl Depo {
         if let Ok(data) = std::fs::read(seed_yol) {
             if let Ok(seed) = serde_json::from_slice::<Vec<Belge>>(&data) {
                 for sb in seed {
-                    self.korumali.insert(sb.baslik.to_lowercase());
-                    match self.belgeler.iter().position(|x| x.baslik.eq_ignore_ascii_case(&sb.baslik)) {
+                    let anahtar = baslik_anahtar(&sb.baslik);
+                    self.korumali.insert(anahtar.clone());
+                    match self.belgeler.iter().position(|x| baslik_anahtar(&x.baslik) == anahtar) {
                         Some(pos) => {
                             if self.belgeler[pos].metin != sb.metin || self.belgeler[pos].url != sb.url {
                                 self.belgeler[pos] = sb;
@@ -244,7 +267,8 @@ impl Depo {
 
     /// Belge ekle (ingest) + kaydet. Aynı başlık varsa metni günceller.
     pub fn ekle(&mut self, b: Belge) {
-        if let Some(mevcut) = self.belgeler.iter_mut().find(|x| x.baslik.eq_ignore_ascii_case(&b.baslik)) {
+        let anahtar = baslik_anahtar(&b.baslik);
+        if let Some(mevcut) = self.belgeler.iter_mut().find(|x| baslik_anahtar(&x.baslik) == anahtar) {
             mevcut.metin = b.metin;
             mevcut.url = b.url;
         } else {
@@ -254,15 +278,17 @@ impl Depo {
     }
 
     /// Belge ekle + embedding'i SENKRON tut (embedder varsa). Semantik retrieval için.
-    pub fn ekle_embed(&mut self, b: Belge, e: Option<&crate::embed::Embedder>) {
+    /// Döner: false → başlık KORUMALI (küratörlü seed), belge eklenmedi.
+    pub fn ekle_embed(&mut self, b: Belge, e: Option<&crate::embed::Embedder>) -> bool {
         // KORUMALI (küratörlü seed) başlığı ingest EZEMEZ — temiz cevap korunur.
-        if self.korumali.contains(&b.baslik.to_lowercase()) {
-            return;
+        let anahtar = baslik_anahtar(&b.baslik);
+        if self.korumali.contains(&anahtar) {
+            return false;
         }
         while self.embeddings.len() < self.belgeler.len() {
             self.embeddings.push(vec![]);
         }
-        let idx = if let Some(pos) = self.belgeler.iter().position(|x| x.baslik.eq_ignore_ascii_case(&b.baslik)) {
+        let idx = if let Some(pos) = self.belgeler.iter().position(|x| baslik_anahtar(&x.baslik) == anahtar) {
             self.belgeler[pos].metin = b.metin.clone();
             self.belgeler[pos].url = b.url.clone();
             pos
@@ -277,6 +303,7 @@ impl Depo {
             self.embed_cache_kaydet();
         }
         self.kaydet();
+        true
     }
 
     /// IDF (ters belge frekansı) ağırlığı ×100. Yaygın kelime ("başkenti" birçok
@@ -408,6 +435,37 @@ mod tests {
             embeddings: vec![],
             korumali: HashSet::new(),
         }
+    }
+
+    #[test]
+    fn korumali_baslik_turkce_ve_gorunmez_varyantlarla_ezilemez() {
+        let d = std::env::temp_dir().join(format!("soulware-retrieval-test-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let kb = d.join("kb.json");
+        let seed = d.join("kb.seed.json");
+        let _ = std::fs::remove_file(&kb);
+        std::fs::write(&seed, serde_json::to_vec(&vec![
+            Belge { baslik: "İstanbul".into(), metin: "TEMIZ istanbul metni".into(), url: None },
+            Belge { baslik: "Işık".into(), metin: "TEMIZ isik metni".into(), url: None },
+        ]).unwrap()).unwrap();
+        let mut depo = Depo::yukle(kb.to_str().unwrap());
+        depo.seed_uygula(seed.to_str().unwrap());
+        for saldiri in ["istanbul", "ISTANBUL", "ıstanbul", "İSTANBUL", " istanbul ", "İstan\u{200b}bul",
+                        "i\u{307}stanbul", "IŞIK", "ışık", "isik\u{feff}"] {
+            let b = Belge { baslik: saldiri.into(), metin: "ZEHIRLI metin".into(), url: None };
+            // "isik" (noktasiz sade) ayri kelimedir; yalniz ş'li varyantlar eslesir.
+            let beklenen_red = baslik_anahtar(saldiri) == baslik_anahtar("İstanbul") || baslik_anahtar(saldiri) == baslik_anahtar("Işık");
+            assert_eq!(!depo.ekle_embed(b, None), beklenen_red, "{saldiri:?}");
+        }
+        assert!(depo.belgeler.iter().all(|b| !b.metin.contains("ZEHIRLI") || baslik_anahtar(&b.baslik) == "isik"));
+        let ist = depo.belgeler.iter().find(|b| b.baslik == "İstanbul").unwrap();
+        assert_eq!(ist.metin, "TEMIZ istanbul metni");
+        // Temel esitlikler
+        assert_eq!(baslik_anahtar("İstanbul"), baslik_anahtar("ıstanbul"));
+        assert_eq!(baslik_anahtar("İstanbul"), baslik_anahtar("ISTANBUL"));
+        assert_eq!(baslik_anahtar("Işık"), baslik_anahtar("IŞIK"));
+        assert_ne!(baslik_anahtar("Ankara"), baslik_anahtar("Ankaraa"));
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

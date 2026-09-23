@@ -2,6 +2,7 @@
 name = "soulware-worker"
 version = "0.1.0"
 edition = "2021"
+license-file = "../LICENSE"
 description = "SoulwareAI worker — indirilen KUBRA istemcisi. Kullanici IZNIYLE bostaki gucu aga verir."
 
 [[bin]]
@@ -12,6 +13,7 @@ path = "src/main.rs"
 lsc-engine = { path = "../lsc-engine" }
 ed25519-dalek = { version = "=2.1.1", default-features = false, features = ["std"] }
 hex = "=0.4.3"
+blake3 = "=1.5.5"
 rand = "=0.8.5"
 tokio = { version = "=1.43.0", features = ["rt-multi-thread", "macros", "signal", "time"] }
 serde_json = "=1.0.140"

@@ -2,6 +2,7 @@
 name = "soulware-coordinator"
 version = "0.1.0"
 edition = "2021"
+license-file = "../LICENSE"
 description = "SoulwareAI hesaplama & odul koordinatoru — is dagit, yedekli dogrula, zincire imzali odul yaz."
 
 [[bin]]
@@ -21,3 +22,6 @@ tokio = { version = "=1.43.0", features = ["rt-multi-thread", "macros", "signal"
 serde = { version = "1", features = ["derive"] }
 serde_json = "=1.0.140"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# Worker cuzdan-sahipligi imzasi (EVM EIP-191 personal_sign): lsc-engine ile AYNI surumler.
+k256 = { version = "=0.13.4", features = ["ecdsa"] }
+sha3 = "=0.11.0"
