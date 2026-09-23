@@ -74,9 +74,13 @@ Veri dosyasi **mutlak yolla** verilir (aksi halde restart'ta yuklenmez).
 Beklenen: `network_id 3474`, `genesis b82345008ae109d8`, `orphan_count 0`, `vertex_count`
 sunucudakiyle ayni (test sirasinda yeni vertex geldiyse birkac saniye sonra tekrar bak).
 
-Sunucuda uzak dugumun dis es olarak gorundugunu kaydet:
+Sunucuda uzak dugumun dis es olarak gorundugunu kaydet. Dugum gunlugu her baglantida
+`ES BAGLANDI: peer=<id> yon=gelen|giden adres=/ip4/a.b.x.x/tcp/<port>` yazar (IP'nin son iki
+okteti maskeli; 45.13.x.x ve 172.x.x.x sunucunun kendi adresleridir, dis dugum bunlardan farklidir):
 
-    ss -tn state established '( sport = :40001 )' > $K/04-sunucu-dis-es.txt
+    { ss -tn state established '( sport = :40001 )'
+      journalctl -u lsc-node --since "-30 min" --no-pager | grep -E "ES (BAGLANDI|AYRILDI)"; } \
+      > $K/04-sunucu-dis-es.txt
 
 ## 5. Belge yayilimi — uzak dugum -> sunucu
 
