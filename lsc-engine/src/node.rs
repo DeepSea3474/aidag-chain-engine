@@ -5895,6 +5895,98 @@ mod rwa_tests {
         assert!(!m.rwa_aktif());
     }
 
+    /// Eski tarihli vertex'i genesis'e bagla, sonra guncel uca birlestir.
+    fn eski_tarihli_gonder(k: &mut Kurulum, sk: &SigningKey, payload: Vec<u8>, eski: u64) {
+        let v = Vertex::new_signed(NET, vec![k.gid], payload, eski, sk).unwrap();
+        k.node.ingest_networked(&wire::encode(&v), k.t);
+        let mut ebeveyn = vec![k.son, *v.id()];
+        ebeveyn.sort();
+        k.dolgu += 1;
+        let m = Vertex::new_signed(NET, ebeveyn, k.dolgu.to_be_bytes().to_vec(), k.t, &anahtar(0x5A))
+            .unwrap();
+        assert!(matches!(
+            k.node.ingest_networked(&wire::encode(&m), k.t),
+            NetworkIngestOutcome::Integrated(_)
+        ));
+        k.son = *m.id();
+    }
+
+    /// KUBRA benzeri servis anahtari (rolsuz, yasak listesine EKLENMEMIS — bugunku
+    /// mainnet sabitiyle ayni durum): zincire yalniz tip=1 belge kaydi yazabilir;
+    /// tip=17 yonetim, 18 akis tanimi, 19 rapor, 20 KYC islemlerinin HICBIRI etki etmez.
+    #[test]
+    fn rwa_kubra_benzeri_rolsuz_servis_hicbir_rwa_islemi_yapamaz() {
+        let mut k = Kurulum::yeni();
+        k.owner(akis_tanimi(1).encode());
+        let servis = anahtar(0x4C);
+        let sa = adres(&servis);
+        assert!(!k.node.rwa_yasakli_mi(&sa), "yasak listesi YOK: koruma yalniz rol/imza kapilari");
+        // Yapabildigi tek sey (bugunku soulware-core davranisi): tip=1 belge hash'i.
+        k.gonder(&servis, crate::tx::Record::new([0xAB; 32]).encode());
+        assert_eq!(k.node.belge_dogrula(&[0xAB; 32]).unwrap().kaydeden, sa);
+        // Kendini kurum diye kaydedebilir (tip=5) — bu RWA yetkisi VERMEZ.
+        k.kurum_kaydet(&servis, "KUBRA");
+        // tip=17: kendi anahtariyla (iki kez) imzaladigi yonetim islemi.
+        let e = YonetimEylemi::Rol(KurumYetki::new(sa, ROL_KYC_ONAYLAYICI, 0, true));
+        k.gonder(&servis, imzali(e.clone(), 0, k.t + 60, &[&servis, &servis]).encode());
+        // tip=17: yonetim imzacisi eklemeye calisir (kendi anahtarini).
+        let ekle = YonetimEylemi::ImzaciEkle(servis.verifying_key().to_bytes());
+        k.gonder(&servis, imzali(ekle, 0, k.t + 60, &[&servis, &k.osk.clone()]).encode());
+        // tip=18: kendi akisini tanimlamaya calisir.
+        k.gonder(&servis, OracleAkisTanim { akis_no: 99, ..akis_tanimi(1) }.encode());
+        k.ilerle(BILDIRIM);
+        // tip=19 ve tip=20.
+        k.gonder(&servis, rapor(1, 1_000));
+        k.gonder(&servis, KycKayit { adres: [0xC9; 20], onay: true, kanit_hash: [0; 32] }.encode());
+        // KANIT: hicbir RWA durumu degismedi.
+        assert!(k.node.kurum_rolleri(&sa).is_empty(), "rol yok");
+        let y = k.node.rwa_yonetim().unwrap();
+        assert_eq!((y.nonce(), y.imzacilar().len()), (0, 3), "yonetim degismedi");
+        assert!(!y.imzaci_mi(&servis.verifying_key().to_bytes()));
+        assert!(k.node.oracle_akis(99).is_none(), "akis tanimlanamadi");
+        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::VeriYok);
+        assert_eq!(k.node.oracle_akis(AKIS).unwrap().acik_raporlar.len(), 0, "rapor tura girmedi");
+        assert!(!k.node.kyc_onayli_mi(&[0xC9; 20]));
+        assert!(k.node.kyc_kayitlari(&[0xC9; 20]).is_empty(), "KYC kaydi yok");
+    }
+
+    /// GERIYE TARIHLEME: bayatlik/tur penceresi ZINCIR saatine bagli. Eski tarihli
+    /// vertex zincir saatini geri alamaz, bayat veriyi taze gosteremez; eski
+    /// tarihli rapor, vertex zamaniyla DEGIL islendigi zincir saatiyle kaydedilir.
+    #[test]
+    fn rwa_eski_tarihli_vertex_bayatligi_atlatamaz() {
+        let mut k = Kurulum::yeni();
+        k.owner(akis_tanimi(2).encode());
+        let a = anahtar(0x91 ^ 0x10);
+        let b = anahtar(0x92 ^ 0x10);
+        k.yetkili_kurum(&a, ROL_ORACLE_RAPORLAYICI, AKIS);
+        k.yetkili_kurum(&b, ROL_ORACLE_RAPORLAYICI, AKIS);
+        k.gonder(&a, rapor(1, 1000));
+        k.gonder(&b, rapor(1, 1001));
+        let yayin = k.t;
+        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap().guncelleme, yayin);
+        k.ilerle(3_601);
+        let saat = k.node.zincir_saati();
+        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::Bayat);
+        // 1) Yayin anina tarihli bos vertex: zincir saati GERI GITMEZ, veri hala bayat.
+        eski_tarihli_gonder(&mut k, &anahtar(0x33), b"eski".to_vec(), yayin);
+        assert_eq!(k.node.zincir_saati(), saat, "zincir saati monoton");
+        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::Bayat);
+        // 2) Eski tarihli RAPOR: tur 2'nin ilk raporu; zamani vertex zamani DEGIL.
+        eski_tarihli_gonder(&mut k, &a, rapor(2, 1002), yayin);
+        let acik = k.node.oracle_akis(AKIS).unwrap();
+        assert_eq!(acik.acik_tur_baslangic, saat, "tur baslangici zincir saati");
+        assert_eq!(acik.acik_raporlar.values().next().unwrap().zaman, saat);
+        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::Bayat, "tek rapor < M");
+        // 3) Eski tarihli ikinci rapor turu kapatir; guncelleme = ZINCIR saati.
+        eski_tarihli_gonder(&mut k, &b, rapor(2, 1003), T0 + 1); // genesis sonrasi en eski an
+        let t = k.node.oracle_son_veri(AKIS).unwrap();
+        assert_eq!((t.tur_no, t.baslangic, t.guncelleme), (2, saat, saat));
+        // 4) Bir bayat_sn sonra yine bayatlar (eski tarihli vertex sureyi uzatmaz).
+        k.ilerle(3_601);
+        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::Bayat);
+    }
+
     #[test]
     fn rwa_mainnet_aktivasyon_oncesi_kapali() {
         let mut m = NodeState::new_mainnet();

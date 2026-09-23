@@ -208,6 +208,8 @@ Her biri once ESKI kodda BASARISIZ, yeni kodda BASARILI oldugu dogrulanarak ekle
 
 ## RWA ORACLE + KYC TESTLERI (dal: rwa-oracle-kyc) — bkz. RWA_ORACLE_KYC_TASARIM.md
 - node::rwa_tests::rwa_yonetim_* — M-of-N: 2 imza gecer, 1 imza red, ayni imzaci 2 kez sayilmaz, replay red, esik altina dusurme red, imzaci/esik degisikligi M-of-N, owner tek anahtarla veremez, suresi dolan/baska ag imzasi red, kurulmamis yonetim; rwa_mainnet_genesis_ve_dagitim_degismedi
+- node::rwa_tests::rwa_kubra_benzeri_rolsuz_servis_hicbir_rwa_islemi_yapamaz — rolsuz servis anahtari (yasak listesi olmadan) yalniz tip=1 yazar; 17/18/19/20 etkisiz
+- node::rwa_tests::rwa_eski_tarihli_vertex_bayatligi_atlatamaz — eski tarihli vertex zincir saatini geri almaz, bayat veriyi tazelemez, rapor zamani = zincir saati
 - tx::rwa_tx_tests — tip 17..20 kodlama: gidis-donus, eksik/fazla bayt, yanlis tip, gecersiz alan, tip numarasi cakismasi
 - oracle_hesap::tests — alt medyan, sapma siniri, i128 sinirlarinda tasmasiz 256-bit karsilastirma, eleme, girdi sirasindan bagimsizlik, kesici, bayatlik
 - rwa::tests — tur kapanisi, tekrar rapor, yanlis tur, bayat acik tur, devre kesici durdur/ac, rolu iptal edilenin raporu, tur gecmisi budama, KYC onay/iptal
