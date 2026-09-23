@@ -59,3 +59,8 @@ data/
 .on-satis-son-blok.json
 soulware-knowledge/bilim-durum.json
 soulware-knowledge/github-durum.json
+# On-satis izleyici durum dosyalari (canli durum; repoya GIRMEZ)
+.on-satis-islenmis.json
+.on-satis-adres-usd.json
+.on-satis-durum.json
+.on-satis-durum.json.kilit
