@@ -346,6 +346,159 @@ impl KycRegistry {
     }
 }
 
+/// Yonetim esigi alt siniri: tek anahtarla yonetim YOK.
+pub const RWA_YONETIM_ASGARI_ESIK: u8 = 2;
+
+/// Yonetim islemi red sebepleri (deterministik; state'e dokunulmaz).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum YonetimHatasi {
+    /// Yonetim kurulmamis (mainnet'te imzaci listesi henuz pinlenmedi).
+    Kurulmamis,
+    /// Nonce zincirdeki yonetim sayacina esit degil (replay / eski imza).
+    YanlisNonce { beklenen: u64 },
+    /// Zincir saati `son_gecerlilik`'i gecti.
+    SuresiDolmus,
+    /// Benzersiz, gecerli imzaci sayisi esigin altinda.
+    YetersizImza { gecerli: usize, esik: u8 },
+    /// Imzaci sayisi esigin altina duserdi (kendini kilitleme).
+    EsikAltinaDusurme,
+    /// Esik [ASGARI, imzaci sayisi] disinda.
+    GecersizEsik,
+    ImzaciZatenVar,
+    ImzaciYok,
+    AzamiImzaci,
+    /// Gecersiz ed25519 acik anahtari.
+    GecersizAnahtar,
+}
+
+/// RWA yonetimi: M-of-N imzaci kumesi + replay sayaci. Imzaci ANAHTARLARI
+/// sunucuda DEGIL; burada yalniz ACIK anahtarlar tutulur.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct YonetimRegistry {
+    imzacilar: std::collections::BTreeSet<[u8; 32]>,
+    esik: u8,
+    /// Sonraki gecerli yonetim isleminin nonce'u. Her YETKILENDIRILMIS islemde +1.
+    nonce: u64,
+}
+
+fn anahtar_gecerli(pk: &[u8; 32]) -> bool {
+    ed25519_dalek::VerifyingKey::from_bytes(pk).is_ok()
+}
+
+impl YonetimRegistry {
+    /// Baslangic kurulumu (genesis disi, DAG disi baslangic durumu).
+    pub fn kur(imzacilar: &[[u8; 32]], esik: u8) -> Result<Self, YonetimHatasi> {
+        let kume: std::collections::BTreeSet<[u8; 32]> = imzacilar.iter().copied().collect();
+        if kume.len() != imzacilar.len() {
+            return Err(YonetimHatasi::ImzaciZatenVar);
+        }
+        if kume.len() > crate::tx::RWA_YONETIM_AZAMI_IMZA {
+            return Err(YonetimHatasi::AzamiImzaci);
+        }
+        if !kume.iter().all(anahtar_gecerli) {
+            return Err(YonetimHatasi::GecersizAnahtar);
+        }
+        if esik < RWA_YONETIM_ASGARI_ESIK || usize::from(esik) > kume.len() {
+            return Err(YonetimHatasi::GecersizEsik);
+        }
+        Ok(YonetimRegistry { imzacilar: kume, esik, nonce: 0 })
+    }
+
+    pub fn imzacilar(&self) -> Vec<[u8; 32]> {
+        self.imzacilar.iter().copied().collect()
+    }
+
+    pub fn esik(&self) -> u8 {
+        self.esik
+    }
+
+    pub fn nonce(&self) -> u64 {
+        self.nonce
+    }
+
+    pub fn imzaci_mi(&self, pk: &[u8; 32]) -> bool {
+        self.imzacilar.contains(pk)
+    }
+
+    /// Islemi yetkilendir: nonce == sayac, sure dolmamis, imza mesajini gecerli
+    /// imzalayan BENZERSIZ imzaci sayisi >= esik. Liste-disi anahtar, gecersiz
+    /// imza ve AYNI imzacinin tekrari SAYILMAZ.
+    pub fn yetkilendir(
+        &self,
+        islem: &crate::tx::YonetimIslemi,
+        network_id: u32,
+        simdi: u64,
+    ) -> Result<(), YonetimHatasi> {
+        if islem.nonce != self.nonce {
+            return Err(YonetimHatasi::YanlisNonce { beklenen: self.nonce });
+        }
+        if simdi > islem.son_gecerlilik {
+            return Err(YonetimHatasi::SuresiDolmus);
+        }
+        let mesaj = islem.imza_mesaji(network_id);
+        let mut sayilan = std::collections::BTreeSet::new();
+        for (pk, imza) in &islem.imzalar {
+            if !self.imzacilar.contains(pk) || sayilan.contains(pk) {
+                continue;
+            }
+            let Ok(vk) = ed25519_dalek::VerifyingKey::from_bytes(pk) else {
+                continue;
+            };
+            let sig = ed25519_dalek::Signature::from_bytes(imza);
+            if vk.verify_strict(&mesaj, &sig).is_ok() {
+                sayilan.insert(*pk);
+            }
+        }
+        if sayilan.len() < usize::from(self.esik) {
+            return Err(YonetimHatasi::YetersizImza { gecerli: sayilan.len(), esik: self.esik });
+        }
+        Ok(())
+    }
+
+    /// Yetkilendirilmis islem tuketildi: sayac +1 (eski imzalar artik gecersiz).
+    pub fn nonce_ilerlet(&mut self) {
+        self.nonce = self.nonce.saturating_add(1);
+    }
+
+    /// Imzaci/esik eylemini uygula. KENDINI KILITLEME KORUMASI: imzaci sayisi
+    /// esigin altina dusurulemez; esik [ASGARI, imzaci sayisi] disina cikamaz.
+    /// Rol eylemi burada degil (node.rs).
+    pub fn yapi_degistir(&mut self, eylem: &crate::tx::YonetimEylemi) -> Result<(), YonetimHatasi> {
+        use crate::tx::YonetimEylemi as E;
+        match eylem {
+            E::ImzaciEkle(pk) => {
+                if self.imzacilar.contains(pk) {
+                    return Err(YonetimHatasi::ImzaciZatenVar);
+                }
+                if self.imzacilar.len() >= crate::tx::RWA_YONETIM_AZAMI_IMZA {
+                    return Err(YonetimHatasi::AzamiImzaci);
+                }
+                if !anahtar_gecerli(pk) {
+                    return Err(YonetimHatasi::GecersizAnahtar);
+                }
+                self.imzacilar.insert(*pk);
+            }
+            E::ImzaciCikar(pk) => {
+                if !self.imzacilar.contains(pk) {
+                    return Err(YonetimHatasi::ImzaciYok);
+                }
+                if self.imzacilar.len() - 1 < usize::from(self.esik) {
+                    return Err(YonetimHatasi::EsikAltinaDusurme);
+                }
+                self.imzacilar.remove(pk);
+            }
+            E::Esik(m) => {
+                if *m < RWA_YONETIM_ASGARI_ESIK || usize::from(*m) > self.imzacilar.len() {
+                    return Err(YonetimHatasi::GecersizEsik);
+                }
+                self.esik = *m;
+            }
+            E::Rol(_) => {}
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -76,6 +76,11 @@ pub struct NodeState {
     oracle_registry: crate::rwa::OracleRegistry,
     /// RWA KYC onay kaydi (tip=20). total_order'dan turer.
     kyc_registry: crate::rwa::KycRegistry,
+    /// RWA M-of-N yonetim (tip=17). None = kurulmamis (hicbir rol islemi gecmez).
+    /// total_order'dan turer; baslangic degeri `baslangic_rwa_yonetim`.
+    rwa_yonetim: Option<crate::rwa::YonetimRegistry>,
+    /// Baslangic yonetim kumesi (DAG disi; her state-rebuild'de buradan baslar).
+    baslangic_rwa_yonetim: Option<crate::rwa::YonetimRegistry>,
     /// Test-yalniz ek yasakli imzalayanlar (mainnet::RWA_YASAKLI_ADRESLER'e ek).
     /// Uretimde HER ZAMAN bos -> konsensus yalniz derleme-zamani sabite baglidir.
     #[cfg(test)]
@@ -151,6 +156,17 @@ impl NodeState {
         // yukle. Env (LSC_GENESIS_*) YOK -> tum mainnet node'lari AYNI dagitim + owner
         // bakiyesi -> on-satis konsensus bolunmesi kapanir. Kapalilik (21M) debug'da dogrulanir.
         s.mainnet_dagitim_yukle();
+        // RWA yonetimi: PINLI imzaci listesi (bos ise kurulmaz -> rol islemi yok).
+        // Genesis id'sine dokunmaz (baslangic durumu, DAG vertex'i degil).
+        if !crate::mainnet::RWA_YONETIM_IMZACILARI.is_empty() {
+            let y = crate::rwa::YonetimRegistry::kur(
+                crate::mainnet::RWA_YONETIM_IMZACILARI,
+                crate::mainnet::RWA_YONETIM_BASLANGIC_ESIK,
+            )
+            .expect("mainnet RWA yonetim sabitleri gecersiz");
+            s.baslangic_rwa_yonetim = Some(y.clone());
+            s.rwa_yonetim = Some(y);
+        }
         s
     }
 
@@ -216,6 +232,8 @@ impl NodeState {
             on_satis_registry: crate::registry::OnSatisRegistry::yeni(),
             oracle_registry: crate::rwa::OracleRegistry::yeni(),
             kyc_registry: crate::rwa::KycRegistry::yeni(),
+            rwa_yonetim: None,
+            baslangic_rwa_yonetim: None,
             #[cfg(test)]
             rwa_test_yasakli: Vec::new(),
             on_satis_gunluk: (0, 0),
@@ -463,13 +481,61 @@ impl NodeState {
             || matches!(crate::mainnet::RWA_MAINNET_AKTIVASYON, Some(t) if self.zincir_saati >= t)
     }
 
-    /// RWA'da imza/rol yetkisi olamayacak adres mi? (owner + sabit liste [+ test]).
+    /// RWA'da rol alamayacak / rapor-KYC yazamayacak adres mi?
+    /// Owner + yonetim imzacilari (gorevler ayrimi) + sabit liste (KUBRA) [+ test].
     fn rwa_yasakli_mi(&self, adres: &[u8; 20]) -> bool {
         #[cfg(test)]
         if self.rwa_test_yasakli.contains(adres) {
             return true;
         }
-        self.faucet_owner == Some(*adres) || crate::mainnet::RWA_YASAKLI_ADRESLER.contains(adres)
+        let yonetim_imzacisi = self.rwa_yonetim.as_ref().is_some_and(|y| {
+            y.imzacilar()
+                .iter()
+                .any(|pk| crate::registry::public_key_to_adres(pk) == *adres)
+        });
+        self.faucet_owner == Some(*adres)
+            || yonetim_imzacisi
+            || crate::mainnet::RWA_YASAKLI_ADRESLER.contains(adres)
+    }
+
+    /// RWA yonetimini (M-of-N) baslangic durumu olarak kur. DEVNET/TESTNET
+    /// acilisinda, vertex yuklemeden ONCE cagrilir (faucet_owner_ayarla gibi).
+    /// Mainnet'te kume mainnet::RWA_YONETIM_IMZACILARI'ndan PINLIDIR.
+    pub fn rwa_yonetim_kur(
+        &mut self,
+        imzacilar: &[[u8; 32]],
+        esik: u8,
+    ) -> Result<(), crate::rwa::YonetimHatasi> {
+        let y = crate::rwa::YonetimRegistry::kur(imzacilar, esik)?;
+        self.baslangic_rwa_yonetim = Some(y.clone());
+        self.rwa_yonetim = Some(y);
+        Ok(())
+    }
+
+    /// RWA yonetim durumu (imzacilar, esik, sonraki nonce). None = kurulmamis.
+    pub fn rwa_yonetim(&self) -> Option<&crate::rwa::YonetimRegistry> {
+        self.rwa_yonetim.as_ref()
+    }
+
+    /// tip=17 rol eylemi: yasakli degil + (ver: kayitli kurum, oracle icin tanimli
+    /// akis; bildirim suresi sonra etkin) / (al: aninda).
+    fn rwa_rol_eylemi(&mut self, y: &crate::tx::KurumYetki) {
+        if self.rwa_yasakli_mi(&y.kurum) {
+            return;
+        }
+        if y.ver {
+            let kapsam_ok = y.rol != crate::tx::ROL_ORACLE_RAPORLAYICI
+                || self.oracle_registry.akis_var_mi(y.kapsam);
+            if kapsam_ok {
+                let etkin = self
+                    .zincir_saati
+                    .saturating_add(crate::mainnet::RWA_ROL_BILDIRIM_SURESI);
+                self.kurum_registry.rol_ver(y.kurum, y.rol, y.kapsam, etkin);
+            }
+        } else {
+            self.kurum_registry
+                .rol_al(y.kurum, y.rol, y.kapsam, self.zincir_saati);
+        }
     }
 
     #[cfg(test)]
@@ -954,6 +1020,7 @@ impl NodeState {
         self.on_satis_registry = crate::registry::OnSatisRegistry::yeni();
         self.oracle_registry = crate::rwa::OracleRegistry::yeni();
         self.kyc_registry = crate::rwa::KycRegistry::yeni();
+        self.rwa_yonetim = self.baslangic_rwa_yonetim.clone();
         // total_order'dan tureyen TUM sayaclar sifirlanir (yoksa reorg'da gunun
         // satislari eski toplamin USTUNE yeniden sayilir -> gecerli satis reddi,
         // restart eden dugumle durum ayrismasi = konsensus bolunmesi).
@@ -1516,28 +1583,25 @@ impl NodeState {
             //  - Zaman = ZINCIR SAATI (vertex zamani degil; geriye tarihlenemez).
             //  - Yasakli imzalayan (owner, KUBRA, ...) rapor/KYC YAZAMAZ, rol ALAMAZ.
             //  - Ihlal -> SESSIZ RED (tip=15/16 deseni).
-            // tip=17: KURUM YETKI. SADECE owner; yalniz KAYITLI kuruma rol verir /
-            // geri alir. Verilen rol bildirim suresi sonra etkin; geri alma aninda.
-            Some(&crate::tx::TX_TYPE_KURUM_YETKI) => {
-                if let Ok(y) = crate::tx::KurumYetki::decode(payload) {
-                    let cagiran = crate::registry::public_key_to_adres(signer);
-                    if self.rwa_aktif()
-                        && self.faucet_owner == Some(cagiran)
-                        && !self.rwa_yasakli_mi(&y.kurum)
-                    {
-                        if y.ver {
-                            // Oracle rolu yalniz TANIMLI akisa verilir.
-                            let kapsam_ok = y.rol != crate::tx::ROL_ORACLE_RAPORLAYICI
-                                || self.oracle_registry.akis_var_mi(y.kapsam);
-                            if kapsam_ok {
-                                let etkin = self
-                                    .zincir_saati
-                                    .saturating_add(crate::mainnet::RWA_ROL_BILDIRIM_SURESI);
-                                self.kurum_registry.rol_ver(y.kurum, y.rol, y.kapsam, etkin);
-                            }
-                        } else {
-                            self.kurum_registry
-                                .rol_al(y.kurum, y.rol, y.kapsam, self.zincir_saati);
+            // tip=17: RWA YONETIM (M-of-N). Yetki vertex imzalayanindan DEGIL, islemdeki
+            // cevrimdisi yonetim imzalarindan: nonce == sayac (replay yok), sure dolmamis,
+            // BENZERSIZ gecerli imzaci >= esik. Yetkilendirilen islem nonce'u TUKETIR
+            // (eylem etkisiz kalsa bile) -> ayni imzalar ikinci kez kullanilamaz.
+            // Owner'in tek anahtarla rol verme yolu YOK.
+            Some(&crate::tx::TX_TYPE_RWA_YONETIM) => {
+                if let Ok(islem) = crate::tx::YonetimIslemi::decode(payload) {
+                    let yetkili = self.rwa_aktif()
+                        && self.rwa_yonetim.as_ref().is_some_and(|y| {
+                            y.yetkilendir(&islem, self.network_id, self.zincir_saati).is_ok()
+                        });
+                    if yetkili {
+                        if let crate::tx::YonetimEylemi::Rol(r) = &islem.eylem {
+                            self.rwa_rol_eylemi(r);
+                        }
+                        if let Some(y) = self.rwa_yonetim.as_mut() {
+                            // Imzaci/esik eylemi: kilitleme korumasi ihlalinde etkisiz.
+                            let _ = y.yapi_degistir(&islem.eylem);
+                            y.nonce_ilerlet();
                         }
                     }
                 }
@@ -5212,9 +5276,10 @@ mod rwa_tests {
     use crate::registry::{public_key_to_adres, RolKaydi};
     use crate::rwa::OkumaHatasi;
     use crate::tx::{
-        KurumKaydiTx, KurumYetki, KycKayit, OracleAkisTanim, OracleRapor, ROL_KYC_ONAYLAYICI,
-        ROL_ORACLE_RAPORLAYICI,
+        KurumKaydiTx, KurumYetki, KycKayit, OracleAkisTanim, OracleRapor, YonetimEylemi,
+        YonetimIslemi, ROL_KYC_ONAYLAYICI, ROL_ORACLE_RAPORLAYICI,
     };
+    use ed25519_dalek::Signer;
     use ed25519_dalek::SigningKey;
 
     const NET: u32 = 1;
@@ -5248,9 +5313,30 @@ mod rwa_tests {
     }
 
     /// Dogrusal zincir kuran test dugumu.
+    /// Test yonetim imzacilari (2-of-3). GERCEKTE bu anahtarlar cevrimdisidir.
+    fn yonetim_anahtarlari() -> [SigningKey; 3] {
+        [anahtar(0xE1), anahtar(0xE2), anahtar(0xE3)]
+    }
+
+    fn yonetim_pk(sk: &SigningKey) -> [u8; 32] {
+        sk.verifying_key().to_bytes()
+    }
+
+    /// Cevrimdisi imzalanmis yonetim islemi uret.
+    fn imzali(eylem: YonetimEylemi, nonce: u64, son: u64, imzacilar: &[&SigningKey]) -> YonetimIslemi {
+        let mut y = YonetimIslemi { nonce, son_gecerlilik: son, eylem, imzalar: vec![] };
+        let m = y.imza_mesaji(NET);
+        y.imzalar = imzacilar
+            .iter()
+            .map(|sk| (yonetim_pk(sk), sk.sign(&m).to_bytes()))
+            .collect();
+        y
+    }
+
     struct Kurulum {
         node: NodeState,
         osk: SigningKey,
+        ys: [SigningKey; 3],
         gid: VertexId,
         son: VertexId,
         t: u64,
@@ -5265,7 +5351,31 @@ mod rwa_tests {
             node.ingest_networked(&wire::encode(&g), T0);
             let osk = anahtar(0x91);
             node.faucet_owner_ayarla(adres(&osk));
-            Kurulum { node, osk, gid, son: gid, t: T0, dolgu: 0 }
+            let ys = yonetim_anahtarlari();
+            let pks: Vec<[u8; 32]> = ys.iter().map(yonetim_pk).collect();
+            node.rwa_yonetim_kur(&pks, 2).expect("2-of-3 kurulum");
+            Kurulum { node, osk, ys, gid, son: gid, t: T0, dolgu: 0 }
+        }
+
+        fn nonce(&self) -> u64 {
+            self.node.rwa_yonetim().unwrap().nonce()
+        }
+
+        /// Verilen yonetim imzacilariyla (indeks) imzali islem uret (guncel nonce).
+        fn islem(&self, eylem: YonetimEylemi, imzaci: &[usize]) -> YonetimIslemi {
+            let sks: Vec<&SigningKey> = imzaci.iter().map(|i| &self.ys[*i]).collect();
+            imzali(eylem, self.nonce(), self.t + 86_400, &sks)
+        }
+
+        /// Yonetim islemini zincire gonder (aktaran: herhangi bir anahtar).
+        fn yonet(&mut self, eylem: YonetimEylemi, imzaci: &[usize]) {
+            let y = self.islem(eylem, imzaci);
+            self.gonder(&anahtar(0x77), y.encode());
+        }
+
+        /// 2-of-3 ile rol eylemi.
+        fn rol(&mut self, y: KurumYetki) {
+            self.yonet(YonetimEylemi::Rol(y), &[0, 1]);
         }
 
         /// Imzali vertex'i zincirin ucuna ekle (zaman = self.t).
@@ -5300,7 +5410,7 @@ mod rwa_tests {
             if self.node.kurum_sorgula(&adres(sk)).is_none() {
                 self.kurum_kaydet(sk, "Kurum");
             }
-            self.owner(KurumYetki::new(adres(sk), rol, kapsam, true).encode());
+            self.rol(KurumYetki::new(adres(sk), rol, kapsam, true));
             self.ilerle(BILDIRIM);
         }
     }
@@ -5311,7 +5421,7 @@ mod rwa_tests {
         k.owner(akis_tanimi(1).encode());
         let r = anahtar(0x21);
         k.kurum_kaydet(&r, "Rafineri A");
-        k.owner(KurumYetki::new(adres(&r), ROL_ORACLE_RAPORLAYICI, AKIS, true).encode());
+        k.rol(KurumYetki::new(adres(&r), ROL_ORACLE_RAPORLAYICI, AKIS, true));
         let verilis = k.t;
         assert!(!k.node.kurum_rol_aktif_mi(&adres(&r), ROL_ORACLE_RAPORLAYICI, AKIS));
         // Bildirim suresinden 1 sn once: rapor YOK SAYILIR.
@@ -5346,7 +5456,7 @@ mod rwa_tests {
     fn rwa_kayitsiz_adrese_rol_verilmez() {
         let mut k = Kurulum::yeni();
         let r = anahtar(0x23);
-        k.owner(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true).encode());
+        k.rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true));
         k.ilerle(BILDIRIM);
         assert!(k.node.kurum_rolleri(&adres(&r)).is_empty());
         k.gonder(&r, KycKayit { adres: [9; 20], onay: true, kanit_hash: [0; 32] }.encode());
@@ -5358,7 +5468,13 @@ mod rwa_tests {
         let mut k = Kurulum::yeni();
         let r = anahtar(0x24);
         k.kurum_kaydet(&r, "Kurum");
-        k.gonder(&r, KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true).encode());
+        let sahte = imzali(
+            YonetimEylemi::Rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true)),
+            k.nonce(),
+            k.t + 86_400,
+            &[&r, &k.osk.clone()],
+        );
+        k.gonder(&r, sahte.encode());
         k.gonder(&r, akis_tanimi(1).encode());
         k.ilerle(BILDIRIM);
         assert!(k.node.kurum_rolleri(&adres(&r)).is_empty(), "kurum kendine rol veremez");
@@ -5370,7 +5486,7 @@ mod rwa_tests {
         let mut k = Kurulum::yeni();
         let r = anahtar(0x25);
         k.kurum_kaydet(&r, "Kurum");
-        k.owner(KurumYetki::new(adres(&r), ROL_ORACLE_RAPORLAYICI, AKIS, true).encode());
+        k.rol(KurumYetki::new(adres(&r), ROL_ORACLE_RAPORLAYICI, AKIS, true));
         assert!(k.node.kurum_rolleri(&adres(&r)).is_empty(), "akis 1 tanimsiz");
         // Akis 1 ve 2 tanimli; kurum yalniz akis 2'ye yetkili.
         k.owner(akis_tanimi(1).encode());
@@ -5386,8 +5502,8 @@ mod rwa_tests {
         k.owner(akis_tanimi(1).encode());
         let owner = adres(&k.osk);
         k.owner(KurumKaydiTx::new(1, "AIDAG".into()).encode());
-        k.owner(KurumYetki::new(owner, ROL_ORACLE_RAPORLAYICI, AKIS, true).encode());
-        k.owner(KurumYetki::new(owner, ROL_KYC_ONAYLAYICI, 0, true).encode());
+        k.rol(KurumYetki::new(owner, ROL_ORACLE_RAPORLAYICI, AKIS, true));
+        k.rol(KurumYetki::new(owner, ROL_KYC_ONAYLAYICI, 0, true));
         k.ilerle(BILDIRIM);
         assert!(k.node.kurum_rolleri(&owner).is_empty(), "owner'a rol verilemez");
         k.owner(rapor(1, 1000));
@@ -5404,8 +5520,8 @@ mod rwa_tests {
         k.node.rwa_test_yasakli_ekle(adres(&kubra));
         k.owner(akis_tanimi(1).encode());
         k.kurum_kaydet(&kubra, "KUBRA");
-        k.owner(KurumYetki::new(adres(&kubra), ROL_ORACLE_RAPORLAYICI, AKIS, true).encode());
-        k.owner(KurumYetki::new(adres(&kubra), ROL_KYC_ONAYLAYICI, 0, true).encode());
+        k.rol(KurumYetki::new(adres(&kubra), ROL_ORACLE_RAPORLAYICI, AKIS, true));
+        k.rol(KurumYetki::new(adres(&kubra), ROL_KYC_ONAYLAYICI, 0, true));
         k.ilerle(BILDIRIM);
         assert!(k.node.kurum_rolleri(&adres(&kubra)).is_empty());
         k.gonder(&kubra, rapor(1, 1000));
@@ -5421,7 +5537,7 @@ mod rwa_tests {
         let ks: Vec<SigningKey> = (0x31..=0x34).map(anahtar).collect();
         for sk in &ks {
             k.kurum_kaydet(sk, "Rafineri");
-            k.owner(KurumYetki::new(adres(sk), ROL_ORACLE_RAPORLAYICI, AKIS, true).encode());
+            k.rol(KurumYetki::new(adres(sk), ROL_ORACLE_RAPORLAYICI, AKIS, true));
         }
         k.ilerle(BILDIRIM);
         assert_eq!(k.node.oracle_raporlayici_sayisi(AKIS), 4, "N = 4");
@@ -5454,13 +5570,13 @@ mod rwa_tests {
         k.gonder(&kyc, KycKayit { adres: musteri, onay: true, kanit_hash: [1; 32] }.encode());
         assert!(k.node.kyc_onayli_mi(&musteri));
         // Owner rolu geri alir: ONAY ANINDA gecersiz (bekleme yok).
-        k.owner(KurumYetki::new(adres(&kyc), ROL_KYC_ONAYLAYICI, 0, false).encode());
+        k.rol(KurumYetki::new(adres(&kyc), ROL_KYC_ONAYLAYICI, 0, false));
         assert!(!k.node.kyc_onayli_mi(&musteri));
-        k.owner(KurumYetki::new(adres(&orc), ROL_ORACLE_RAPORLAYICI, AKIS, false).encode());
+        k.rol(KurumYetki::new(adres(&orc), ROL_ORACLE_RAPORLAYICI, AKIS, false));
         k.gonder(&orc, rapor(1, 1000));
         assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::VeriYok);
         // Yeniden verilen rol yine bildirim suresi bekler.
-        k.owner(KurumYetki::new(adres(&kyc), ROL_KYC_ONAYLAYICI, 0, true).encode());
+        k.rol(KurumYetki::new(adres(&kyc), ROL_KYC_ONAYLAYICI, 0, true));
         assert!(!k.node.kyc_onayli_mi(&musteri));
         k.ilerle(BILDIRIM);
         assert!(k.node.kyc_onayli_mi(&musteri), "eski onay rol donunce tekrar gecerli");
@@ -5496,7 +5612,8 @@ mod rwa_tests {
         let eski = Vertex::new_signed(
             NET,
             vec![k.gid],
-            KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true).encode(),
+            k.islem(YonetimEylemi::Rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true)), &[0, 1])
+                .encode(),
             simdi - 10 * 86_400,
             &k.osk,
         )
@@ -5536,6 +5653,7 @@ mod rwa_tests {
                 n.kyc_onayli_mi(&[0xD1; 20]),
                 ks.iter().map(|sk| n.kurum_rolleri(&adres(sk))).collect::<Vec<_>>(),
                 n.zincir_saati(),
+                n.rwa_yonetim().cloned(),
             )
         };
         let beklenen = ozet(&k.node);
@@ -5543,8 +5661,10 @@ mod rwa_tests {
 
         // 1) Taze dugum, disa aktarilan sirayla (replay).
         let vs = k.node.export_vertices();
+        let pks: Vec<[u8; 32]> = k.ys.iter().map(yonetim_pk).collect();
         let mut taze = NodeState::new_devnet(NET);
         taze.faucet_owner_ayarla(owner);
+        taze.rwa_yonetim_kur(&pks, 2).unwrap();
         for vb in &vs {
             taze.ingest_synced(vb);
         }
@@ -5553,11 +5673,226 @@ mod rwa_tests {
         // 2) Ters sira (yetim havuzu uzerinden) -> ayni durum.
         let mut ters = NodeState::new_devnet(NET);
         ters.faucet_owner_ayarla(owner);
+        ters.rwa_yonetim_kur(&pks, 2).unwrap();
         for vb in vs.iter().rev() {
             ters.ingest_networked(vb, k.t);
         }
         assert_eq!(ters.orphan_count(), 0);
         assert_eq!(ozet(&ters), beklenen, "ters sirali dugum ayni durum");
+    }
+
+    // ===== M-of-N YONETIM (tip=17) =====
+
+    fn kyc_rolu(k: &Kurulum, sk: &SigningKey) -> bool {
+        !k.node.kurum_rolleri(&adres(sk)).is_empty()
+    }
+
+    #[test]
+    fn rwa_yonetim_iki_imza_gecer() {
+        let mut k = Kurulum::yeni();
+        let r = anahtar(0x81);
+        k.kurum_kaydet(&r, "Banka");
+        k.yonet(YonetimEylemi::Rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true)), &[0, 2]);
+        assert!(kyc_rolu(&k, &r), "2-of-3 imza ile rol verildi");
+        assert_eq!(k.nonce(), 1, "yetkilendirilen islem nonce'u tuketti");
+    }
+
+    #[test]
+    fn rwa_yonetim_tek_imza_reddedilir() {
+        let mut k = Kurulum::yeni();
+        let r = anahtar(0x82);
+        k.kurum_kaydet(&r, "Banka");
+        k.yonet(YonetimEylemi::Rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true)), &[1]);
+        assert!(!kyc_rolu(&k, &r), "tek imza yetmez");
+        assert_eq!(k.nonce(), 0, "reddedilen islem nonce tuketmez");
+    }
+
+    #[test]
+    fn rwa_yonetim_ayni_imzaci_iki_kez_sayilmaz() {
+        let mut k = Kurulum::yeni();
+        let r = anahtar(0x83);
+        k.kurum_kaydet(&r, "Banka");
+        // Ayni imzacinin gecerli imzasi IKI kez eklenir -> 1 sayilir < esik 2.
+        k.yonet(YonetimEylemi::Rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true)), &[2, 2]);
+        assert!(!kyc_rolu(&k, &r));
+        assert_eq!(k.nonce(), 0);
+        // Birebir imza tekrari (ayni pk+imza iki kez) da ayni sonuc.
+        let mut y = k.islem(YonetimEylemi::Rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true)), &[0]);
+        y.imzalar.push(y.imzalar[0]);
+        k.gonder(&anahtar(0x77), y.encode());
+        assert!(!kyc_rolu(&k, &r));
+        let yon = k.node.rwa_yonetim().unwrap();
+        assert!(matches!(
+            yon.yetkilendir(&y, NET, k.t),
+            Err(crate::rwa::YonetimHatasi::YetersizImza { gecerli: 1, esik: 2 })
+        ));
+    }
+
+    #[test]
+    fn rwa_yonetim_replay_reddedilir() {
+        let mut k = Kurulum::yeni();
+        let r = anahtar(0x84);
+        k.kurum_kaydet(&r, "Banka");
+        let ver = k.islem(YonetimEylemi::Rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true)), &[0, 1]);
+        k.gonder(&anahtar(0x77), ver.encode());
+        assert!(kyc_rolu(&k, &r));
+        k.rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, false)); // nonce 1: iptal
+        let iptal_sonrasi = k.node.kurum_rolleri(&adres(&r));
+        assert!(iptal_sonrasi[0].2.iptal.is_some());
+        // REPLAY: ayni "ver" islemi (gecerli 2 imzali) baska bir vertex'le tekrar gonderilir.
+        k.gonder(&anahtar(0x78), ver.encode());
+        assert_eq!(k.node.kurum_rolleri(&adres(&r)), iptal_sonrasi, "eski imza rolu geri getiremez");
+        assert_eq!(k.nonce(), 2);
+        assert!(matches!(
+            k.node.rwa_yonetim().unwrap().yetkilendir(&ver, NET, k.t),
+            Err(crate::rwa::YonetimHatasi::YanlisNonce { beklenen: 2 })
+        ));
+    }
+
+    #[test]
+    fn rwa_yonetim_esik_altina_dusurulemez() {
+        let mut k = Kurulum::yeni();
+        let pk = |k: &Kurulum, i: usize| yonetim_pk(&k.ys[i]);
+        // 3 imzaci, esik 2: birini cikar -> 2 imzaci (== esik) KABUL.
+        let c2 = pk(&k, 2);
+        k.yonet(YonetimEylemi::ImzaciCikar(c2), &[0, 1]);
+        assert_eq!(k.node.rwa_yonetim().unwrap().imzacilar().len(), 2);
+        // Bir tane daha cikarma -> 1 < esik 2: REDDEDILIR, kume degismez.
+        let c1 = pk(&k, 1);
+        k.yonet(YonetimEylemi::ImzaciCikar(c1), &[0, 1]);
+        assert_eq!(k.node.rwa_yonetim().unwrap().imzacilar().len(), 2, "esik altina dusurulemez");
+        // Esigi imzaci sayisinin ustune cikarma (3 > 2) ve 1'e dusurme REDDEDILIR.
+        k.yonet(YonetimEylemi::Esik(3), &[0, 1]);
+        k.yonet(YonetimEylemi::Esik(1), &[0, 1]);
+        assert_eq!(k.node.rwa_yonetim().unwrap().esik(), 2);
+        // Kendi kilitleme denemeleri etkisiz ama yonetim hala calisir.
+        let r = anahtar(0x85);
+        k.kurum_kaydet(&r, "Banka");
+        k.rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true));
+        assert!(kyc_rolu(&k, &r));
+        // Dogrudan birim kontrolu: kurulumda da esik > imzaci ve esik < 2 reddedilir.
+        let pks: Vec<[u8; 32]> = k.ys.iter().map(yonetim_pk).collect();
+        assert!(crate::rwa::YonetimRegistry::kur(&pks[..2], 3).is_err());
+        assert!(crate::rwa::YonetimRegistry::kur(&pks, 1).is_err());
+        assert!(crate::rwa::YonetimRegistry::kur(&[pks[0], pks[0], pks[1]], 2).is_err());
+    }
+
+    #[test]
+    fn rwa_yonetim_imzaci_ve_esik_degisikligi_m_of_n_ile() {
+        let mut k = Kurulum::yeni();
+        let yeni = anahtar(0xE4);
+        // Tek imzayla imzaci ekleme / esik degistirme REDDEDILIR.
+        k.yonet(YonetimEylemi::ImzaciEkle(yonetim_pk(&yeni)), &[0]);
+        k.yonet(YonetimEylemi::Esik(3), &[0]);
+        let y = k.node.rwa_yonetim().unwrap();
+        assert_eq!((y.imzacilar().len(), y.esik(), y.nonce()), (3, 2, 0));
+        // 2-of-3 ile: ekle (4 imzaci), esik 3.
+        k.yonet(YonetimEylemi::ImzaciEkle(yonetim_pk(&yeni)), &[0, 1]);
+        k.yonet(YonetimEylemi::Esik(3), &[1, 2]);
+        let y = k.node.rwa_yonetim().unwrap();
+        assert_eq!((y.imzacilar().len(), y.esik(), y.nonce()), (4, 3, 2));
+        // Artik 2 imza YETMEZ, yeni imzaci dahil 3 imza yeter.
+        let r = anahtar(0x86);
+        k.kurum_kaydet(&r, "Banka");
+        k.rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true));
+        assert!(!kyc_rolu(&k, &r), "esik 3 iken 2 imza reddedilir");
+        let islem = {
+            let sks = [&k.ys[0], &k.ys[2], &yeni];
+            imzali(
+                YonetimEylemi::Rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true)),
+                k.nonce(),
+                k.t + 60,
+                &sks,
+            )
+        };
+        k.gonder(&anahtar(0x77), islem.encode());
+        assert!(kyc_rolu(&k, &r));
+    }
+
+    #[test]
+    fn rwa_yonetim_owner_tek_anahtarla_rol_veremez() {
+        let mut k = Kurulum::yeni();
+        let r = anahtar(0x87);
+        k.kurum_kaydet(&r, "Banka");
+        let owner_sk = k.osk.clone();
+        // Owner imzasi yonetim kumesinde degil: owner + 1 imzaci = 1 gecerli < 2.
+        let e = YonetimEylemi::Rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true));
+        let y = imzali(e.clone(), k.nonce(), k.t + 60, &[&owner_sk, &k.ys[0]]);
+        k.gonder(&owner_sk, y.encode());
+        assert!(!kyc_rolu(&k, &r), "owner rol veremez");
+        // Owner'in eski format (tip=17 + 26 bayt rol govdesi) denemesi decode olmaz.
+        let mut eski = vec![crate::tx::TX_TYPE_RWA_YONETIM];
+        eski.extend_from_slice(&adres(&r));
+        eski.extend_from_slice(&[ROL_KYC_ONAYLAYICI, 0, 0, 0, 0, 1]);
+        k.gonder(&owner_sk, eski);
+        assert!(!kyc_rolu(&k, &r));
+        assert_eq!(k.nonce(), 0);
+    }
+
+    #[test]
+    fn rwa_yonetim_suresi_dolan_ve_baska_ag_imzasi_reddedilir() {
+        let mut k = Kurulum::yeni();
+        let r = anahtar(0x88);
+        k.kurum_kaydet(&r, "Banka");
+        let e = YonetimEylemi::Rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true));
+        // Suresi dolmus (son_gecerlilik < zincir saati).
+        let eski = imzali(e.clone(), 0, k.t - 1, &[&k.ys[0], &k.ys[1]]);
+        k.gonder(&anahtar(0x77), eski.encode());
+        assert!(!kyc_rolu(&k, &r));
+        // Baska ag (mainnet 3474) icin imzalanmis mesaj devnet'te gecersiz.
+        let mut baska = YonetimIslemi { nonce: 0, son_gecerlilik: k.t + 60, eylem: e, imzalar: vec![] };
+        let m = baska.imza_mesaji(crate::mainnet::MAINNET_NETWORK_ID);
+        baska.imzalar = k.ys[..2].iter().map(|sk| (yonetim_pk(sk), sk.sign(&m).to_bytes())).collect();
+        k.gonder(&anahtar(0x77), baska.encode());
+        assert!(!kyc_rolu(&k, &r));
+        assert_eq!(k.nonce(), 0);
+    }
+
+    #[test]
+    fn rwa_yonetim_kurulmamissa_rol_islemi_gecmez_ve_imzaci_kurum_olamaz() {
+        // Yonetim kurulmamis dugum: gecerli gorunen islem bile etkisiz.
+        let mut n = NodeState::new_devnet(NET);
+        let g = Vertex::new_signed(NET, vec![], vec![1, 1], T0, &anahtar(1)).unwrap();
+        n.ingest_networked(&wire::encode(&g), T0);
+        let r = anahtar(0x89);
+        let kv = Vertex::new_signed(NET, vec![*g.id()], KurumKaydiTx::new(1, "B".into()).encode(), T0, &r).unwrap();
+        n.ingest_networked(&wire::encode(&kv), T0);
+        let ys = yonetim_anahtarlari();
+        let y = imzali(
+            YonetimEylemi::Rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true)),
+            0,
+            T0 + 60,
+            &[&ys[0], &ys[1]],
+        );
+        let v = Vertex::new_signed(NET, vec![*kv.id()], y.encode(), T0, &anahtar(0x77)).unwrap();
+        n.ingest_networked(&wire::encode(&v), T0);
+        assert!(n.rwa_yonetim().is_none());
+        assert!(n.kurum_rolleri(&adres(&r)).is_empty());
+        // Gorevler ayrimi: yonetim imzacisi kurum olarak rol ALAMAZ.
+        let mut k = Kurulum::yeni();
+        let imzaci = k.ys[0].clone();
+        k.kurum_kaydet(&imzaci, "Imzaci");
+        k.rol(KurumYetki::new(adres(&imzaci), ROL_KYC_ONAYLAYICI, 0, true));
+        assert!(k.node.kurum_rolleri(&adres(&imzaci)).is_empty());
+    }
+
+    #[test]
+    fn rwa_mainnet_genesis_ve_dagitim_degismedi() {
+        // Pinli genesis id'si ve 21M dagitim RWA/yonetim eklemesinden ETKILENMEZ.
+        let mut m = NodeState::new_mainnet();
+        let gid = m
+            .ingest(&crate::mainnet::genesis_wire(), crate::mainnet::ON_SATIS_BASLANGIC)
+            .expect("pinli genesis");
+        assert_eq!(gid, crate::mainnet::genesis_id(), "genesis id pinli degerle ayni");
+        let dagitim = crate::genesis::GenesisDagitim::planla(crate::mainnet::dagitim_adresleri());
+        assert!(dagitim.kapali_mi(), "dagitim 21M");
+        for (adres, miktar) in dagitim.dilimler() {
+            assert_eq!(m.bakiye(&adres), miktar, "dilim bakiyesi degismedi");
+        }
+        // Mainnet'te yonetim pinlenmedi (bos) -> kurulmamis; RWA kapali.
+        assert!(crate::mainnet::RWA_YONETIM_IMZACILARI.is_empty());
+        assert!(m.rwa_yonetim().is_none());
+        assert!(!m.rwa_aktif());
     }
 
     #[test]

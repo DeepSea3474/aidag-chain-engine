@@ -6,23 +6,38 @@ Dal: `rwa-oracle-kyc` · Durum: GELISTIRME (mainnet'te KAPALI, `RWA_MAINNET_AKTI
 - Izinli model: rapor ve KYC onayi yalniz KurumRegistry'de KAYITLI ve ROL VERILMIS kurumlardan.
 - Ham veri zincire yazilmaz; yalniz hash'i (`veri_hash`, `kanit_hash`). KYC'de kisisel veri YOK.
 - Kurum imzasi = vertex'in ed25519 imzasi (kaydeden = imzalayan).
-- Onay/rapor yetkisi KURUMDA. Owner yalniz rol verir/geri alir ve akis tanimlar; deger/onay YAZAMAZ.
+- Onay/rapor yetkisi KURUMDA. Rol verme/iptal M-of-N YONETIM imzasiyla (owner tek anahtarla rol VEREMEZ).
+  Owner yalniz akis tanimlar (tip=18); deger/onay YAZAMAZ, rol ALAMAZ.
 - Yapay zeka (KUBRA) imza/yazma yetkisine SAHIP DEGIL: `mainnet::RWA_YASAKLI_ADRESLER`.
 - Tum zaman kurallari ZINCIR SAATIYLE (vertex zamani geriye tarihlenebilir).
 
 ## Islem tipleri
 | tip | ad | kim | govde |
 |---|---|---|---|
-| 17 | KURUM_YETKI | owner | kurum:20, rol:1 (1=oracle, 2=kyc), kapsam:4 (akis_no / 0), islem:1 (1=ver, 0=al) — 27 B |
+| 17 | RWA_YONETIM | M-of-N imza (aktaran herkes) | nonce:8, son_gecerlilik:8, eylem:1 + govde, imza_sayisi:1, (pk:32, imza:64)*k |
 | 18 | ORACLE_AKIS_TANIM | owner | akis:4, ondalik:1, M:1, sapma_bps:2, kesici_bps:2, bayat_sn:4, aciklama<=64 |
 | 19 | ORACLE_RAPOR | oracle rolu aktif kurum | akis:4, tur:8, deger:i128, olcum_zamani:8, veri_hash:32 — 69 B |
 | 20 | KYC_KAYIT | kyc rolu aktif kurum | adres:20, durum:1, kanit_hash:32 — 54 B |
+
+## M-of-N yonetim (tip=17)
+- Eylemler: 0=rol (kurum:20, rol:1, kapsam:4, islem:1), 1=imzaci ekle (pk:32), 2=imzaci cikar (pk:32), 3=esik (1 B).
+- Baslangic 2-of-3. Imzaci ve esik degisikligi de AYNI M-of-N ile.
+- Imzalanan mesaj: `"AIDAG-RWA-YONETIM-v1" || network_id(4) || nonce || son_gecerlilik || eylem`.
+  Imzalar cevrimdisi uretilir; ozel anahtarlar sunucuda TUTULMAZ. Vertex'i herkes aktarabilir.
+- Sayim: yalniz kumedeki, BENZERSIZ, `verify_strict` gecen imzacilar (ayni imzaci iki kez sayilmaz).
+- Replay: `nonce` zincir sayacina esit olmali; yetkilendirilen islem nonce'u tuketir (eylem etkisiz olsa da).
+  Ag kimligi mesajda (testnet imzasi mainnet'te gecmez); `son_gecerlilik` gecmisse red.
+- Kilitleme korumasi: imzaci sayisi esigin altina dusurulemez; esik [2, imzaci sayisi]; azami 15 imzaci.
+- Yonetim imzacilari kurum rolu ALAMAZ (gorevler ayrimi).
+- Kurulum: mainnet `RWA_YONETIM_IMZACILARI` (bugun BOS = kurulmamis, rol islemi gecmez);
+  devnet/testnet `NodeState::rwa_yonetim_kur`. Genesis'e degil baslangic durumuna yazilir.
+- Durum okuma: `GET /rwa-yonetim` (imzacilar, esik, sonraki nonce, network_id).
 
 ## Yetki kurallari
 - Rol yalniz KAYITLI (tip=5) kuruma verilir; oracle rolu yalniz TANIMLI akisa.
 - Verilen rol `zincir_saati + RWA_ROL_BILDIRIM_SURESI` (3 gun) sonra etkin; aktif rol tekrar verilerek sure oynanamaz.
 - Geri alma ANINDA etkili; kurumun KYC onaylari ve acik turdaki raporlari otomatik gecersiz.
-- Owner ve yasakli adresler rol alamaz; imzaladiklari rapor/KYC yok sayilir.
+- Owner, yonetim imzacilari ve yasakli adresler rol alamaz; imzaladiklari rapor/KYC yok sayilir.
 - Akis tanimi ILK KAYIT KAZANIR (M/sapma/kesici sonradan degistirilemez).
 
 ## Oracle tur modeli (`rwa.rs`, `oracle_hesap.rs`)

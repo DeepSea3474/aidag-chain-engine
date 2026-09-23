@@ -382,10 +382,10 @@ pub const TGE_BELIRSIZ: u64 = 4_102_444_800;
 /// Devnet/testnet'te (mainnet=false) RWA her zaman aciktir.
 pub const RWA_MAINNET_AKTIVASYON: Option<u64> = None;
 
-/// RWA ROL BILDIRIM SURESI: owner'in tip=17 ile verdigi rol, zincir saatinden bu
-/// kadar SONRA yururluge girer (TGE_MIN_BILDIRIM_SURESI ile ayni ilke: ele gecen
-/// owner anahtari "hemen" raporlayici/onaylayici atayamaz, her atama zincirde
-/// onceden gorunur). Rol GERI ALMA aninda etkilidir (guvenlik yonu).
+/// RWA ROL BILDIRIM SURESI: M-of-N yonetimin tip=17 ile verdigi rol, zincir
+/// saatinden bu kadar SONRA yururluge girer (TGE_MIN_BILDIRIM_SURESI ile ayni ilke:
+/// ele gecen imzaci anahtarlari "hemen" raporlayici/onaylayici atayamaz, her atama
+/// zincirde onceden gorunur). Rol GERI ALMA aninda etkilidir (guvenlik yonu).
 pub const RWA_ROL_BILDIRIM_SURESI: u64 = 3 * 86_400;
 
 /// RWA YASAKLI IMZALAYANLAR: bu adreslere rol VERILEMEZ ve bu adreslerin imzaladigi
@@ -394,3 +394,14 @@ pub const RWA_ROL_BILDIRIM_SURESI: u64 = 3 * 86_400;
 /// modullerde imza/yazma yetkisine SAHIP DEGILDIR. Adres ACIK bilgidir
 /// (soulware-core acilisinda "imzalayan : 0x..." satiri) — ozel anahtar gerekmez.
 pub const RWA_YASAKLI_ADRESLER: &[[u8; 20]] = &[];
+
+/// RWA YONETIM (M-of-N) MAINNET IMZACILARI: ed25519 ACIK anahtarlari (32 bayt).
+/// Rol verme/iptal, imzaci ve esik degisikligi YALNIZ bu kumenin esik kadar
+/// imzasiyla (tip=17) yapilir; owner tek anahtarla rol VEREMEZ. Ozel anahtarlar
+/// sunucuda TUTULMAZ, imzalar cevrimdisi uretilir. BOS = yonetim kurulmamis ->
+/// mainnet'te hicbir rol islemi gecmez. Pinlemek mainnet-etkili karardir
+/// (ayri PR + onay); kurulum genesis'e DEGIL baslangic durumuna yazilir.
+pub const RWA_YONETIM_IMZACILARI: &[[u8; 32]] = &[];
+
+/// RWA yonetim baslangic esigi (M). Baslangic: 2-of-3.
+pub const RWA_YONETIM_BASLANGIC_ESIK: u8 = 2;
