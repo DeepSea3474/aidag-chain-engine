@@ -19,6 +19,7 @@ mod hesap;       // deterministik hesap makinesi aracı (araç-kullanımı)
 mod zincir;      // deterministik zincir sorgu araci (arac-kullanimi)
 mod stream;      // SSE streaming (cevabi harf harf akitir)
 mod resmi;       // AIDAG/KUBRA resmi kaynak katmani (grounding onceligi)
+mod imza_dosyasi; // zincir imza anahtari: FAIL-CLOSED yukleme (sessiz uretim YOK)
 
 use axum::{extract::State, routing::{get, post}, response::{IntoResponse, Sse, sse::Event}, http::{StatusCode, header}, body::Body, Json, Router};
 use ed25519_dalek::SigningKey;
@@ -327,28 +328,7 @@ async fn beyin_remote(st: &AppState, user_content: &str, temp: f64) -> Result<Br
 }
 
 // ════════════════════════════ Zincir (gerçek) ════════════════════════════
-fn anahtar_yukle_veya_uret(path: &str) -> std::io::Result<SigningKey> {
-    if let Ok(data) = std::fs::read(path) {
-        if data.len() == 33 && data[0] == 1 {
-            let mut seed = [0u8; 32];
-            seed.copy_from_slice(&data[1..33]);
-            return Ok(SigningKey::from_bytes(&seed));
-        }
-    }
-    use rand::RngCore;
-    let mut seed = [0u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut seed);
-    let mut dosya = Vec::with_capacity(33);
-    dosya.push(1u8);
-    dosya.extend_from_slice(&seed);
-    std::fs::write(path, &dosya)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-    }
-    Ok(SigningKey::from_bytes(&seed))
-}
+// Anahtar yukleme/uretimi: imza_dosyasi.rs (fail-closed; sessiz uretim kaldirildi).
 
 async fn uclari_cek(http: &reqwest::Client, rpc: &str) -> Vec<[u8; 32]> {
     let url = format!("{rpc}/tips");
@@ -1073,7 +1053,39 @@ async fn kb_stats(State(st): State<Arc<AppState>>) -> Json<Value> {
 async fn main() {
     let cfg = Config::from_env();
 
-    let key = anahtar_yukle_veya_uret(&cfg.key_path).expect("soulware anahtarı yüklenemedi");
+    // ANAHTAR (FAIL-CLOSED): dosya yoksa/bozuksa servis ACILMAZ. Yeni anahtar YALNIZ
+    // `--yeni-anahtar-uret` ile uretilir: yalniz ACIK adres basilir, servis BASLAMAZ
+    // (rotasyonda adres, imza atmadan once RWA yasak listesine eklenebilsin).
+    let argumanlar: Vec<String> = std::env::args().skip(1).collect();
+    match argumanlar.as_slice() {
+        [] => {}
+        [a] if a == "--yeni-anahtar-uret" => match imza_dosyasi::uret(&cfg.key_path) {
+            Ok(k) => {
+                println!(
+                    "YENI ANAHTAR URETILDI: {}\n   imzalayan   : 0x{}\nServis BASLATILMADI. Once bu adresi \
+                     mainnet::RWA_YASAKLI_ADRESLER'e ekleyin (BAKIM-REHBERI.md bolum 8).",
+                    cfg.key_path,
+                    hex::encode(public_key_to_adres(&k.verifying_key().to_bytes()))
+                );
+                return;
+            }
+            Err(e) => {
+                eprintln!("HATA: {e}");
+                std::process::exit(2);
+            }
+        },
+        _ => {
+            eprintln!("HATA: bilinmeyen arguman: {argumanlar:?}. Gecerli: (yok) | --yeni-anahtar-uret");
+            std::process::exit(2);
+        }
+    }
+    let key = match imza_dosyasi::yukle(&cfg.key_path) {
+        Ok(k) => k,
+        Err(e) => {
+            eprintln!("HATA: {e}");
+            std::process::exit(2);
+        }
+    };
     let key_addr = public_key_to_adres(&key.verifying_key().to_bytes());
 
     // EGEMEN YEREL BEYİN (KUBRA) yükle — dosya varsa. Yoksa None (Claude'a düşer).

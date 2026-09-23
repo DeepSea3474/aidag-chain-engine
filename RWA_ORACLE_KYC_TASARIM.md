@@ -77,9 +77,9 @@ Dal: `rwa-oracle-kyc` · Durum: GELISTIRME (mainnet'te KAPALI, `RWA_MAINNET_AKTI
   adresi yasak listesinde olmaz (M-of-N rol vermedikce yazamaz, ama ikinci savunma katmani kaybolur).
 - Yeni adres EKLENIR; eski adres listeden CIKARILMAZ (konsensus sabiti: gecmisin replay'i + ele
   gecmis eski anahtar riski). Liste degisikligi konsensus degisikligidir (PR + replay + esgudumlu deploy).
-- Yeni anahtar, yeni adres listeye girip deploy edilmeden imza atmaya BASLAMAMALI
-  (soulware-core anahtar dosyasi yoksa ya da bicimi gecersizse acilista yeni anahtar uretip
-  dosyanin uzerine yazar -> servis her acilista loglanan "imzalayan" adresi listeyle karsilastirilmali).
+- Yeni anahtar, yeni adres listeye girip deploy edilmeden imza atmaya BASLAMAMALI.
+  soulware-core FAIL-CLOSED: anahtar dosyasi yoksa/bozuksa ACILMAZ; yeni anahtar yalniz
+  `--yeni-anahtar-uret` ile (yalniz adres basar, servisi baslatmaz, var olan dosyanin uzerine yazmaz).
 - Adim adim prosedur: `BAKIM-REHBERI.md` bolum 8 "KUBRA IMZA ANAHTARI ROTASYONU".
 
 ## Aktivasyon
