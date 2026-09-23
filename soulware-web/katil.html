@@ -86,6 +86,12 @@
       <label for="adres" data-i="addrLabel"></label>
       <input id="adres" type="text" placeholder="0x..." autocomplete="off" spellcheck="false">
       <p class="note" data-i="addrNote"></p>
+      <p class="note"><button id="yerelBtn" type="button" class="btn" style="padding:6px 12px;font-size:.85rem" data-i="localBtn"></button></p>
+      <div id="yerelBilgi" class="hidden note" style="margin:0 0 10px;padding:10px 12px;border-radius:10px;border:1px solid #5a4a2a;line-height:1.5">
+        <span id="yerelMetin"></span>
+        <br><button id="anahtarGoster" type="button" class="btn" style="padding:6px 12px;font-size:.85rem;margin-top:8px" data-i="showKey"></button>
+        <code id="yerelAnahtar" class="hidden" style="display:block;word-break:break-all;margin-top:8px"></code>
+      </div>
       <button id="baslat" class="btn" data-i="start"></button>
       <p class="note" id="yukdurum" data-i="willDownload" style="margin-top:10px"></p>
       <div id="hata" class="hidden" style="margin-top:12px;padding:12px 14px;border-radius:10px;background:#2a1620;border:1px solid #5a2a3a;color:#ffb4b4;font-size:.9rem;line-height:1.5"></div>
@@ -118,12 +124,15 @@
       <div class="stat"><div class="n" id="seviye">—</div><div class="l" data-i="tier"></div></div>
     </div>
     <div id="log" class="live" style="margin-top:10px"></div>
+    <button id="yenidenImza" type="button" class="btn hidden" style="margin-top:10px;padding:8px 16px;font-size:.9rem" data-i="resign"></button>
   </div>
 
   <p class="note" data-i="foot"></p>
   <p class="note">🔓 <span data-i="oss"></span>: <a href="https://github.com/DeepSea3474" target="_blank">SoulwareAI / KUBRA</a></p>
 </div>
 
+<script src="/lib/nacl.min.js"></script>
+<script src="/lib/blake3.js"></script>
 <script>
 const I18N = {
  en: {
@@ -147,6 +156,14 @@ const I18N = {
   startTips:"Tips: use Chrome/Edge · disable ad-blocker for this page · keep the tab open while the model downloads (first time only).",
   earnHint:"💡 You're chatting locally (free & private). To also EARN LSC, reload and paste your AIDAG/MetaMask address before Start.",
   welcomeBack:"✅ Welcome back — this computer is remembered (same wallet). Click Start to resume earning.",
+  localBtn:"No MetaMask? Use a local wallet",
+  localNote:a=>"Local wallet created in this browser. Rewards go to: "+a+" — the key is stored ONLY in this browser. Back it up now (Show key); if you clear browser data without a backup, the rewards are lost.",
+  showKey:"Show key (backup)", keyLabel:"PRIVATE key (32-byte seed, hex) — keep it secret, never share: ",
+  needMM:"To earn with a 0x (MetaMask) address, MetaMask must sign once to prove it is yours. Install/open MetaMask, or use a local wallet.",
+  wrongAcct:"MetaMask's selected account is not this address. Switch account in MetaMask or fix the address.",
+  signFail:"Signature was rejected or failed: ", regFail:"Registration failed: ", libFail:"Signing libraries could not be loaded (/lib/nacl.min.js, /lib/blake3.js). Reload the page.",
+  sessExpired:"Session is no longer valid (expired or coordinator restarted). Contributions paused.", resign:"🔑 Sign again & resume",
+  chatOnly:"Leave the address empty to only chat.",
  },
  tr: {
   title:"KUBRA ile Sohbet Et & Katkı Ver",
@@ -169,6 +186,14 @@ const I18N = {
   startTips:"İpuçları: Chrome/Edge kullan · bu sayfa için reklam-engelleyiciyi kapat · model inerken sekmeyi açık tut (sadece ilk sefer).",
   earnHint:"💡 Yerel sohbet ediyorsun (ücretsiz & gizli). Ayrıca LSC KAZANMAK için sayfayı yenile ve Başla'dan önce AIDAG/MetaMask adresini yapıştır.",
   welcomeBack:"✅ Tekrar hoş geldin — bu bilgisayar hatırlandı (aynı cüzdan). Kazanmayı sürdürmek için Başla'ya bas.",
+  localBtn:"MetaMask yok mu? Yerel cüzdan kullan",
+  localNote:a=>"Bu tarayıcıda yerel cüzdan oluşturuldu. Ödüller şu adrese: "+a+" — anahtar YALNIZ bu tarayıcıda saklanır. Şimdi yedekle (Anahtarı göster); yedeksiz tarayıcı verisini silersen ödüller kaybolur.",
+  showKey:"Anahtarı göster (yedek)", keyLabel:"ÖZEL anahtar (32 bayt seed, hex) — gizli tut, kimseyle paylaşma: ",
+  needMM:"0x (MetaMask) adresiyle kazanmak için MetaMask'in adresin sana ait olduğunu bir kez imzalaması gerekir. MetaMask'i kur/aç ya da yerel cüzdan kullan.",
+  wrongAcct:"MetaMask'te seçili hesap bu adres değil. MetaMask'te hesabı değiştir ya da adresi düzelt.",
+  signFail:"İmza reddedildi ya da başarısız: ", regFail:"Kayıt başarısız: ", libFail:"İmza kütüphaneleri yüklenemedi (/lib/nacl.min.js, /lib/blake3.js). Sayfayı yenile.",
+  sessExpired:"Oturum artık geçerli değil (süresi doldu ya da koordinatör yeniden başladı). Katkı duraklatıldı.", resign:"🔑 Yeniden imzala ve sürdür",
+  chatOnly:"Yalnız sohbet için adres alanını boş bırak.",
  }
 };
 let L = localStorage.getItem("kubra_lang") || "en";
@@ -186,9 +211,63 @@ const MODEL = "Qwen2.5-1.5B-Instruct-q4f16_1-MLC";
 const POLL_MS = 4000;
 const $ = id => document.getElementById(id);
 const log = m => { const el=$("log"); el.textContent += m+"\n"; el.scrollTop=el.scrollHeight; };
-let aktif=false, engine=null, cuzdan=null, dongu=null, mesgul=false;
+let aktif=false, engine=null, cuzdan=null, dongu=null, mesgul=false, mod=null; // mod: "evm" | "yerel"
 function durum(txt,cls){ $("durum").textContent=txt; $("dot").className="dot"+(cls?" "+cls:""); }
 async function j(path,opt){ const r=await fetch(COORD+path,opt); return r.json(); }
+// HTTP durumuyla birlikte: {status, d}
+async function jr(path,opt){ const r=await fetch(COORD+path,opt); let d={}; try{ d=await r.json(); }catch(e){} return {status:r.status, d:d||{}}; }
+const JSONH = {"Content-Type":"application/json"};
+
+// ── CÜZDAN İMZASI (koordinatör biçimi: soulware-coordinator/src/worker_mesaj.rs) ──
+// Mesaj: "AIDAG-WORKER|<wallet küçük>|<nonce>|<ts>". Tarayıcı bir ed25519 OTURUM anahtarı
+// tutar; MetaMask cüzdanı bu anahtarı BİR KEZ yetkilendirir (nonce "oturum:<pk>"),
+// sonraki poll/submit istekleri bu anahtarla imzalanır (her istekte MetaMask açılmaz).
+// MetaMask yoksa "yerel cüzdan": adres = blake3(oturum_pk)[..20], doğrudan ed25519 cüzdan.
+const hexE = b => Array.from(b, x=>x.toString(16).padStart(2,"0")).join("");
+const hexC = h => Uint8Array.from(h.match(/../g).map(x=>parseInt(x,16)));
+const utf8 = s => new TextEncoder().encode(s);
+const simdiSn = () => Math.floor(Date.now()/1000);
+const imzaMesaji = (w,nonce,ts) => "AIDAG-WORKER|"+String(w).trim().toLowerCase()+"|"+nonce+"|"+ts;
+const kutuphaneVar = () => typeof nacl!=="undefined" && nacl.sign && typeof blake3hash==="function";
+let oturum=null;  // {kp, pkHex, seedHex}
+function oturumAnahtari(){
+  if(oturum) return oturum;
+  let seed=null;
+  try { const s=localStorage.getItem("kubra_oturum_seed"); if(s && /^[0-9a-f]{64}$/.test(s)) seed=hexC(s); } catch(e){}
+  if(!seed){ seed=nacl.randomBytes(32); try { localStorage.setItem("kubra_oturum_seed", hexE(seed)); } catch(e){ /* bellekte kalir */ } }
+  const kp=nacl.sign.keyPair.fromSeed(seed);
+  oturum={kp, pkHex:hexE(kp.publicKey), seedHex:hexE(seed)};
+  return oturum;
+}
+function yerelAdres(){ return "0x"+hexE(blake3hash(oturumAnahtari().kp.publicKey).slice(0,20)); }
+// Oturum anahtarıyla imza alanları (ed25519): {ts, imza, pubkey}
+function oturumImza(nonce){
+  const ts=simdiSn(), o=oturumAnahtari();
+  return {ts, imza:hexE(nacl.sign.detached(utf8(imzaMesaji(cuzdan,nonce,ts)), o.kp.secretKey)), pubkey:o.pkHex};
+}
+// Rust str::trim() ile AYNI boşluk kümesi (Unicode White_Space) — cevap özeti koordinatörle eşleşsin.
+const WS="\\u0009-\\u000D\\u0020\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000";
+const rustTrim = s => String(s).replace(new RegExp("^["+WS+"]+|["+WS+"]+$","g"),"");
+const cevapOzeti = a => hexE(blake3hash(utf8(rustTrim(a))));
+// Koordinatöre kayıt. evm: MetaMask BİR KEZ "oturum:<pk>" imzalar. yerel: oturum anahtarı = cüzdan.
+async function oturumKur(){
+  let govde;
+  if(mod==="evm"){
+    const eth=window.ethereum;
+    const hesaplar=await eth.request({method:"eth_requestAccounts"});
+    if(!(hesaplar||[]).map(x=>String(x).toLowerCase()).includes(cuzdan)) throw new Error(t("wrongAcct"));
+    const ts=simdiSn(), pk=oturumAnahtari().pkHex;
+    let imza;
+    try { imza=await eth.request({method:"personal_sign", params:["0x"+hexE(utf8(imzaMesaji(cuzdan,"oturum:"+pk,ts))), cuzdan]}); }
+    catch(e){ throw new Error(t("signFail")+((e&&e.message)||e)); }
+    govde={wallet:cuzdan, oturum_pubkey:pk, ts, imza};
+  } else {
+    govde={wallet:cuzdan, ...oturumImza("kayit")};
+  }
+  const r=await jr("/worker/register",{method:"POST",headers:JSONH,body:JSON.stringify(govde)});
+  if(r.status!==200 || !r.d.ok) throw new Error(t("regFail")+(r.d.hata||("HTTP "+r.status)));
+  return r.d;
+}
 const konusma = ()=>$("konusma");
 function ekle(cls,txt){ const d=document.createElement("div"); d.className="msg "+cls; d.textContent=txt; konusma().appendChild(d); konusma().scrollTop=konusma().scrollHeight; return d; }
 // KUBRA düşünme figürü — 12 yapraklı papatya, biri sarı, yaprakları eksilerek döner.
@@ -259,34 +338,79 @@ async function seviyeGuncelle(){
   try { const s=await j("/status"); const w=(s.workers||[]).find(x=>x.wallet.toLowerCase()===cuzdan);
     if(w){ $("kazanc").textContent=w.earned_lsc; $("isler").textContent=w.jobs_done; $("seviye").textContent="T"+(w.tier??0); } } catch(e){}
 }
+function katkiDurdur(){ aktif=false; clearInterval(dongu); dongu=null; }
+function katkiBaslat(){ katkiDurdur(); aktif=true; dongu=setInterval(katkiAdim,POLL_MS); }
+// 401: oturum geçersiz (süresi doldu / koordinatör yeniden başladı / saat kayması) → durdur, yeniden imza iste.
+function oturumGecersiz(hataMetni){
+  katkiDurdur(); durum(t("paused"),"");
+  log("⚠ "+t("sessExpired")+(hataMetni?" ("+hataMetni+")":""));
+  $("yenidenImza").classList.remove("hidden");
+}
 async function katkiAdim(){
   if(!aktif||mesgul) return; // sohbet sırasında modeli meşgul etme
   try {
-    const is = await j("/worker/poll/"+cuzdan);
+    const q=new URLSearchParams(Object.entries(oturumImza("poll")).map(([k,v])=>[k,String(v)]));
+    const p = await jr("/worker/poll/"+cuzdan+"?"+q.toString());
+    if(p.status===401){ oturumGecersiz(p.d.hata); return; }
+    const is=p.d;
     if(is&&is.none){ durum(t("waiting"),"on"); return; }
     if(is&&is.job_id){
       durum(t("running")(is.job_id),"busy"); log(t("jobline")(is.job_id, (is.prompt||"").slice(0,50)));
-      mesgul=true; const cevap=await uret(is.prompt); mesgul=false;
-      const res=await j("/worker/submit",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet:cuzdan,job_id:is.job_id,answer:cevap})});
-      log(t("submitted")(is.job_id,res.durum||"?",!!res.oduller)); await seviyeGuncelle(); durum(t("waiting"),"on");
+      mesgul=true; let cevap; try { cevap=rustTrim(await uret(is.prompt)); } finally { mesgul=false; }
+      const s=await jr("/worker/submit",{method:"POST",headers:JSONH,body:JSON.stringify({
+        wallet:cuzdan, job_id:is.job_id, answer:cevap, ...oturumImza("is:"+is.job_id+":"+cevapOzeti(cevap)) })});
+      if(s.status===401){ oturumGecersiz(s.d.hata); return; }
+      const res=s.d;
+      log(t("submitted")(is.job_id,res.durum||res.hata||"?",!!res.oduller)); await seviyeGuncelle(); durum(t("waiting"),"on");
     }
   } catch(e){ mesgul=false; durum(t("connErr"),""); }
 }
 
-function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
-// m: yalnız sabit metin + esc() edilmiş dinamik veri
-function hataGoster(m){ const h=$("hata"); h.innerHTML=m; h.classList.remove("hidden"); }
+// Hata kutusu: YALNIZ düz metin (textContent) — koordinatör/MetaMask metni HTML olarak yorumlanmaz.
+function hataGoster(m, ipucu){
+  const h=$("hata"); h.textContent=String(m);
+  if(ipucu){ const s=document.createElement("span"); s.style.color="#93a1b3"; s.textContent=ipucu; h.appendChild(document.createElement("br")); h.appendChild(s); }
+  h.classList.remove("hidden");
+}
 function hataGizle(){ $("hata").classList.add("hidden"); }
+function yerelBilgiGoster(){
+  $("yerelMetin").textContent=t("localNote")(yerelAdres());
+  $("yerelBilgi").classList.remove("hidden");
+}
+$("yerelBtn").onclick = () => {
+  hataGizle();
+  if(!kutuphaneVar()){ hataGoster(t("libFail")); return; }
+  $("adres").value=yerelAdres(); yerelBilgiGoster();
+};
+$("anahtarGoster").onclick = () => {
+  const k=$("yerelAnahtar"); k.textContent=t("keyLabel")+oturumAnahtari().seedHex; k.classList.toggle("hidden");
+};
+$("yenidenImza").onclick = async () => {
+  $("yenidenImza").disabled=true;
+  try { await oturumKur(); $("yenidenImza").classList.add("hidden"); log(t("registered")(cuzdan)); katkiBaslat(); }
+  catch(e){ log("⚠ "+((e&&e.message)||e)); }
+  $("yenidenImza").disabled=false;
+};
 $("baslat").onclick = async () => {
   hataGizle();
   const a=$("adres").value.trim().toLowerCase();
   const gecerli=/^0x[0-9a-f]{40}$/.test(a);
   if(a && !gecerli){ hataGoster(t("badAddr")); return; }   // adres GİRİLDİYSE geçerli olmalı
   cuzdan = gecerli ? a : null;                             // adres YOKSA: sohbet-only (buton yine çalışır)
-  if(cuzdan) localStorage.setItem("kubra_adres", cuzdan);  // BU BİLGİSAYARI HATIRLA → sonraki açılışta otomatik tanınır
+  mod = null;
+  if(cuzdan){
+    if(!kutuphaneVar()){ hataGoster(t("libFail")); return; }
+    if(cuzdan===yerelAdres()) mod="yerel";                 // bu tarayıcının yerel cüzdanı
+    else if(window.ethereum && window.ethereum.request) mod="evm";
+    else { hataGoster(t("needMM"), t("chatOnly")); return; }
+  }
   $("baslat").disabled=true;
   try {
-    if(cuzdan){ try{ await j("/worker/register",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet:cuzdan})}); }catch(e){} }
+    if(cuzdan){                                            // cüzdan sahipliği: kayıt BAŞARILI olmalı
+      try { await oturumKur(); }
+      catch(e){ hataGoster((e&&e.message)||String(e), t("chatOnly")); $("baslat").disabled=false; return; }
+      localStorage.setItem("kubra_adres", cuzdan);         // BU BİLGİSAYARI HATIRLA → sonraki açılışta otomatik tanınır
+    }
     await motorYukle();                                    // asıl kritik adım — modeli yükle
     $("giris").classList.add("hidden");
     $("sohbet").classList.remove("hidden");
@@ -294,20 +418,20 @@ $("baslat").onclick = async () => {
     ekle("cevap", t("ready"));
     if(cuzdan){                                            // adres var → arka plan katkı + kazanç aç
       $("katki").classList.remove("hidden");
-      aktif=true; dongu=setInterval(katkiAdim,POLL_MS); seviyeGuncelle();
+      log(t("registered")(cuzdan)); katkiBaslat(); seviyeGuncelle();
     } else {                                               // adres yok → sadece yerel sohbet + kazanç ipucu
       ekle("cevap", t("earnHint"));
     }
     $("soru").focus();
   } catch(e){
     $("yukdurum").textContent="";
-    hataGoster(t("startFail")(esc(e && e.message || e))+"<br><span style='color:#93a1b3'>"+t("startTips")+"</span>");
+    hataGoster(t("startFail")(e && e.message || e), t("startTips"));
     $("baslat").disabled=false;
   }
 };
 $("gonder").onclick = sohbetGonder;
 $("soru")?.addEventListener("keydown", e=>{ if(e.key==="Enter") sohbetGonder(); });
-$("durdur").onclick = () => { aktif=false; clearInterval(dongu); durum(t("paused")); log(t("stopped")); };
+$("durdur").onclick = () => { katkiDurdur(); durum(t("paused")); log(t("stopped")); };
 setLang(L);
 
 // ── CİHAZ KONTROLÜ: WebGPU (Chrome/Edge) gerekli. "GPU yok" demek YANLIŞ — asıl sebep tarayıcı. ──
@@ -326,7 +450,8 @@ function yardimKart(baslik, metin){
   if (!(await webgpuHazir())){ $("giris").innerHTML = yardimKart(t("gpuTitle"), t("gpuText")); return; }
   // WebGPU hazır → giriş kartı kalır. Kayıtlı adresi doldur (bu bilgisayarı hatırla → otomatik tanınır).
   const kayitliAdres = localStorage.getItem("kubra_adres");
-  if (kayitliAdres && $("adres")){ $("adres").value = kayitliAdres; $("yukdurum").textContent = t("welcomeBack"); }
+  if (kayitliAdres && $("adres")){ $("adres").value = kayitliAdres; $("yukdurum").textContent = t("welcomeBack");
+    try { if (kutuphaneVar() && kayitliAdres===yerelAdres()) yerelBilgiGoster(); } catch(e){} }
 })();
 </script>
 </body>

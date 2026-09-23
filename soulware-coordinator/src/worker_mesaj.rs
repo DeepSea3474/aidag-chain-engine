@@ -6,6 +6,7 @@
 //!          | "poll"                       (GET  /worker/poll/:wallet)
 //!          | "benchmark:<ozet hex>"       (POST /worker/benchmark)
 //!          | "is:<job_id>:<cevap ozeti>"  (POST /worker/submit)
+//!          | "oturum:<oturum pubkey hex>" (POST /worker/register + `oturum_pubkey`)
 //!   ts     = unix saniye (koordinator +-300 sn pencere uygular)
 //!
 //! Ozetler blake3 (hex). Cevap ozeti = blake3(answer.trim()) — koordinatorun
@@ -16,6 +17,10 @@
 //!     `imza` (128 hex) = ed25519(mesaj baytlari).
 //!   - EVM cuzdan (MetaMask vb.): `imza` (130 hex, r|s|v) = EIP-191 personal_sign(mesaj);
 //!     `pubkey` GONDERILMEZ.
+//!   - OTURUM anahtari (tarayici isci): cuzdan sahibi "oturum:<pk>" nonce'unu BIR KEZ
+//!     imzalar (EIP-191 ya da ed25519); koordinator 24 saat boyunca poll/benchmark/submit
+//!     isteklerinde `pubkey` = oturum anahtari + ed25519 imzasini bu cuzdan icin kabul eder.
+//!     Oturum anahtari baska cuzdan icin ve yeni oturum kurmak icin KULLANILAMAZ.
 
 pub const ONEK: &str = "AIDAG-WORKER";
 pub const NONCE_KAYIT: &str = "kayit";
@@ -23,6 +28,12 @@ pub const NONCE_POLL: &str = "poll";
 
 pub fn mesaj(wallet: &str, nonce: &str, ts: u64) -> String {
     format!("{ONEK}|{}|{nonce}|{ts}", wallet.trim().to_lowercase())
+}
+
+/// Oturum kurma nonce'u: "oturum:<oturum pubkey, 64 kucuk hex>".
+#[allow(dead_code)] // soulware-worker (ayni dosya) kullanmiyor
+pub fn oturum_nonce(pubkey: &[u8; 32]) -> String {
+    format!("oturum:{}", hex::encode(pubkey))
 }
 
 pub fn cevap_ozeti(answer: &str) -> String {
