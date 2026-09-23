@@ -33,65 +33,53 @@
   <div class="box"><textarea id="li" readonly style="min-height:300px"></textarea><button class="btn" onclick="kopya('li',this)">Kopyala</button></div>
 </div>
 <script>
-const X1 = `An AI that pays you to build it — and belongs to you.
+const X1 = `Meet KUBRA — the AI assistant of AIDAG-Chain.
 
-🖥️ Share your spare compute → help run KUBRA
-💰 Earn $LSC
-🤖 Spend $LSC to use KUBRA
-💧 That spending funds the contributors
-📈 More join → KUBRA gets stronger, for everyone
+💬 Free to use: aidag-chain.com/ask
+📚 Answers from verified sources — says "no verified information" instead of guessing
+⛓️ A hash of every answer is written to the chain
+⚡ Pilot: contribute spare compute, earn $LSC
 
-No datacenters. No subscriptions. Owned by its builders.
+Honest status: small model on the project's own server (CPU). Early — and we won't pretend otherwise.
 
 👉 aidag-chain.com/how`;
 
-const X2 = `1/ Big AI is owned by a handful of corporations.
+const X2 = `1/ KUBRA is the AI assistant of AIDAG-Chain — an independent Layer-1 DAG blockchain, live on mainnet since 26 July 2026.
 
-We're building the opposite: KUBRA — an AI that funds itself, rewards the people who run it, and belongs to them.
+2/ What works today
+• Free to use at aidag-chain.com/ask
+• Grounded in verified official sources; says "no verified information" instead of guessing
+• Verifies document hashes against the chain
+• Writes a hash of every answer to the chain
 
-Here's the loop that makes it work 👇
-
-2/ The flywheel
+3/ The pilot
 🖥️ Contribute idle compute → help run KUBRA
-💰 Earn $LSC
-🤖 Spend $LSC to use KUBRA
-💧 That spending pays the contributors
-📈 More contributors → KUBRA gets smarter & faster
-Each turn, bigger. A snowball.
+💰 Earn $LSC (AIDAG-Chain's gas coin) — rewards are settled by the team during the pilot
 
-3/ Why it's different
-• No datacenters — it runs on contributed computers
-• No subscriptions — you earn what you use
-• Not owned by a company — owned by its builders
-The network funds itself.
-
-4/ On-chain, not a promise
-$LSC is the gas coin of AIDAG-Chain. Every contribution, reward and use is written to a public blockchain. Open source. You don't have to trust us — you can check.
+4/ The plan (not live yet)
+🤖 Pay for KUBRA usage in $LSC
+💧 Usage fees fund contributor rewards
+📈 More contributors → a stronger KUBRA
 
 5/ Honest about where we are
-KUBRA today: small model, no GPUs yet. Good on basics, not frontier-level — and we won't pretend otherwise. It grows stronger with every contributor. That's the point.
+Today KUBRA runs a small model on the project's own server (CPU). Good on basics, not frontier-level. Independent security audit of the chain: pending.
 
-6/ Your move
-💬 Use KUBRA free (any device): aidag-chain.com/ask
-⚡ Contribute & earn (PC + GPU): aidag-chain.com/katil
-Own a piece of the AI you help build.`;
+6/ Try it
+💬 aidag-chain.com/ask
+⚡ Pilot: aidag-chain.com/katil`;
 
-const LI = `What if an AI paid you to help build it — and belonged to you, not a corporation?
+const LI = `KUBRA is the AI assistant of AIDAG-Chain, an independent Layer-1 DAG blockchain written in Rust and live on mainnet since 26 July 2026.
 
-That's KUBRA. It runs on compute contributed by people, not datacenters. The economics form a self-reinforcing loop:
+What works today: KUBRA is free to use, answers from verified official sources (and says "no verified information" instead of guessing), verifies document hashes against the chain, and writes a hash of every answer to the chain.
 
-→ Contribute idle compute, help run KUBRA
-→ Earn LSC
-→ Spend LSC to use KUBRA
-→ That spending funds the contributors
-→ More contributors → a stronger, faster AI → more value for everyone
+The pilot: people can contribute idle compute and earn LSC, the chain's gas coin; during the pilot, rewards are settled by the team.
 
-No datacenters. No subscriptions. The network funds itself, and every contribution, reward and use is recorded on a public blockchain (AIDAG-Chain, where LSC is the gas coin). Open source — verifiable, not a promise.
+The plan (not live yet): usage paid in LSC, with those fees funding contributor rewards.
 
-We're honest about the stage: KUBRA today runs a small model and is early — competitive on basics, not frontier-level yet. Its strength grows with its community. That's the design.
+We're honest about the stage: KUBRA runs a small model on the project's own server (CPU) today — competitive on basics, not frontier-level. The chain's independent security audit is pending.
 
 See how it works: aidag-chain.com/how
-Use it free, or contribute and earn: aidag-chain.com`;
+Try it: aidag-chain.com/ask`;
 
 document.getElementById("x1").value=X1;
 document.getElementById("x2").value=X2;

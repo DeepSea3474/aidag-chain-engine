@@ -74,7 +74,7 @@ flowchart TB
 ```mermaid
 timeline
     title AIDAG-Chain progress
-    Done : Testnet : EVM layer (AVM, MetaMask)
+    Done : EVM layer (AVM, MetaMask)
     26 Jul 2026 : MAINNET LIVE (Chain ID 3474)
     Sep 2026 : Custody & consensus hardening : TGE policy : Presale phases auto-continue
     In progress : Presale Phase 1 → Phase 2
@@ -85,7 +85,6 @@ timeline
 
 | Step | Status |
 |---|---|
-| Testnet | ✅ done |
 | EVM layer (AVM, MetaMask transfers) | ✅ done |
 | **Mainnet** — 26 Jul 2026, Chain ID 3474 | ✅ **live** |
 | Custody & consensus hardening (Sep 2026) | ✅ done |
