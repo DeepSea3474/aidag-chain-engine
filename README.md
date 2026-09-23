@@ -150,3 +150,4 @@ Remote-node test procedure and logs: [`UZAK_DUGUM_TESTI.md`](UZAK_DUGUM_TESTI.md
 
 - **Explorer, dApp, presale & whitepaper:** https://aidag-chain.com
 - **Repository:** https://github.com/DeepSea3474/aidag-chain-engine
+- **X:** https://x.com/AidagChain_
