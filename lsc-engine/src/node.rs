@@ -1058,6 +1058,13 @@ impl NodeState {
     /// NOT (B7): eski `synced` param'i kaldirildi — state HER ZAMAN total_order'dan
     /// sifirdan turetilir; "replay" ozel yolu yoktu (olu koddu), silindi.
     fn kalkana_yonlendir(&mut self, payload: &[u8], signer: &[u8; 32], zaman: u64) {
+        self.kalkana_yonlendir_ic(payload, signer, zaman);
+        // Islem rezervi/TGE'yi degistirmis olabilir: sorgular (RPC harcanabilir)
+        // ve sonraki islem guncel kilidi gorsun.
+        self.kilitleri_guncelle();
+    }
+
+    fn kalkana_yonlendir_ic(&mut self, payload: &[u8], signer: &[u8; 32], zaman: u64) {
         // DETERMINIZM: vesting kilit kontrolu, islenmekte olan vertex'in KENDI
         // timestamp'ine gore yapilir. `zaman` konsensus verisidir (vertex preimage'i
         // + her dugumde AYNI) → kilitli/serbest miktar tum dugumlerde birebir ayni
@@ -5187,3 +5194,6 @@ mod tests {
         }
     }
 }
+#[cfg(test)]
+#[path = "denetim_regresyon.rs"]
+mod denetim_regresyon;
