@@ -68,7 +68,7 @@ struct Config {
     image_url: Option<String>,  // SOULWARE_IMAGE_URL → uzak GPU görsel servisi (POST {prompt} → PNG)
     video_url: Option<String>,  // SOULWARE_VIDEO_URL → uzak GPU video servisi (POST {prompt} → MP4)
     // ── Güvenlik ──
-    /// SOULWARE_YONETIM_TOKEN: yönetim uçları (/kb/*, /retrieve, /models) için Bearer
+    /// SOULWARE_YONETIM_TOKEN: yönetim uçları (/kb/*, /models; /retrieve herkese açık ve hız sınırlı) için Bearer
     /// token. Ayarlı değilse (ya da 16 karakterden kısaysa) bu uçlar KAPALI (403).
     yonetim_token: Option<String>,
     /// SOULWARE_BEYIN_ESZAMAN: aynı anda en fazla kaç /v1/ask(-stream) (varsayılan 4).
@@ -677,8 +677,13 @@ async fn models(State(st): State<Arc<AppState>>, h: axum::http::HeaderMap) -> ax
 #[derive(Deserialize)]
 struct RetrieveReq { prompt: String }
 
-async fn retrieve(State(st): State<Arc<AppState>>, h: axum::http::HeaderMap, Json(req): Json<RetrieveReq>) -> axum::response::Response {
-    if let Err(r) = yonetim::yetki(&h, st.cfg.yonetim_token.as_deref()) { return r; }
+// HERKESE ACIK (katil.html tarayici iscisi grounding icin kullanir): donen veri
+// herkese acik kaynak derlemesinden kisa alintilardir. DoS korumasi: govde 32 KB
+// (route katmani) + beyin semaforuyla eszamanlilik siniri (dolunca 429).
+async fn retrieve(State(st): State<Arc<AppState>>, Json(req): Json<RetrieveReq>) -> axum::response::Response {
+    let Ok(_izin) = st.beyin_sem.clone().try_acquire_owned() else {
+        return (StatusCode::TOO_MANY_REQUESTS, "yogunluk: lutfen biraz sonra tekrar deneyin").into_response();
+    };
     let qemb = st.embedder.as_ref().and_then(|e| e.embed(&req.prompt).ok());
     let depo = match st.depo.lock() { Ok(g) => g, Err(p) => p.into_inner() };
     let (mod_, pasajlar) = match qemb {

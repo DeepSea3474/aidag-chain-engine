@@ -154,9 +154,14 @@ try:
 
     # ── 4) yonetim uclari ──
     H={"Authorization":"Bearer "+TOKEN}
-    for yol,gov in (("/kb/stats",None),("/models",None),("/retrieve",{"prompt":"x"}),("/kb/ingest",{"baslik":"Deneme","metin":"yeterince uzun metin burada"})):
+    for yol,gov in (("/kb/stats",None),("/models",None),("/kb/ingest",{"baslik":"Deneme","metin":"yeterince uzun metin burada"})):
         r=istek(KUB+yol,gov,ham=True); r2=istek(KUB+yol,gov,{"Authorization":"Bearer yanlis-token-0123456789"},ham=True)
         kontrol(f"BULGU4: {yol} tokensiz 401, yanlis token 401", r[0]==401 and r2[0]==401, (r[0],r2[0]))
+    # /retrieve bilincli olarak HERKESE ACIK (tarayici iscisi grounding): tokensiz 200, 32 KB ustu 413
+    r=istek(KUB+"/retrieve",{"prompt":"x"},ham=True)
+    kontrol("/retrieve herkese acik (tokensiz 200)", r[0]==200, r[0])
+    r=istek(KUB+"/retrieve",{"prompt":"x"*(40*1024)},ham=True)
+    kontrol("/retrieve 40 KB govde -> 413", r[0]==413, r[0])
     r=istek(KUB+"/kb/stats",None,H)
     kontrol("BULGU4: /kb/stats dogru token -> 200 (yol sizdirmaz)", r.get("ok") and "yol" not in r, r)
     r=istek(KUB+"/kb/ingest",{"baslik":"Deneme","metin":"yeterince uzun metin burada"},H)
@@ -184,7 +189,7 @@ try:
     k.terminate(); k.wait()
     # Token olmadan: yonetim uclari KAPALI (403); yargic yoksa gorsel REDDEDILIR
     k=kubra("soulware-core-YENI",SOULWARE_REMOTE_URL="")
-    for yol,gov in (("/kb/stats",None),("/models",None),("/retrieve",{"prompt":"x"}),("/kb/ingest",{"baslik":"a","metin":"yeterince uzun metin"})):
+    for yol,gov in (("/kb/stats",None),("/models",None),("/kb/ingest",{"baslik":"a","metin":"yeterince uzun metin"})):
         r=istek(KUB+yol,gov,{"Authorization":"Bearer "+TOKEN},ham=True)
         kontrol(f"BULGU4: token env yok -> {yol} 403", r[0]==403, r[0])
     kod,_,_=istek(KUB+"/v1/image",{"prompt":"guzel bir kedi"},ham=True)

@@ -219,7 +219,8 @@ function linkifyDom(kap, txt){
 // KANIT-BASLA — kanıt dosyası içeriği (saf fonksiyon; sunucunun hash'lediği metin önceliklidir)
 function kanitVerisi(proof, soru, metin){
   return {
-    sema: "tuzlu-v1",
+    // Sunucunun bildirdigi sema (tuzlu-v2 ve sonrasi); eski sunucu yanitlari icin v1.
+    sema: (typeof proof.sema === "string") ? proof.sema : "tuzlu-v1",
     net_id: 3474,
     prompt: (typeof proof.prompt === "string") ? proof.prompt : soru,
     answer: (typeof proof.answer === "string") ? proof.answer : metin,
@@ -228,7 +229,7 @@ function kanitVerisi(proof, soru, metin){
     salt: proof.salt,
     proof_hash: proof.proof_hash,
     zincir: "https://aidag-chain.com/rpc/belge/" + proof.proof_hash,
-    dogrulama: "POST https://aidag-chain.com/kubra-brain/v1/verify  (bu dosyanin prompt, answer, model, ts, salt, proof_hash alanlari)"
+    dogrulama: "POST https://aidag-chain.com/kubra-brain/v1/verify  (bu dosyanin sema, prompt, answer, model, ts, salt, proof_hash alanlari)"
   };
 }
 // KANIT-BITIS
