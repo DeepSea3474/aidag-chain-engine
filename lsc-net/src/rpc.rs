@@ -398,8 +398,10 @@ async fn nonce(State(st): State<RpcState>, Path(adres_hex): Path<String>) -> Jso
 /// GET /tips — mevcut DAG uclari (tip) id'leri. SDK bunlari parent yapar.
 async fn tips(State(st): State<RpcState>) -> Json<Value> {
     let node = st.node.read().await;
-    let tips: Vec<String> = node.tips().iter().map(hex::encode).collect();
-    Json(json!({ "count": tips.len(), "tips": tips }))
+    // DENETIM K-01: istemciler (cuzdan/SDK/betikler) bu listeyi parent yapar ->
+    // en fazla MAX_PARENTS uc dondur; toplam uc sayisi ayrica bilgi olarak verilir.
+    let tips: Vec<String> = node.uretim_ebeveynleri().iter().map(hex::encode).collect();
+    Json(json!({ "count": tips.len(), "toplam_uc": node.tips().len(), "tips": tips }))
 }
 
 /// Faucet basina sabit test AIDAG miktari (testnet kolayligi).
@@ -729,7 +731,7 @@ async fn on_satis_claim_relay(State(st): State<RpcState>, Json(govde): Json<Valu
                 }
             }
         }
-        (node.tips(), net)
+        (node.uretim_ebeveynleri(), net)
     };
     let payload = claim.encode();
     let vertex = match lsc_engine::Vertex::new_signed(net, parents, payload, now, &st.signing_key) {
@@ -818,9 +820,7 @@ async fn faucet(State(st): State<RpcState>, Path(adres_hex): Path<String>) -> Js
         .unwrap_or(0);
     let (parents, net) = {
         let node = st.node.read().await;
-        let mut t = node.tips();
-        t.sort();
-        (t, node.network_id())
+        (node.uretim_ebeveynleri(), node.network_id())
     };
     let payload = lsc_engine::tx::FaucetKaydi::new(adres, FAUCET_MIKTAR).encode();
     let vertex = match lsc_engine::Vertex::new_signed(net, parents, payload, now, &st.signing_key) {
@@ -970,9 +970,8 @@ async fn submit(State(st): State<RpcState>, body: String) -> Json<Value> {
     }))
 }
 
-/// AIDAG Chain ID (EVM uyumu). 3474 = 0xD92. MetaMask bu ID ile agi tanir.
-/// NOT: mainnet'te chainlist.org'da rezerve edilmeli (cakisma kontrolu).
-const AIDAG_CHAIN_ID: u64 = 3474;
+// AIDAG Chain ID (EVM uyumu): mainnet 3474 = 0xD92. Deger artik dugumun agindan
+// `lsc_engine::avm::evm_chain_id` ile turetilir (DENETIM K-06).
 
 /// eth_ JSON-RPC params dizisinin ILK elemanindan 20 baytlik adres cikar.
 /// "0x<40 hex>" bekler. Hatali ise None.
@@ -1032,9 +1031,17 @@ async fn eth_rpc(State(st): State<RpcState>, Json(istek): Json<Value>) -> Json<V
 
     match method {
         // Agin kimligi: MetaMask baglanirken ILK bunu sorar. Hex string.
-        "eth_chainId" => ok(&id, json!(format!("0x{:x}", AIDAG_CHAIN_ID))),
+        // DENETIM K-06: chain id dugumun agindan turetilir (mainnet 3474; diger
+        // aglar farkli) -> testnet'te imzalanan tx mainnet'te gecersiz.
+        "eth_chainId" => {
+            let c = lsc_engine::avm::evm_chain_id(st.node.read().await.network_id());
+            ok(&id, json!(format!("0x{:x}", c)))
+        }
         // Ag versiyonu: chainId'nin ondalik string hali.
-        "net_version" => ok(&id, json!(AIDAG_CHAIN_ID.to_string())),
+        "net_version" => {
+            let c = lsc_engine::avm::evm_chain_id(st.node.read().await.network_id());
+            ok(&id, json!(c.to_string()))
+        }
         // En son blok numarasi. Bizde "blok" = vertex sayisi (yaklasik gosterge).
         "eth_blockNumber" => {
             let n = st.node.read().await.vertex_count() as u64;
@@ -1095,9 +1102,45 @@ async fn eth_rpc(State(st): State<RpcState>, Json(istek): Json<Value>) -> Json<V
                             // tx_hash = keccak256(raw) - eth standardi, hemen hesaplanir
                             let tx_hash = {
                                 use lsc_engine::avm::ham_eth_tx_coz;
-                                // once cozulebilir mi kontrol (gecersizse hemen red)
-                                if ham_eth_tx_coz(&raw).is_err() {
-                                    return err(&id, -32000, "raw tx cozulemedi (RLP/imza)");
+                                // once cozulebilir mi kontrol (gecersizse hemen red).
+                                // DENETIM K-06: chain id bu agin EVM chain id'si olmali.
+                                let beklenen = lsc_engine::avm::evm_chain_id(
+                                    st.node.read().await.network_id(),
+                                );
+                                let islem = match ham_eth_tx_coz(&raw, beklenen) {
+                                    Ok(i) => i,
+                                    Err(e) => return err(&id, -32000, e),
+                                };
+                                // DENETIM K-05/K-07: mempool benzeri on-dogrulama. Yurutulemeyecek
+                                // tx (yanlis nonce / yetersiz bakiye / gas yok) DAG'a SOKULMAZ ve
+                                // istemciye hash (= "kabul") DONULMEZ. Yalniz bu dugumun RPC'den
+                                // urettigi vertex'i etkiler (konsensus kurali degil).
+                                {
+                                    let node = st.node.read().await;
+                                    let beklenen_nonce = node.beklenen_nonce(&islem.gonderen);
+                                    if islem.nonce != beklenen_nonce {
+                                        return err(
+                                            &id,
+                                            -32000,
+                                            &format!(
+                                                "nonce hatali: beklenen {beklenen_nonce}, gelen {}",
+                                                islem.nonce
+                                            ),
+                                        );
+                                    }
+                                    if node.harcanabilir_bakiye(&islem.gonderen) < islem.deger {
+                                        return err(
+                                            &id,
+                                            -32000,
+                                            "yetersiz harcanabilir AIDAG (vesting kilidi dahil)",
+                                        );
+                                    }
+                                    let gas_limit = lsc_engine::avm::AVM_GAS_LIMIT;
+                                    let azami_ucret = lsc_engine::avm::gas_ucreti_hesapla(gas_limit)
+                                        as lsc_engine::registry::Tutar;
+                                    if node.lsc_bakiye(&islem.gonderen) < azami_ucret {
+                                        return err(&id, -32000, "gas icin yetersiz LSC");
+                                    }
                                 }
                                 lsc_engine::avm::eth_tx_hash(&raw)
                             };
@@ -1109,7 +1152,7 @@ async fn eth_rpc(State(st): State<RpcState>, Json(istek): Json<Value>) -> Json<V
                                 .unwrap_or(0);
                             let (parents, net) = {
                                 let node = st.node.read().await;
-                                (node.tips(), node.network_id())
+                                (node.uretim_ebeveynleri(), node.network_id())
                             };
                             let vertex = match lsc_engine::Vertex::new_signed(
                                 net,
@@ -1136,65 +1179,86 @@ async fn eth_rpc(State(st): State<RpcState>, Json(istek): Json<Value>) -> Json<V
             }
         }
 
-        // eth_getTransactionByHash: MetaMask islem takibi icin sorar.
-        // Islem sendRawTransaction'da vertex'e girdi; hash'i geri dogrularz.
-        "eth_getTransactionByHash" => {
+        // eth_getTransactionByHash / eth_getTransactionReceipt.
+        // DENETIM K-05: eskiden HER hash icin (hic var olmayanlar dahil) uydurma
+        // "onaylanmis" tx ve status=0x1 makbuz donuyordu -> borsa/koprü sahte yatirimi
+        // onaylayabilirdi. Artik yanit, tip=12 uygulanirken yazilan GERCEK makbuz
+        // defterinden (NodeState::evm_makbuz) uretilir; bilinmeyen hash -> null.
+        "eth_getTransactionByHash" | "eth_getTransactionReceipt" => {
             let h = istek
                 .get("params")
                 .and_then(|p| p.as_array())
                 .and_then(|a| a.first())
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let bn = {
-                let node = st.node.read().await;
-                node.vertex_count() as u64
+            let hash: [u8; 32] = match hex::decode(h.trim().trim_start_matches("0x"))
+                .ok()
+                .and_then(|b| b.try_into().ok())
+            {
+                Some(x) => x,
+                None => return err(&id, -32602, "gecersiz tx hash (32 bayt hex olmali)"),
+            };
+            let makbuz = st.node.read().await.evm_makbuz(&hash).cloned();
+            let Some(m) = makbuz else {
+                return ok(&id, Value::Null);
+            };
+            let adr = |a: &[u8; 20]| format!("0x{}", hex::encode(a));
+            let hedef = m.hedef.as_ref().map(adr);
+            if method == "eth_getTransactionByHash" {
+                return ok(
+                    &id,
+                    json!({
+                        "hash": format!("0x{}", hex::encode(m.tx_hash)),
+                        "blockNumber": format!("0x{:x}", m.sira),
+                        "blockHash": format!("0x{}", hex::encode(m.vertex_id)),
+                        "transactionIndex": "0x0",
+                        "from": adr(&m.gonderen),
+                        "to": hedef,
+                        "value": format!("0x{:x}", m.deger),
+                        "gas": format!("0x{:x}", m.gas_limit),
+                        "gasPrice": "0x3b9aca00",
+                        "nonce": format!("0x{:x}", m.nonce),
+                        "input": format!("0x{}", hex::encode(&m.veri)),
+                    }),
+                );
+            }
+            let (status, gas_used, olusan, aidag_durum, aidag_hata) = match &m.durum {
+                lsc_engine::EvmMakbuzDurum::Basarili {
+                    gas_used,
+                    olusan_adres,
+                } => (
+                    "0x1",
+                    *gas_used,
+                    olusan_adres.as_ref().map(adr),
+                    "basarili",
+                    None,
+                ),
+                lsc_engine::EvmMakbuzDurum::Basarisiz { gas_used } => {
+                    ("0x0", *gas_used, None, "basarisiz", None)
+                }
+                lsc_engine::EvmMakbuzDurum::Uygulanmadi(neden) => {
+                    ("0x0", 0, None, "uygulanmadi", Some(*neden))
+                }
             };
             ok(
                 &id,
                 json!({
-                    "hash": h,
-                    "blockNumber": format!("0x{:x}", bn),
-                    "blockHash": format!("0x{:064x}", bn),
+                    "transactionHash": format!("0x{}", hex::encode(m.tx_hash)),
+                    "blockNumber": format!("0x{:x}", m.sira),
+                    "blockHash": format!("0x{}", hex::encode(m.vertex_id)),
                     "transactionIndex": "0x0",
-                    "from": "0x0000000000000000000000000000000000000000",
-                    "to": "0x0000000000000000000000000000000000000000",
-                    "value": "0x0",
-                    "gas": "0x5208",
-                    "gasPrice": "0x3b9aca00",
-                    "nonce": "0x0",
-                    "input": "0x"
-                }),
-            )
-        }
-
-        // eth_getTransactionReceipt: MetaMask "islem onaylandi mi?" icin sorar.
-        // Islem zaten kabul edildi (vertex'e girdi) -> status=0x1 (basarili).
-        "eth_getTransactionReceipt" => {
-            let h = istek
-                .get("params")
-                .and_then(|p| p.as_array())
-                .and_then(|a| a.first())
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let bn = {
-                let node = st.node.read().await;
-                node.vertex_count() as u64
-            };
-            ok(
-                &id,
-                json!({
-                    "transactionHash": h,
-                    "blockNumber": format!("0x{:x}", bn),
-                    "blockHash": format!("0x{:064x}", bn),
-                    "transactionIndex": "0x0",
-                    "from": "0x0000000000000000000000000000000000000000",
-                    "to": "0x0000000000000000000000000000000000000000",
-                    "cumulativeGasUsed": "0x5208",
-                    "gasUsed": "0x5208",
-                    "contractAddress": serde_json::Value::Null,
+                    "from": adr(&m.gonderen),
+                    "to": hedef,
+                    "cumulativeGasUsed": format!("0x{:x}", gas_used),
+                    "gasUsed": format!("0x{:x}", gas_used),
+                    "effectiveGasPrice": "0x3b9aca00",
+                    "contractAddress": olusan,
+                    // NOT: AVM loglari henuz makbuza tasinmiyor (bilinen sinir).
                     "logs": [],
                     "logsBloom": format!("0x{}", "0".repeat(512)),
-                    "status": "0x1"
+                    "status": status,
+                    "aidagDurum": aidag_durum,
+                    "aidagHata": aidag_hata,
                 }),
             )
         }
@@ -1318,7 +1382,124 @@ pub fn router(
             .route("/lsc_test_bakiye", post(lsc_test_bakiye))
     };
 
-    router.with_state(state)
+    router
+        .with_state(state)
+        .layer(axum::middleware::from_fn_with_state(
+            yazma_siniri_olustur(),
+            yazma_siniri,
+        ))
+}
+
+/// JSON-RPC govdesi icin azami boyut (axum Json cikarimcisinin varsayilani ile ayni).
+const RPC_GOVDE_SINIRI: usize = 2 * 1024 * 1024;
+
+/// DENETIM K-07 (ara cozum): yazma uclari icin istemci basina + genel hiz siniri.
+type RpcHizSiniri = Arc<crate::hiz_siniri::HizSiniri<String>>;
+
+/// Sinirlar ortam degiskenleriyle ayarlanabilir (saniyede istek / ani yuk kapasitesi):
+/// LSC_RPC_YAZMA_HIZI (2), LSC_RPC_YAZMA_KAPASITE (10) — istemci basina;
+/// LSC_RPC_GENEL_YAZMA_HIZI (20), LSC_RPC_GENEL_YAZMA_KAPASITE (100) — tum istemciler.
+fn yazma_siniri_olustur() -> RpcHizSiniri {
+    use crate::hiz_siniri::{ortam_sayisi, HizSiniri};
+    Arc::new(HizSiniri::yeni(
+        ortam_sayisi("LSC_RPC_YAZMA_HIZI", 2.0),
+        ortam_sayisi("LSC_RPC_YAZMA_KAPASITE", 10.0),
+        Some((
+            ortam_sayisi("LSC_RPC_GENEL_YAZMA_HIZI", 20.0),
+            ortam_sayisi("LSC_RPC_GENEL_YAZMA_KAPASITE", 100.0),
+        )),
+    ))
+}
+
+/// Istemci anahtari. Baglanti loopback'ten geliyorsa (nginx gibi yerel ters vekil)
+/// vekilin yazdigi X-Real-IP, yoksa X-Forwarded-For'un SON girdisi kullanilir (ilk
+/// girdiyi istemci uydurabilir; nginx gercek adresi sona ekler). Dogrudan
+/// baglantida basliklara GUVENILMEZ, baglantinin IP'si kullanilir.
+/// `None`: basliksiz loopback — gercek istemci ayirt edilemez (basliksiz vekil
+/// arkasindaki TUM kullanicilar ya da yerel araclar, or. on satis izleyicisi); bu
+/// trafik tek bir istemci kotasini paylasmasin diye yalnizca genel tavana tabidir.
+fn istemci_anahtari(req: &axum::extract::Request) -> Option<String> {
+    let baglanti = req
+        .extensions()
+        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+        .map(|c| c.0.ip());
+    let baslik = |ad: &str| {
+        req.headers()
+            .get(ad)
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.to_string())
+    };
+    match baglanti {
+        Some(ip) if ip.is_loopback() => baslik("x-real-ip")
+            .or_else(|| {
+                baslik("x-forwarded-for").and_then(|v| v.rsplit(',').next().map(|s| s.to_string()))
+            })
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty()),
+        Some(ip) => Some(ip.to_string()),
+        None => None,
+    }
+}
+
+/// Yazma uclarina (vertex ureten / durum yazan) hiz siniri uygular; okuma uclari
+/// etkilenmez. JSON-RPC'de yalnizca `eth_sendRawTransaction` sinirlanir.
+async fn yazma_siniri(
+    State(hs): State<RpcHizSiniri>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+
+    let yol = req.uri().path().to_string();
+    let yazma_ucu = matches!(
+        yol.as_str(),
+        "/submit" | "/eslestir" | "/on-satis-claim" | "/test_bakiye" | "/lsc_test_bakiye"
+    ) || yol.starts_with("/faucet/");
+    let anahtar = istemci_anahtari(&req);
+    let izin = |hs: &RpcHizSiniri| match &anahtar {
+        Some(a) => hs.izin(a),
+        None => hs.izin_genel(),
+    };
+
+    if yazma_ucu {
+        if !izin(&hs) {
+            let govde =
+                json!({ "ok": false, "hata": "hiz siniri asildi; daha sonra tekrar deneyin" });
+            return (StatusCode::TOO_MANY_REQUESTS, Json(govde)).into_response();
+        }
+        return next.run(req).await;
+    }
+
+    if yol == "/" && req.method() == axum::http::Method::POST {
+        let (parcalar, govde) = req.into_parts();
+        let baytlar = match axum::body::to_bytes(govde, RPC_GOVDE_SINIRI).await {
+            Ok(b) => b,
+            Err(_) => return StatusCode::PAYLOAD_TOO_LARGE.into_response(),
+        };
+        let istek: Option<Value> = serde_json::from_slice(&baytlar).ok();
+        let ham_tx = istek
+            .as_ref()
+            .and_then(|v| v.get("method"))
+            .and_then(|m| m.as_str())
+            == Some("eth_sendRawTransaction");
+        if ham_tx && !izin(&hs) {
+            let id = istek
+                .as_ref()
+                .and_then(|v| v.get("id").cloned())
+                .unwrap_or(json!(1));
+            let govde = json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": { "code": -32005, "message": "hiz siniri asildi" }
+            });
+            return (StatusCode::TOO_MANY_REQUESTS, Json(govde)).into_response();
+        }
+        let req = axum::extract::Request::from_parts(parcalar, axum::body::Body::from(baytlar));
+        return next.run(req).await;
+    }
+
+    next.run(req).await
 }
 
 /// RPC sunucusunu verilen adreste baslatir (ornek: "0.0.0.0:8645").
@@ -1331,7 +1512,12 @@ pub async fn serve(
     let app = router(node, submit_tx, signing_key);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!("RPC sunucusu dinliyor: http://{addr}  (GET /health, /status)");
-    axum::serve(listener, app).await?;
+    // DENETIM K-07: istemci IP'si hiz siniri icin gerekli (ConnectInfo).
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }
 

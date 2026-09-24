@@ -123,6 +123,41 @@ pub struct NodeState {
     /// total_order_artimli, yeni tip bunun zincirini uzatiyorsa tam O(n)
     /// yeniden-siralamayi ATLAR (sadece yeni segment) -> ingest O(n^2) -> O(n).
     son_secili_tip: Option<VertexId>,
+    /// DENETIM K-05: tip=12 eth tx makbuz defteri (tx_hash -> gercek sonuc).
+    /// total_order'dan turer; tam yeniden hesapta sifirlanir.
+    evm_makbuzlar: std::collections::BTreeMap<[u8; 32], EvmMakbuz>,
+    /// Su an uygulanan vertex (id, total_order sirasi) — makbuza yazilir.
+    uygulanan_vertex: (VertexId, u64),
+}
+
+/// DENETIM K-05: bir tip=12 eth tx'in zincirdeki GERCEK sonucu.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EvmMakbuzDurum {
+    /// Calisti ve basarili oldu (gas kesildi, nonce ilerledi).
+    Basarili {
+        gas_used: u64,
+        olusan_adres: Option<[u8; 20]>,
+    },
+    /// Calisti ama revert/basarisiz (gas kesildi, nonce ilerledi, deger TASINMADI).
+    Basarisiz { gas_used: u64 },
+    /// DAG'da ama HIC yurutulmedi (nonce/bakiye/dogrulama). Hicbir sey degismedi.
+    Uygulanmadi(&'static str),
+}
+
+/// DENETIM K-05: eth_getTransactionReceipt / eth_getTransactionByHash kaynagi.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EvmMakbuz {
+    pub tx_hash: [u8; 32],
+    pub vertex_id: VertexId,
+    /// Vertex'in total_order'daki sirasi (RPC'de blockNumber olarak).
+    pub sira: u64,
+    pub gonderen: [u8; 20],
+    pub hedef: Option<[u8; 20]>,
+    pub deger: u128,
+    pub nonce: u64,
+    pub gas_limit: u64,
+    pub veri: Vec<u8>,
+    pub durum: EvmMakbuzDurum,
 }
 
 impl NodeState {
@@ -244,6 +279,8 @@ impl NodeState {
             compute_reward_verildi: std::collections::HashSet::new(),
             compute_reward_emitted: 0,
             avm_db: crate::avm::AidagDatabase::yeni(),
+            evm_makbuzlar: std::collections::BTreeMap::new(),
+            uygulanan_vertex: ([0u8; 32], 0),
             baslangic_bakiyeler: Vec::new(),
             baslangic_lsc: Vec::new(),
             baslangic_stake: Vec::new(),
@@ -335,6 +372,11 @@ impl NodeState {
     /// Zincir zamanini bakiye_registry'ye ver (transfer'de vesting kontrolu).
     pub fn vesting_zaman_ayarla(&mut self, simdi: u64) {
         self.bakiye_registry.zaman_ayarla(simdi);
+    }
+
+    /// Bir adresin su anki zincir zamanina gore HARCANABILIR AIDAG'i (kilit dusulmus).
+    pub fn harcanabilir_bakiye(&self, adres: &[u8; 20]) -> crate::registry::Tutar {
+        self.bakiye_registry.harcanabilir(adres)
     }
 
     /// Bir adresin su an kilitli (vesting) miktari.
@@ -689,6 +731,34 @@ impl NodeState {
         self.graph.tips()
     }
 
+    /// Yerel saat politikasi (kural 7: gelecek siniri) — diskten yukleme gibi
+    /// saat kontrolsuz yollarin, vertex'i kabul etmeden once sorgulamasi icin.
+    pub fn saat_politikasi(
+        &self,
+        v: &Vertex,
+        now: u64,
+    ) -> Result<(), crate::dag::graph::GraphError> {
+        self.graph.saat_politikasi(v, now)
+    }
+
+    /// DENETIM K-01: yeni vertex icin parent secimi — EN FAZLA `MAX_PARENTS` uc.
+    /// Eskiden TUM uclar parent aliniyordu; saldirgan 9 paralel vertex yayinlayinca
+    /// her durust vertex `TooManyParents` ile uretilemiyordu (zincir dururdu).
+    /// Secim deterministik: blue_work azalan, esitlikte id artan (ghostdag
+    /// selected_tip ile ayni kural -> secili uc her zaman dahil). Fazla uclar
+    /// sonraki vertex'lerde kademeli birlestirilir. Donus canonical (artan) sirali.
+    pub fn uretim_ebeveynleri(&self) -> Vec<VertexId> {
+        let mut uclar = self.graph.tips();
+        uclar.sort_by(|a, b| {
+            let wa = self.ghostdag.blue_work(a).unwrap_or(0);
+            let wb = self.ghostdag.blue_work(b).unwrap_or(0);
+            wb.cmp(&wa).then_with(|| a.cmp(b))
+        });
+        uclar.truncate(crate::dag::vertex::MAX_PARENTS);
+        uclar.sort();
+        uclar
+    }
+
     /// Graf'taki TUM vertex'leri ham (wire) bayt halinde disa aktarir.
     /// Kaliciliga (diske kaydetme) temel: bu baytlar daha sonra `ingest_networked`
     /// ile geri yuklenebilir. SIRA garantisi YOK (HashMap) — yukleme orphan-bilincli
@@ -752,6 +822,14 @@ impl NodeState {
         let has_missing_parent = vertex.parents().iter().any(|p| !self.graph.contains(p));
 
         if has_missing_parent {
+            // DENETIM K-02: saat politikasi (kural 7) orphan havuzuna GIRMEDEN uygulanir.
+            // Eskiden eksik-ebeveynli vertex kontrolsuz havuza (ve diske) giriyor, ebeveyni
+            // pull-sync ile gelince ya da restart'ta saat kontrolu olmadan DAG'a aliniyordu
+            // (2103 tarihli vertex -> vesting acilir, uretim durur, dugumler ayrisir).
+            // Kural yalniz GELECEK siniri koyar -> gec gelen durust gecmis etkilenmez.
+            if let Err(e) = self.graph.saat_politikasi(&vertex, now) {
+                return NetworkIngestOutcome::Rejected(IngestError::Graph(e));
+            }
             // Henuz islenemez -> yetim havuzuna al (reddetme!).
             return match self.orphans.add_orphan(vertex) {
                 Ok(()) => NetworkIngestOutcome::Buffered(id),
@@ -1006,11 +1084,12 @@ impl NodeState {
 
         if append_mi && !onceki.is_empty() {
             let baslangic = onceki.len();
-            for id in &yeni_sira[baslangic..] {
+            for (i, id) in yeni_sira[baslangic..].iter().enumerate() {
                 if let Some(v) = self.graph.get(id) {
                     let payload: Vec<u8> = v.payload().to_vec();
                     let signer: [u8; 32] = *v.public_key();
                     let zaman: u64 = v.timestamp();
+                    self.uygulanan_vertex = (*id, (baslangic + i) as u64);
                     self.kalkana_yonlendir(&payload, &signer, zaman);
                 }
             }
@@ -1049,6 +1128,7 @@ impl NodeState {
         self.compute_reward_verildi = std::collections::HashSet::new();
         self.compute_reward_emitted = 0;
         self.avm_db = crate::avm::AidagDatabase::yeni();
+        self.evm_makbuzlar = std::collections::BTreeMap::new();
 
         // 2) BASLANGIC DURUMU (genesis/test) — DAG'da vertex karsiligi YOK.
         for (adres, miktar) in self.baslangic_bakiyeler.clone() {
@@ -1065,13 +1145,14 @@ impl NodeState {
         }
 
         // 3) BELIRLENIMCI sira ile tum vertex'leri yeniden isle.
-        for id in &sira {
+        for (i, id) in sira.iter().enumerate() {
             let Some(v) = self.graph.get(id) else {
                 continue;
             };
             let payload: Vec<u8> = v.payload().to_vec();
             let signer: [u8; 32] = *v.public_key();
             let zaman: u64 = v.timestamp();
+            self.uygulanan_vertex = (*id, i as u64);
             // synced=FALSE: disk-replay DEGIL; state'in sifirdan TAM KURALLARLA
             // yeniden hesabi (gas kesilir, nonce ilerler, bakiye kontrol edilir).
             self.kalkana_yonlendir(&payload, &signer, zaman);
@@ -1140,6 +1221,125 @@ impl NodeState {
     /// TUM ingest yollari (ag/replay/yerel/cascade) ayni deterministik yoldan gecer.
     /// NOT (B7): eski `synced` param'i kaldirildi — state HER ZAMAN total_order'dan
     /// sifirdan turetilir; "replay" ozel yolu yoktu (olu koddu), silindi.
+    /// tip=12 ham eth tx'i uygula (kurallar degismedi; yalnizca sonuc DONDURULUR
+    /// ki makbuz defterine gercek durum yazilabilsin — DENETIM K-05).
+    fn ham_eth_tx_uygula(
+        &mut self,
+        raw: &[u8],
+        islem: &crate::avm::HamEthIslem,
+        zaman: u64,
+        beklenen_chain: u64,
+    ) -> EvmMakbuzDurum {
+        let gonderen = islem.gonderen;
+        // Nonce replay korumasi (canli+replay ayni)
+        if !self.nonce_registry.dogru_mu(&gonderen, islem.nonce) {
+            return EvmMakbuzDurum::Uygulanmadi("nonce beklenenle ayni degil");
+        }
+        // B2: upfront affordability gas TAVANINA (AVM_GAS_LIMIT) gore;
+        // GERCEK kesinti gas_used'dan. AIDAG (deger) + LSC (gas) ayri defter.
+        let azami_ucret =
+            crate::avm::gas_ucreti_hesapla(crate::avm::AVM_GAS_LIMIT) as crate::registry::Tutar;
+        // DENETIM K-04: ust-seviye deger HARCANABILIR bakiyeden (kilit haric).
+        if self.bakiye_registry.harcanabilir(&gonderen) < islem.deger {
+            return EvmMakbuzDurum::Uygulanmadi("yetersiz harcanabilir AIDAG");
+        }
+        if self.lsc_registry.bakiye(&gonderen) < azami_ucret {
+            return EvmMakbuzDurum::Uygulanmadi("gas icin yetersiz LSC");
+        }
+        // B1 (SEED): EVM'e AIDAG gorunumu ver (kontrat-ici hareketler ucuncu-taraflar
+        // dahil dogru bakiyelerle yurusun). DENETIM K-04: kilitli kisim EVM'e verilmez.
+        self.avm_db
+            .aidag_yukle_hepsi(&self.bakiye_registry.evm_gorunumu());
+        // B6: CREATE nonce'unu BIRLESIK nonce_registry'ye senkronla
+        // (islem.nonce == beklenen). CREATE adresi eth_getTransactionCount
+        // ile tutarli olur -> MetaMask/arac adres tahmini dogru.
+        self.avm_db.nonce_koy(gonderen, islem.nonce);
+        let rwa = rwa_gorunum(
+            self.rwa_aktif(),
+            &self.oracle_registry,
+            &self.kurum_registry,
+            &self.kyc_registry,
+            self.zincir_saati,
+        );
+        let r = match crate::avm::ham_eth_tx_isle_rwa(
+            &mut self.avm_db,
+            raw,
+            zaman,
+            beklenen_chain,
+            rwa,
+        ) {
+            Ok((_h, r)) => r,
+            Err(_) => return EvmMakbuzDurum::Uygulanmadi("AVM islemi dogrulayamadi"),
+        };
+        // B2: GERCEK gas_used (basari/basarisiz FARK ETMEZ) -> LSC.
+        let ucret_ger = crate::avm::gas_ucreti_hesapla(r.gas_used);
+        let (yak_g, gel_g) = crate::avm::gas_ucreti_bol(ucret_ger);
+        let _ = self.lsc_registry.transfer(
+            &gonderen,
+            &crate::avm::YAKIM_ADRESI,
+            yak_g as crate::registry::Tutar,
+        );
+        let _ = self.lsc_registry.transfer(
+            &gonderen,
+            &crate::avm::GELISTIRME_HAVUZU,
+            gel_g as crate::registry::Tutar,
+        );
+        // nonce HER DURUMDA ilerler (basarisiz tx replay'i de engellenir).
+        self.nonce_registry.ilerlet(&gonderen);
+        // B1 (MIRROR): EVM'in urettigi TUM AIDAG state-diff'i (ust seviye deger dahil)
+        // gercek deftere aynala. DENETIM K-04: kilitli kisim geri eklenir.
+        self.bakiye_registry
+            .evm_sonucunu_aynala(self.avm_db.aidag_tumu());
+        if r.basarili {
+            EvmMakbuzDurum::Basarili {
+                gas_used: r.gas_used,
+                olusan_adres: r.olusan_adres,
+            }
+        } else {
+            EvmMakbuzDurum::Basarisiz {
+                gas_used: r.gas_used,
+            }
+        }
+    }
+
+    /// DENETIM K-05: makbuz defterine yaz. Ayni ham tx (ayni hash) birden fazla
+    /// vertex'te gelebilir; YURUTULMUS (basarili/basarisiz) kayit, sonraki
+    /// "uygulanmadi" kopyasiyla (nonce artik eski) EZILMEZ.
+    fn evm_makbuz_kaydet(
+        &mut self,
+        raw: &[u8],
+        islem: &crate::avm::HamEthIslem,
+        durum: EvmMakbuzDurum,
+    ) {
+        let tx_hash = crate::avm::eth_tx_hash(raw);
+        if let Some(mevcut) = self.evm_makbuzlar.get(&tx_hash) {
+            if !matches!(mevcut.durum, EvmMakbuzDurum::Uygulanmadi(_)) {
+                return;
+            }
+        }
+        let (vertex_id, sira) = self.uygulanan_vertex;
+        self.evm_makbuzlar.insert(
+            tx_hash,
+            EvmMakbuz {
+                tx_hash,
+                vertex_id,
+                sira,
+                gonderen: islem.gonderen,
+                hedef: islem.hedef,
+                deger: islem.deger,
+                nonce: islem.nonce,
+                gas_limit: islem.gas_limit,
+                veri: islem.veri.clone(),
+                durum,
+            },
+        );
+    }
+
+    /// DENETIM K-05: bir eth tx hash'inin GERCEK makbuzu (yoksa None -> RPC null).
+    pub fn evm_makbuz(&self, tx_hash: &[u8; 32]) -> Option<&EvmMakbuz> {
+        self.evm_makbuzlar.get(tx_hash)
+    }
+
     fn kalkana_yonlendir(&mut self, payload: &[u8], signer: &[u8; 32], zaman: u64) {
         // DETERMINIZM: vesting kilit kontrolu, islenmekte olan vertex'in KENDI
         // timestamp'ine gore yapilir. `zaman` konsensus verisidir (vertex preimage'i
@@ -1303,15 +1503,17 @@ impl NodeState {
                             let azami_ucret =
                                 crate::avm::gas_ucreti_hesapla(crate::avm::AVM_GAS_LIMIT)
                                     as crate::registry::Tutar;
-                            if self.bakiye_registry.bakiye(&gonderen) >= c.deger
+                            // DENETIM K-04: ust-seviye deger HARCANABILIR bakiyeden (kilit haric).
+                            if self.bakiye_registry.harcanabilir(&gonderen) >= c.deger
                                 && self.lsc_registry.bakiye(&gonderen) >= azami_ucret
                             {
                                 // B1 (SEED): EVM'e TAM AIDAG gorunumu ver. Yalniz gonderen
                                 // degil, TUM hesaplar yuklenir ki kontrat-ici hareketler
                                 // (payable/withdraw/ucuncu-tarafa odeme) dogru bakiyelerle
                                 // yurusun. gas_price=0 -> EVM native yaratmaz/yakmaz.
+                                // DENETIM K-04: kilitli (vesting) kisim EVM'e verilmez.
                                 self.avm_db
-                                    .aidag_yukle_hepsi(self.bakiye_registry.tum_bakiyeler());
+                                    .aidag_yukle_hepsi(&self.bakiye_registry.evm_gorunumu());
                                 // B6: CREATE nonce'unu BIRLESIK nonce_registry'ye senkronla
                                 // (c.nonce == beklenen, dogru_mu ile dogrulandi). Boylece
                                 // CREATE adresi = keccak(gonderen, birlesik_nonce) =
@@ -1360,7 +1562,9 @@ impl NodeState {
                                     // aynalama seed ile ayni kalir (guvenli no-op). Eski
                                     // ust-seviye `transfer` KALDIRILDI (deger'i EVM zaten tasidi;
                                     // aksi halde CIFT sayim olurdu).
-                                    self.bakiye_registry.aidag_aynala(self.avm_db.aidag_tumu());
+                                    // DENETIM K-04: kilitli kisim geri eklenir.
+                                    self.bakiye_registry
+                                        .evm_sonucunu_aynala(self.avm_db.aidag_tumu());
                                 }
                             }
                         }
@@ -1556,61 +1760,12 @@ impl NodeState {
             // Hem canli hem replay'de AVM'de calisir -> DAG'da kalici + restart'ta geri gelir.
             Some(&crate::tx::TX_TYPE_HAM_ETH_TX) => {
                 if let Some(raw) = crate::tx::ham_eth_tx_coz_payload(payload) {
-                    if let Ok(islem) = crate::avm::ham_eth_tx_coz(raw) {
-                        let gonderen = islem.gonderen;
-                        // Nonce replay korumasi (canli+replay ayni)
-                        if self.nonce_registry.dogru_mu(&gonderen, islem.nonce) {
-                            // B2: upfront affordability gas TAVANINA (AVM_GAS_LIMIT) gore;
-                            // GERCEK kesinti gas_used'dan. AIDAG (deger) + LSC (gas) ayri defter.
-                            let azami_ucret =
-                                crate::avm::gas_ucreti_hesapla(crate::avm::AVM_GAS_LIMIT)
-                                    as crate::registry::Tutar;
-                            if self.bakiye_registry.bakiye(&gonderen) >= islem.deger
-                                && self.lsc_registry.bakiye(&gonderen) >= azami_ucret
-                            {
-                                // B1 (SEED): EVM'e TAM AIDAG gorunumu ver (kontrat-ici
-                                // hareketler ucuncu-taraflar dahil dogru bakiyelerle yurusun).
-                                self.avm_db
-                                    .aidag_yukle_hepsi(self.bakiye_registry.tum_bakiyeler());
-                                // B6: CREATE nonce'unu BIRLESIK nonce_registry'ye senkronla
-                                // (islem.nonce == beklenen). CREATE adresi eth_getTransactionCount
-                                // ile tutarli olur -> MetaMask/arac adres tahmini dogru.
-                                self.avm_db.nonce_koy(gonderen, islem.nonce);
-                                let rwa = rwa_gorunum(
-                                    self.rwa_aktif(),
-                                    &self.oracle_registry,
-                                    &self.kurum_registry,
-                                    &self.kyc_registry,
-                                    self.zincir_saati,
-                                );
-                                if let Ok((_h, r)) = crate::avm::ham_eth_tx_isle_rwa(
-                                    &mut self.avm_db,
-                                    raw,
-                                    zaman,
-                                    rwa,
-                                ) {
-                                    // B2: GERCEK gas_used (basari/basarisiz FARK ETMEZ) -> LSC.
-                                    let ucret_ger = crate::avm::gas_ucreti_hesapla(r.gas_used);
-                                    let (yak_g, gel_g) = crate::avm::gas_ucreti_bol(ucret_ger);
-                                    let _ = self.lsc_registry.transfer(
-                                        &gonderen,
-                                        &crate::avm::YAKIM_ADRESI,
-                                        yak_g as crate::registry::Tutar,
-                                    );
-                                    let _ = self.lsc_registry.transfer(
-                                        &gonderen,
-                                        &crate::avm::GELISTIRME_HAVUZU,
-                                        gel_g as crate::registry::Tutar,
-                                    );
-                                    // nonce HER DURUMDA ilerler (basarisiz tx replay'i de engellenir).
-                                    self.nonce_registry.ilerlet(&gonderen);
-                                    // B1 (MIRROR): EVM'in urettigi TUM AIDAG state-diff'i (ust
-                                    // seviye deger dahil) gercek deftere aynala -> fon donmasi biter.
-                                    // Eski ust-seviye transfer KALDIRILDI (cift sayim olurdu).
-                                    self.bakiye_registry.aidag_aynala(self.avm_db.aidag_tumu());
-                                }
-                            }
-                        }
+                    // DENETIM K-06: chain id bu agin EVM chain id'si olmali.
+                    let beklenen_chain = crate::avm::evm_chain_id(self.graph.network_id());
+                    if let Ok(islem) = crate::avm::ham_eth_tx_coz(raw, beklenen_chain) {
+                        let durum = self.ham_eth_tx_uygula(raw, &islem, zaman, beklenen_chain);
+                        // DENETIM K-05: gercek sonucu makbuz defterine yaz (RPC buradan okur).
+                        self.evm_makbuz_kaydet(raw, &islem, durum);
                     }
                 }
             }
@@ -3126,7 +3281,8 @@ mod tests {
         // imzali raw eth tx (EIP-2718) uret.
         let raw_eth = |nonce: u64, to: ATxKind, value: u128, input: Vec<u8>| -> Vec<u8> {
             let tx = TxLegacy {
-                chain_id: Some(NET as u64),
+                // DENETIM K-06: chain id agin EVM chain id'si (network_id DEGIL).
+                chain_id: Some(crate::avm::evm_chain_id(NET)),
                 nonce,
                 gas_price: 0,
                 gas_limit: 3_000_000,

@@ -7,6 +7,7 @@
 //! ASAMA NOTU: gelen gossipsub mesajini NodeState::ingest'e besleme Parca 3'te.
 //! Su an: altyapi + abonelik + gelen mesaji loglama.
 
+pub mod hiz_siniri;
 pub mod rpc;
 pub mod store;
 
@@ -153,6 +154,10 @@ pub async fn run_node(
             let gossipsub_config = gossipsub::ConfigBuilder::default()
                 .heartbeat_interval(Duration::from_secs(10))
                 .validation_mode(gossipsub::ValidationMode::Strict)
+                // DENETIM K-07/O-04: mesaj, dugum onu KABUL ettikten sonra iletilir
+                // (report_message_validation_result). Eskiden her mesaj dogrulanmadan
+                // mesh'e iletiliyordu -> gecersiz/spam vertex tum aga yayiliyordu.
+                .validate_messages()
                 .message_id_fn(message_id_fn)
                 .build()
                 .map_err(|e| std::io::Error::other(e.to_string()))?;
@@ -451,6 +456,10 @@ pub async fn run_node(
                             Some((id, parents, v))
                         })
                         .collect();
+                    let duvar_saati = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
                     let mut loaded: HashSet<[u8; 32]> = HashSet::new();
                     let mut pending = decoded;
                     loop {
@@ -460,6 +469,17 @@ pub async fn run_node(
                             // Parent'larin HEPSI yuklenmis mi? (parent yoksa = genesis, hazir)
                             let ready = parents.iter().all(|pp| loaded.contains(pp));
                             if ready {
+                                // DENETIM K-02: diskteki vertex de GERCEK saate gore gelecek
+                                // sinirindan gecmeli. Durust her vertex kabul aninda bu sinirin
+                                // icindeydi; gecemeyen (eski surumde orphan yoluyla sizmis)
+                                // vertex ve onun soyu yuklenmez -> restart eden dugum ayrismaz.
+                                if let Err(e) = st.saat_politikasi(&vertex, duvar_saati) {
+                                    tracing::warn!(
+                                        "Diskteki gelecek tarihli vertex atlandi: id={} ({e})",
+                                        hex::encode(&id[..8])
+                                    );
+                                    continue;
+                                }
                                 // Vertex ZATEN decode+verify edildi (paralel faz) -> tekrar decode YOK.
                                 match st.ingest_decoded_preverified(vertex) {
                                     lsc_engine::NetworkIngestOutcome::Integrated(_)
@@ -623,6 +643,16 @@ pub async fn run_node(
     let mut status_tick = tokio::time::interval(Duration::from_secs(15));
     status_tick.tick().await; // ilk tick'i atla
 
+    // DENETIM K-07 (ara cozum): p2p esi basina gossip vertex hiz siniri. Siniri asan
+    // esin mesajlari islenmez ve iletilmez (Ignore). Ayar: LSC_P2P_ES_HIZI (saniyede
+    // mesaj, 50), LSC_P2P_ES_KAPASITE (ani yuk, 500).
+    let es_siniri = hiz_siniri::HizSiniri::<PeerId>::yeni(
+        hiz_siniri::ortam_sayisi("LSC_P2P_ES_HIZI", 50.0),
+        hiz_siniri::ortam_sayisi("LSC_P2P_ES_KAPASITE", 500.0),
+        None,
+    );
+    let mut sinir_asimi_sayaci: u64 = 0;
+
     loop {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {
@@ -650,11 +680,11 @@ pub async fn run_node(
                     }
                 }
                 // 1) tips'leri oku (kilit AL -> kopyala -> BIRAK).
-                let mut parents = {
+                // DENETIM K-01: en fazla MAX_PARENTS uc (deterministik secim, artan sirali).
+                let parents = {
                     let st = node_state.read().await;
-                    st.tips()
+                    st.uretim_ebeveynleri()
                 };
-                parents.sort(); // canonical (artan) sira sart.
 
                 // tips bossa (genesis yok) uretme — listener zaten buraya girmez,
                 // ama guvenlik icin kontrol.
@@ -821,8 +851,24 @@ pub async fn run_node(
                         tracing::debug!("Incoming connection error from {send_back_addr}: {error}");
                     }
                     SwarmEvent::Behaviour(LscBehaviourEvent::Gossipsub(
-                        gossipsub::Event::Message { propagation_source, message, .. }
+                        gossipsub::Event::Message { propagation_source, message_id, message }
                     )) => {
+                        // DENETIM K-07: es basina hiz siniri. Asan esin mesaji islenmez,
+                        // iletilmez (Ignore); log seli olmasin diye seyrek loglanir.
+                        if !es_siniri.izin(&propagation_source) {
+                            sinir_asimi_sayaci += 1;
+                            if sinir_asimi_sayaci % 1000 == 1 {
+                                tracing::warn!(
+                                    "p2p hiz siniri asildi (toplam {sinir_asimi_sayaci}), kaynak={propagation_source}"
+                                );
+                            }
+                            let _ = swarm.behaviour_mut().gossipsub.report_message_validation_result(
+                                &message_id,
+                                &propagation_source,
+                                gossipsub::MessageAcceptance::Ignore,
+                            );
+                            continue;
+                        }
                         // Agdan gelen vertex baytlari -> NodeState::ingest.
                         // Bozuk/gecersiz vertex graf durumunu DEGISTIRMEZ (yapiya gomulu).
                         let now = std::time::SystemTime::now()
@@ -833,7 +879,7 @@ pub async fn run_node(
                         // (sirasiz/cok-hop geldiginde olur) reddedilmez; orphan havuzuna
                         // alinir, parent gelince cascade ile cozulur. Cok-node yakinsama
                         // icin SART (zincir topolojisinde vertex'ler sirasiz gelebilir).
-                        let accepted = {
+                        let (accepted, gecerlilik) = {
                             let mut st = node_state.write().await;
                             match st.ingest_networked(&message.data, now) {
                                 lsc_engine::NetworkIngestOutcome::Integrated(id) => {
@@ -855,7 +901,7 @@ pub async fn run_node(
                                             );
                                         }
                                     }
-                                    true
+                                    (true, gossipsub::MessageAcceptance::Accept)
                                 }
                                 lsc_engine::NetworkIngestOutcome::Buffered(id) => {
                                     tracing::info!(
@@ -868,24 +914,32 @@ pub async fn run_node(
                                     // yoksa orphan cascade ile cozulunce yazilma firsati kacar
                                     // -> reboot'ta "parent zinciri kopuk" olur. Dosya ham olay
                                     // kaydidir; reboot'ta topolojik yukleme dogru sirayi kurar.
-                                    true
+                                    (true, gossipsub::MessageAcceptance::Accept)
                                 }
-                                lsc_engine::NetworkIngestOutcome::Duplicate(_) => false,
+                                lsc_engine::NetworkIngestOutcome::Duplicate(_) => {
+                                    (false, gossipsub::MessageAcceptance::Ignore)
+                                }
                                 lsc_engine::NetworkIngestOutcome::Rejected(e) => {
                                     tracing::warn!(
                                         "Vertex reddedildi ({} bayt): {e}, kaynak={propagation_source}",
                                         message.data.len()
                                     );
-                                    false
+                                    (false, gossipsub::MessageAcceptance::Reject)
                                 }
                                 lsc_engine::NetworkIngestOutcome::OrphanPoolFull(_) => {
                                     tracing::warn!(
                                         "Orphan havuzu DOLU, vertex dusuruldu, kaynak={propagation_source}"
                                     );
-                                    false
+                                    (false, gossipsub::MessageAcceptance::Ignore)
                                 }
                             }
                         }; // kilit birakilir
+                        // DENETIM K-07/O-04: yalnizca kabul edilen mesaj mesh'e iletilir.
+                        let _ = swarm.behaviour_mut().gossipsub.report_message_validation_result(
+                            &message_id,
+                            &propagation_source,
+                            gecerlilik,
+                        );
                         // KALICILIK: kabul edilen vertex'i diske ekle (kilit DISINDA).
                         if accepted {
                             if let Some(ref path) = data_file {
