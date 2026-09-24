@@ -258,6 +258,8 @@ struct Coord {
     // ── Kötüye kullanım korumaları ──
     ucretsiz_gunluk: HashMap<String, (u64, u32)>, // istemci anahtarı → (gün, ücretsiz iş sayısı)
     kullanilan_odemeler: HashMap<String, u64>,    // vertex id / "payer:nonce" → iş (çifte sayım kilidi)
+    // ── Tarayıcı işçi oturum anahtarları (YALNIZ bellekte; restartta yeniden kayıt) ──
+    oturumlar: HashMap<String, cuzdan_imza::Oturum>, // cüzdan (küçük harf) → geçerli oturum anahtarı
 }
 
 impl Coord {
@@ -539,9 +541,14 @@ fn hata(kod: StatusCode, mesaj: impl Into<String>) -> Yanit {
     (kod, Json(json!({ "ok": false, "hata": mesaj.into() })))
 }
 
-/// Cüzdan imzasını doğrula; başarısızsa 401.
-fn imza_kontrol(wallet: &str, nonce: &str, alan: &cuzdan_imza::ImzaAlanlari) -> Result<(), Yanit> {
-    cuzdan_imza::dogrula(wallet, nonce, alan, now_secs()).map_err(|e| hata(StatusCode::UNAUTHORIZED, e))
+/// Cüzdan imzasını doğrula (cüzdanın kendi anahtarı YA DA bu cüzdanın geçerli oturum
+/// anahtarı); başarısızsa 401. Oturum yalnız `wallet` anahtarıyla aranır → başka cüzdanın
+/// oturum anahtarı bu cüzdan için kabul edilmez.
+async fn imza_kontrol(st: &St, wallet: &str, nonce: &str, alan: &cuzdan_imza::ImzaAlanlari) -> Result<(), Yanit> {
+    let w = wallet.trim().to_lowercase();
+    let oturum = st.lock().await.oturumlar.get(&w).copied();
+    cuzdan_imza::dogrula_oturumlu(&w, nonce, alan, now_secs(), oturum.as_ref())
+        .map_err(|e| hata(StatusCode::UNAUTHORIZED, e))
 }
 
 fn peer_ip(ci: Option<ConnectInfo<SocketAddr>>, h: &HeaderMap) -> Option<String> {
@@ -627,6 +634,10 @@ async fn job_create(State(st): State<St>, ci: Option<ConnectInfo<SocketAddr>>, h
 #[derive(Deserialize)]
 struct Reg {
     wallet: String,
+    /// Varsa: tarayıcı işçinin geçici ed25519 oturum anahtarı (64 hex). İmza nonce'u
+    /// o zaman "kayit" değil "oturum:<oturum_pubkey>" olur (worker_mesaj::oturum_nonce).
+    #[serde(default)]
+    oturum_pubkey: Option<String>,
     #[serde(flatten)]
     imza: cuzdan_imza::ImzaAlanlari,
 }
@@ -637,14 +648,28 @@ async fn worker_register(State(st): State<St>, Json(req): Json<Reg>) -> Yanit {
         return hata(StatusCode::BAD_REQUEST, "wallet 0x + 40 hex olmalı");
     }
     // Cüzdan sahipliği: imzasız/yanlış imza → 401 (başkası adına kayıt/sybil zorlaşır).
-    if let Err(r) = imza_kontrol(&w, worker_mesaj::NONCE_KAYIT, &req.imza) { return r; }
+    // Kayıt (ve oturum kurma) YALNIZ cüzdanın kendi anahtarıyla — oturum anahtarı kabul edilmez.
+    let simdi = now_secs();
     let mut c = st.lock().await;
+    let oturum = match req.oturum_pubkey.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(pk) => match cuzdan_imza::oturum_kaydet(&mut c.oturumlar, &w, pk, &req.imza, simdi) {
+            Ok(o) => Some(o),
+            Err(e) => return hata(StatusCode::UNAUTHORIZED, e),
+        },
+        None => {
+            if let Err(e) = cuzdan_imza::dogrula(&w, worker_mesaj::NONCE_KAYIT, &req.imza, simdi) {
+                return hata(StatusCode::UNAUTHORIZED, e);
+            }
+            None
+        }
+    };
     c.workers.entry(w.clone()).or_insert_with(|| Worker {
         wallet: w.clone(), reputation: 0, earned_lsc: 0, jobs_done: 0, registered_at: now_secs(),
         tier: 0, gold_score: 0.0, avg_latency_ms: 0.0, benchmarked_at: 0,
     });
     c.save();
     yanit(json!({ "ok": true, "wallet": w,
+        "oturum_bitis": oturum.map(|o| o.bitis),
         "rıza": "GPU katkısı yalnızca istemci onayıyla",
         "not": "seviye için GET /worker/benchmark/:wallet ile öz-kıyaslamayı yap" }))
 }
@@ -677,7 +702,7 @@ async fn worker_benchmark_gonder(State(st): State<St>, Json(req): Json<BenchSubm
     let w = req.wallet.trim().to_lowercase();
     // İmza cevapların kendisine bağlı: başkasının seviyesini değiştiremez.
     let ozet: Vec<(u64, u64, &str)> = req.cevaplar.iter().map(|c| (c.id, c.ms, c.cevap.as_str())).collect();
-    if let Err(r) = imza_kontrol(&w, &worker_mesaj::benchmark_nonce(&ozet), &req.imza) { return r; }
+    if let Err(r) = imza_kontrol(&st, &w, &worker_mesaj::benchmark_nonce(&ozet), &req.imza).await { return r; }
     let mut c = st.lock().await;
     if !c.workers.contains_key(&w) {
         return hata(StatusCode::BAD_REQUEST, "önce kaydol");
@@ -715,7 +740,7 @@ async fn worker_poll(
 ) -> Yanit {
     let w = wallet.trim().to_lowercase();
     // Başkası adına poll = kurbanın adına iş kapma/slot doldurma → imza şart.
-    if let Err(r) = imza_kontrol(&w, worker_mesaj::NONCE_POLL, &imza) { return r; }
+    if let Err(r) = imza_kontrol(&st, &w, worker_mesaj::NONCE_POLL, &imza).await { return r; }
     let ip = peer_ip(ci, &h);
     let mut c = st.lock().await;
     if !c.workers.contains_key(&w) {
@@ -774,7 +799,7 @@ async fn worker_submit(State(st): State<St>, ci: Option<ConnectInfo<SocketAddr>>
     let w = req.wallet.trim().to_lowercase();
     let ts = now_secs();
     // İmza belirli bir iş + belirli bir cevaba bağlı (worker_mesaj::is_nonce).
-    if let Err(r) = imza_kontrol(&w, &worker_mesaj::is_nonce(req.job_id, &req.answer), &req.imza) { return r; }
+    if let Err(r) = imza_kontrol(&st, &w, &worker_mesaj::is_nonce(req.job_id, &req.answer), &req.imza).await { return r; }
     let ip = peer_ip(ci, &h);
     let hash = worker_mesaj::cevap_ozeti(&req.answer);
 
@@ -1166,6 +1191,7 @@ async fn main() {
         settle_key, settle_addr,
         fees_committed_wei: ls.fees_committed_wei, free_committed_lsc: ls.free_committed_lsc,
         ucretsiz_gunluk: ls.ucretsiz_gunluk, kullanilan_odemeler: ls.kullanilan_odemeler,
+        oturumlar: HashMap::new(),
     }));
 
     // Arka plan settlement döngüsü (yalnız auto aktifse gerçek iş yapar).
@@ -1201,6 +1227,115 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::settle_auto_coz;
+
+    // ── Uç (handler) düzeyi: oturum anahtarı ile başkası adına iş/ödül toplanamaz (401) ──
+    mod oturum_uclari {
+        use super::super::*;
+        use crate::cuzdan_imza::test_yardim::*;
+
+        fn test_st(ad: &str) -> St {
+            let mut cfg = Config::from_env();
+            let d = std::env::temp_dir().join(format!("swc-oturum-test-{ad}-{}", std::process::id()));
+            cfg.data_path = d.join("coord.json").to_string_lossy().into_owned();
+            cfg.free_daily_per_client = 100;
+            cfg.free_budget_lsc = 1000;
+            cfg.redundancy = 2;
+            cfg.max_assign = 3;
+            let key = SigningKey::from_bytes(&[3u8; 32]);
+            let key_addr = public_key_to_adres(&key.verifying_key().to_bytes());
+            Arc::new(Mutex::new(Coord {
+                cfg, http: reqwest::Client::new(), key, key_addr,
+                workers: HashMap::new(), jobs: HashMap::new(), next_job: 1,
+                settlements: vec![], next_reward_id: 1, settle_key: None, settle_addr: None,
+                fees_committed_wei: 0, free_committed_lsc: 0,
+                ucretsiz_gunluk: HashMap::new(), kullanilan_odemeler: HashMap::new(),
+                oturumlar: HashMap::new(),
+            }))
+        }
+        async fn kayit(st: &St, wallet: &str, oturum_pubkey: Option<String>, imza: cuzdan_imza::ImzaAlanlari) -> Yanit {
+            worker_register(State(st.clone()), Json(Reg { wallet: wallet.into(), oturum_pubkey, imza })).await
+        }
+        async fn poll(st: &St, wallet: &str, imza: cuzdan_imza::ImzaAlanlari) -> Yanit {
+            worker_poll(State(st.clone()), Path(wallet.into()), Query(imza), None, HeaderMap::new()).await
+        }
+        async fn submit(st: &St, wallet: &str, job_id: u64, answer: &str, imza: cuzdan_imza::ImzaAlanlari) -> Yanit {
+            worker_submit(State(st.clone()), None, HeaderMap::new(),
+                Json(Submit { wallet: wallet.into(), job_id, answer: answer.into(), imza })).await
+        }
+        async fn is_ac(st: &St) -> u64 {
+            let r = job_create(State(st.clone()), None, HeaderMap::new(), Json(CreateJob {
+                prompt: "2+2?".into(), deterministic: Some(true), fee_lsc: None, payer: None, min_tier: None,
+            })).await;
+            r.0["job_id"].as_u64().expect("is acilmali")
+        }
+
+        #[tokio::test]
+        async fn oturum_uclari_saldiri_engelli() {
+            let st = test_st("a");
+            let t = now_secs();
+            // A: MetaMask (EVM) cuzdan + tarayici oturum anahtari
+            let (a_sk, a_w) = evm_cuzdan(21);
+            let osk = ed25519_dalek::SigningKey::from_bytes(&[61; 32]);
+            let o_nonce = worker_mesaj::oturum_nonce(&osk.verifying_key().to_bytes());
+            // Saldirgan A adina oturum kurmaya calisir (kendi EVM anahtariyla) -> 401
+            let (sald_sk, _) = evm_cuzdan(22);
+            let r = kayit(&st, &a_w, Some(pk_hex(&osk)), evm_imzala(&sald_sk, &a_w, &o_nonce, t)).await;
+            assert_eq!(r.0, StatusCode::UNAUTHORIZED, "{:?}", r.1 .0);
+            assert!(st.lock().await.oturumlar.is_empty());
+            // imzasiz kayit -> 401
+            let r = kayit(&st, &a_w, Some(pk_hex(&osk)), Default::default()).await;
+            assert_eq!(r.0, StatusCode::UNAUTHORIZED);
+            // A'nin gercek EIP-191 oturum imzasi -> 200 + oturum_bitis
+            let r = kayit(&st, &a_w, Some(pk_hex(&osk)), evm_imzala(&a_sk, &a_w, &o_nonce, t)).await;
+            assert_eq!(r.0, StatusCode::OK, "{:?}", r.1 .0);
+            let bitis = r.1 .0["oturum_bitis"].as_u64().expect("oturum_bitis");
+            assert!(bitis >= t + cuzdan_imza::OTURUM_SURE_SN && bitis <= t + cuzdan_imza::OTURUM_SURE_SN + 5, "{bitis}");
+
+            // B (kurban): kendi EVM cuzdaniyla normal kayit
+            let (b_sk, b_w) = evm_cuzdan(23);
+            assert_eq!(kayit(&st, &b_w, None, evm_imzala(&b_sk, &b_w, "kayit", t)).await.0, StatusCode::OK);
+            // oturum anahtari "kayit" icin kabul edilmez (kayit yalniz cuzdan anahtariyla)
+            assert_eq!(kayit(&st, &b_w, None, oturum_imzala(&osk, &b_w, "kayit", t)).await.0, StatusCode::UNAUTHORIZED);
+
+            let is1 = is_ac(&st).await;
+            // A'nin oturum anahtariyla B adina poll -> 401 (kurbanin slotunu kapamaz)
+            assert_eq!(poll(&st, &b_w, oturum_imzala(&osk, &b_w, "poll", t)).await.0, StatusCode::UNAUTHORIZED);
+            // imzasiz poll -> 401
+            assert_eq!(poll(&st, &a_w, Default::default()).await.0, StatusCode::UNAUTHORIZED);
+            // A oturumla poll -> is
+            let r = poll(&st, &a_w, oturum_imzala(&osk, &a_w, "poll", t)).await;
+            assert_eq!(r.0, StatusCode::OK);
+            assert_eq!(r.1 .0["job_id"].as_u64(), Some(is1));
+            // B kendi imzasiyla poll -> ayni is B'ye de atanir
+            let r = poll(&st, &b_w, evm_imzala(&b_sk, &b_w, "poll", t)).await;
+            assert_eq!(r.1 .0["job_id"].as_u64(), Some(is1));
+            // A'nin oturumuyla B adina submit -> 401 (B'nin oyunu/odulunu yonlendiremez)
+            let n = worker_mesaj::is_nonce(is1, "4");
+            assert_eq!(submit(&st, &b_w, is1, "4", oturum_imzala(&osk, &b_w, &n, t)).await.0, StatusCode::UNAUTHORIZED);
+            // A oturumla kendi submit'i -> 200, sonuc A adina
+            let r = submit(&st, &a_w, is1, "4", oturum_imzala(&osk, &a_w, &n, t)).await;
+            assert_eq!(r.0, StatusCode::OK, "{:?}", r.1 .0);
+            {
+                let c = st.lock().await;
+                let j = &c.jobs[&is1];
+                assert_eq!(j.results.len(), 1);
+                assert_eq!(j.results[0].worker, a_w.to_lowercase());
+            }
+
+            // Suresi dolmus oturum -> 401
+            st.lock().await.oturumlar.get_mut(&a_w.to_lowercase()).unwrap().bitis = t.saturating_sub(1);
+            let r = poll(&st, &a_w, oturum_imzala(&osk, &a_w, "poll", t)).await;
+            assert_eq!(r.0, StatusCode::UNAUTHORIZED);
+            assert!(r.1 .0["hata"].as_str().unwrap().contains("oturum suresi doldu"));
+
+            // ed25519 yerel cuzdan eskisi gibi dogrudan calisir
+            let (e_sk, e_w) = ed_cuzdan(24);
+            assert_eq!(kayit(&st, &e_w, None, ed_imzala(&e_sk, &e_w, "kayit", t)).await.0, StatusCode::OK);
+            assert_eq!(poll(&st, &e_w, ed_imzala(&e_sk, &e_w, "poll", t)).await.0, StatusCode::OK);
+            let yol = st.lock().await.cfg.data_path.clone();
+            let _ = std::fs::remove_dir_all(std::path::Path::new(&yol).parent().unwrap());
+        }
+    }
 
     // Bulgu 8e: otomatik settlement varsayılan KAPALI; yalnız açıkça "1".
     #[test]
