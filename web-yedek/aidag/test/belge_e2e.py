@@ -65,6 +65,8 @@ try:
                 SOULWARE_LOCAL_MODEL=f"{T}/yok", SOULWARE_EMBED_DIR=f"{T}/yok", SOULWARE_KNOWLEDGE_PATH=f"{T}/kb.json",
                 SOULWARE_SEED_PATH=f"{T}/seed.json", SOULWARE_RESMI_PATH=f"{T}/resmi.json", SOULWARE_MODEL_REGISTRY=f"{T}/reg.json", SOULWARE_GROUND="0")
     for k in ("ANTHROPIC_API_KEY", "CLAUDE_API_KEY"): kenv.pop(k, None)
+    # KUBRA anahtari fail-closed: yoksa servis baslamaz -> once acikca uret.
+    subprocess.run([f"{BIN}/soulware-core", "--yeni-anahtar-uret"], env=kenv, cwd=T, check=True, capture_output=True)
     sureclar.append(subprocess.Popen([f"{BIN}/soulware-core"], env=kenv, cwd=T, stdout=open(f"{T}/kubra.out", "w"), stderr=subprocess.STDOUT))
     bekle("http://127.0.0.1:8646/health")
     subprocess.run(["nginx", "-c", f"{T}/nginx.conf"], check=True)
@@ -101,13 +103,13 @@ try:
 
     # ── Geriye uyum: eski (standart disi) ozet ──
     eski_js = os.path.join(T, "blake3-eski.js")
-    open(eski_js, "wb").write(subprocess.run(["git", "-C", REPO, "show", "main:web/lib/blake3.js"], capture_output=True, check=True).stdout)
+    open(eski_js, "wb").write(subprocess.run(["git", "-C", REPO, "show", "986320a^:web/lib/blake3.js"], capture_output=True, check=True).stdout)
     fark = []
     for n in (1025, 5000, 100_003):
         p = os.path.join(T, f"e{n}"); open(p, "wb").write(os.urandom(n))
         ad = js("adaylar", {"dosya": p})
         if not (len(ad) == 2 and ad[1]["yontem"] == "eski" and ad[1]["hash"] == js("eski_canli", {"dosya": p, "eski_js": eski_js})["hash"]): fark.append(n)
-    kontrol("eski ozet = main'deki eski blake3.js ciktisi (>1 KB)", not fark, str(fark))
+    kontrol("eski ozet = duzeltme oncesi (986320a^) blake3.js ciktisi (>1 KB)", not fark, str(fark))
     p = os.path.join(T, "kucuk"); open(p, "wb").write(os.urandom(900))
     kontrol("<=1 KB girdide tek aday (eski = standart)", len(js("adaylar", {"dosya": p})) == 1)
 

@@ -13,14 +13,14 @@ path = "src/main.rs"
 lsc-engine = { path = "../lsc-engine" }
 libp2p = { version = "=0.56.0", features = ["tokio", "tcp", "noise", "yamux", "ping", "gossipsub", "macros", "request-response", "cbor", "mdns"] }
 serde = { version = "1", features = ["derive"] }
-tokio = { version = "=1.43.0", features = ["rt-multi-thread", "macros", "signal", "sync", "time"] }
+tokio = { version = "=1.43.1", features = ["rt-multi-thread", "macros", "signal", "sync", "time"] }
 futures = "=0.3.31"
 hex = "=0.4.3"
 ed25519-dalek = { version = "=2.1.1", default-features = false, features = ["std"] }
-rand = "=0.8.5"
+rand = "=0.8.6"
 blake3 = "=1.5.5"
 tracing = "=0.1.41"
-tracing-subscriber = { version = "=0.3.19", features = ["env-filter"] }
+tracing-subscriber = { version = "=0.3.20", features = ["env-filter"] }
 axum = "=0.7.9"
 serde_json = "=1.0.140"
 rayon = "=1.10.0"

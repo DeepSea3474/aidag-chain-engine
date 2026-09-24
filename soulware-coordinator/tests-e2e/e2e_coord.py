@@ -165,7 +165,9 @@ try:
     tips=",".join(istek(RPC+"/tips").get("tips",[])) or "-"
     hx=subprocess.run(["./soulware-pay",fakir_key,str(NET),havuz,"2","0",str(int(time.time())),tips],capture_output=True,text=True,check=True).stdout.strip()
     r=istek(CO+"/job/confirm",{"job_id":jf,"odeme_hex":hx})
-    kontrol("bakiyesiz payer: transfer uygulanmadi -> paid DEGIL", r.get("_http")==409 and not istek(CO+f"/job/{jf}")["job"]["paid"], r)
+    # Dugum /submit kapi kontrolu bakiyesiz transferi bastan reddeder (ok:false) -> koordinator 400;
+    # eski dugumde vertex girip etkisiz kalirdi (409). Her iki durumda is ODENMIS SAYILMAZ.
+    kontrol("bakiyesiz payer: transfer uygulanmadi -> paid DEGIL", r.get("_http") in (400, 409) and not istek(CO+f"/job/{jf}")["job"]["paid"], r)
 
     # ── Gercek soulware-worker ikilisi: imzali register/benchmark/poll/submit ──
     wk=[]

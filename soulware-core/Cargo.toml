@@ -15,10 +15,10 @@ lsc-engine = { path = "../lsc-engine" }
 ed25519-dalek = { version = "=2.1.1", default-features = false, features = ["std"] }
 blake3 = "=1.5.5"
 hex = "=0.4.3"
-rand = "=0.8.5"
+rand = "=0.8.6"
 # HTTP sunucu (bu servisin API'si) + istemci (Claude API + zincir /submit)
 axum = "=0.7.9"
-tokio = { version = "=1.43.0", features = ["rt-multi-thread", "macros", "signal", "net", "time"] }
+tokio = { version = "=1.43.1", features = ["rt-multi-thread", "macros", "signal", "net", "time"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "=1.0.140"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }

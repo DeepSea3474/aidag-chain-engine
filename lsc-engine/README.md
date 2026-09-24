@@ -49,4 +49,5 @@ Toplam: 101 (engine) + 2 (net) test gecer.
 - Testnet, profesyonel audit, mainnet
 
 ## Lisans
-Apache-2.0
+Business Source License 1.1 (BUSL-1.1) — Degisim Tarihi 2030-07-10'da Apache-2.0'a
+donusur. Ayrintilar kok dizindeki LICENSE dosyasinda.
