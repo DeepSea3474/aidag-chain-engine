@@ -679,6 +679,48 @@ class T15_YenidenDeneme(Temel):
         self.assertEqual(len(cagri), 1, "kalici hata yeniden denenmez")
 
 
+# ================================================================== 16: yakalama modu
+X = "https://bsc.rpc.blxrbdn.com"   # genis aralik veren saglayici (yakalama tercihi)
+
+class T16_YakalamaModu(Temel):
+    URLLER = [A, X, C]
+
+    def _yukseklik(self, h):
+        for u in self.URLLER:
+            self.ag[u].head = h
+
+    def test_geride_tek_saglayiciyla_hizli_kesif_tahsis_2_dogrulamayla(self):
+        self.durum_baslat(son_blok=1000)
+        self._yukseklik(11_000)
+        # Gercek odeme: log yalniz X'te (digerleri eski blok vermiyor), receipt HEPSINDE
+        self.ag[X].usdt_odeme(txh(7), ALICI, 100 * E18, 5_000)
+        for u in (A, C):
+            self.ag[u].usdt_odeme(txh(7), ALICI, 100 * E18, 5_000, log_listede=False)
+        self.calistir()
+        d = self.durum()
+        self.assertEqual(d["son_blok"], 11_000 - 15 - 1000, "yakalama uca ESIK/2 kala durur")
+        self.assertTrue(all(e - s + 1 <= 5000 for s, e, _ in self.ag[X].getlogs_cagri))
+        self.assertEqual(d["tek_kaynakli"], [[1001, d["son_blok"]]], "tek kaynakli aralik kayitli")
+        self.assertEqual(self.dugum.toplam_aidag(ALICI), 500, "2 saglayici dogrulamasiyla tahsis")
+
+    def test_yakalamada_tek_saglayicinin_sahte_iddiasi_tahsis_ettirmez(self):
+        self.durum_baslat(son_blok=1000)
+        self._yukseklik(11_000)
+        self.ag[X].usdt_odeme(txh(8), ALICI, 100 * E18, 5_000)   # yalniz X iddia ediyor
+        self.calistir()
+        self.assertEqual(self.dugum.toplam_aidag(ALICI), 0)
+        self.assertIn(txh(8), self.durum()["bekleyen"], "aday kuyrukta bekler (dogrulanamadi)")
+
+    def test_uca_yakinken_normal_kural_iki_saglayici(self):
+        self.durum_baslat(son_blok=1000)
+        self._yukseklik(1_500)   # 485 blok geride < esik
+        for u in (A, C):
+            orj = self.ag[u].cagir
+            self.ag[u].cagir = (lambda o: lambda m, p: (_ for _ in ()).throw(OSError("403")) if m == "eth_getLogs" else o(m, p))(orj)
+        self.calistir()
+        self.assertEqual(self.durum()["son_blok"], 1000, "uca yakinken tek saglayici yetmez")
+
+
 # ================================================================== betikler (10-13)
 def calistir_betik(args, env=None, cwd=None):
     return subprocess.run(args, capture_output=True, text=True, env=env, cwd=cwd, timeout=60)

@@ -54,7 +54,10 @@ ADRES_USD_STATE = os.environ.get("ADRES_USD_STATE", "/root/aidag-lsc/.on-satis-a
 # BSC zincirinden DOGRUDAN okuma (ANAHTARSIZ public RPC'ler).
 BSC_RPCS = [u.strip() for u in os.environ.get("BSC_RPCS",
     "https://bsc.publicnode.com,https://bsc-rpc.publicnode.com,https://bsc.blockrazor.xyz,"
-    "https://bsc-mainnet.public.blastapi.io,https://bsc.rpc.blxrbdn.com,https://1rpc.io/bnb").split(",") if u.strip()]
+    "https://bsc-mainnet.public.blastapi.io,https://bsc.rpc.blxrbdn.com,https://1rpc.io/bnb,"
+    "https://bsc.drpc.org").split(",") if u.strip()]
+# NOT: binance.llamarpc.com drpc ile AYNI altyapiyi kullaniyor (ayni hata metinleri) ->
+# bagimsiz sayilmaz, listede yok.
 # ONEMLI: public RPC'ler tarayici gibi gorunmeyen istegi 403 ile reddeder -> User-Agent SART.
 BSC_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
           "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
@@ -70,6 +73,16 @@ ADIM           = int(os.environ.get("ADIM_BLOK", "25"))
 # Public saglayici hiz sinirlari (429 / "limit exceeded" / zaman asimi): istekler
 # arasi tempo + gecici hatada geri cekilerek bir yeniden deneme.
 RPC_TEMPO_SN   = float(os.environ.get("RPC_TEMPO_SN", "0.3"))
+# YAKALAMA MODU: zincirin YAKALAMA_ESIK_BLOK'tan fazla gerisindeyken (anahtarsiz public
+# saglayicilarin cogu eski bloklari/genis araligi vermez) kesif, genis aralik veren TEK
+# saglayiciyla (varsayilan blxrbdn, 5000 blok) ilerler. Kesif yalniz ADAY uretir; tahsis
+# icin 2 bagimsiz saglayicinin birebir ayni receipt'i sarti DEGISMEZ. Tek kaynakla
+# taranan araliklar 'tek_kaynakli' listesine yazilir (anahtarli saglayiciyla yeniden
+# taranabilsin). Uca yaklasinca normal (>=2 saglayici birlesimi) kurala donulur.
+YAKALAMA_ESIK   = int(os.environ.get("YAKALAMA_ESIK_BLOK", "2000"))
+ADIM_YAKALAMA   = int(os.environ.get("ADIM_YAKALAMA", "5000"))
+MAX_TUR_YAKALAMA = int(os.environ.get("MAX_TUR_YAKALAMA", "60000"))
+YAKALAMA_TERCIH = os.environ.get("YAKALAMA_RPC", "blxrbdn.com")
 RPC_GECICI_BEKLE_SN = float(os.environ.get("RPC_GECICI_BEKLE_SN", "2"))
 ETHERSCAN_KEY  = os.environ.get("ETHERSCAN_API_KEY", "")
 BNB_TARA       = os.environ.get("BNB_TARA", "0") == "1"   # native BNB icin blok tarama (agir)
@@ -152,7 +165,7 @@ def _json_siki_oku(yol):
 
 def bos_durum():
     return {"surum": 1, "son_blok": None, "bekleyen": {}, "islenmis": [],
-            "adres_usd": {}, "iade_gerekli": [], "reddedilen": {}}
+            "adres_usd": {}, "iade_gerekli": [], "reddedilen": {}, "tek_kaynakli": []}
 
 def durum_yukle():
     d = _json_siki_oku(DURUM)
@@ -398,12 +411,23 @@ def kesif(durum):
         son = durum["son_blok"]
     if guvenli_ust <= son:
         return
-    hedef = min(guvenli_ust, son + MAX_TUR)
+    yakalama = (not ETHERSCAN_KEY) and (guvenli_ust - son > YAKALAMA_ESIK)
+    if yakalama:
+        # Uca YAKALAMA_ESIK/2 kala normal moda birakilir (son kisim 2 saglayiciyla).
+        hedef = min(guvenli_ust - YAKALAMA_ESIK // 2, son + MAX_TUR_YAKALAMA)
+        tarayicilar = sorted(tarayicilar, key=lambda t: YAKALAMA_TERCIH not in t[0])
+        print(f"YAKALAMA MODU: {guvenli_ust - son} blok geride; tek genis-aralik saglayici "
+              f"({tarayicilar[0][0]}) ile aday kesfi (tahsis icin 2 saglayici dogrulamasi AYNEN)")
+    else:
+        hedef = min(guvenli_ust, son + MAX_TUR)
+    durum.setdefault("tek_kaynakli", [])
     islenmis = set(durum["islenmis"])
     start = son + 1
     while start <= hedef:
-        # Etherscan tek kaynak (sayfalamali) -> buyuk parca; public RPC getLogs -> ADIM.
-        end = min(start + (400 if ETHERSCAN_KEY else ADIM) - 1, hedef)
+        # Etherscan tek kaynak (sayfalamali) -> buyuk parca; yakalama -> genis parca;
+        # normal public RPC getLogs -> ADIM.
+        adim = 400 if ETHERSCAN_KEY else (ADIM_YAKALAMA if yakalama else ADIM)
+        end = min(start + adim - 1, hedef)
         # Parca icin operatorler sirayla denenir; EN AZ MIN_SAGLAYICI bagimsiz operator
         # BASARIYLA cevap vermeli (getLogs siniri/arsiv/hiz siniri olan atlanir). Adaylar
         # basarili operatorlerin BIRLESIMI (biri odemeyi atlasa digeri yakalar). Yeterli
@@ -412,9 +436,9 @@ def kesif(durum):
         basarili, hatalar = 0, []
         # Etherscan modunda tek kesif kaynagi vardir (yalniz ADAY uretir; tahsis icin
         # 2 saglayicili receipt dogrulamasi yine zorunludur).
-        gerekli = len(tarayicilar) if ETHERSCAN_KEY else MIN_SAGLAYICI
-        # Yuk dagitimi: her parcada operator sirasi doner (ayni saglayici hep ilk olmaz).
-        kaydir = ((start // max(ADIM, 1)) % len(tarayicilar)) if tarayicilar else 0
+        gerekli = len(tarayicilar) if ETHERSCAN_KEY else (1 if yakalama else MIN_SAGLAYICI)
+        # Yuk dagitimi: her parcada operator sirasi doner (yakalamada tercihli saglayici ilk).
+        kaydir = 0 if yakalama else (((start // max(ADIM, 1)) % len(tarayicilar)) if tarayicilar else 0)
         for kimlik, _, tara in tarayicilar[kaydir:] + tarayicilar[:kaydir]:
             if basarili >= gerekli:
                 break
@@ -434,6 +458,12 @@ def kesif(durum):
                 continue
             durum["bekleyen"][h] = {"tur": tur, "gorulme": int(time.time()), "deneme": 0}
             yeni += 1
+        if yakalama:
+            tk = durum["tek_kaynakli"]
+            if tk and tk[-1][1] + 1 == start:
+                tk[-1][1] = end
+            else:
+                tk.append([start, end])
         durum["son_blok"] = end           # kuyruk + isaretci TEK atomik yazim
         durum_kaydet(durum)
         if yeni:
