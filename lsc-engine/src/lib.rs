@@ -23,6 +23,9 @@ pub mod node;
 pub mod registry;
 pub mod tx;
 
+#[cfg(test)]
+mod denetim_testleri;
+
 pub use consensus::finality::{
     equivocators, extends_final, final_block, is_final, pruning_anchor, FinalityDepth,
     FinalityState, DEFAULT_FINALITY_DEPTH, DEFAULT_PRUNING_DEPTH,
@@ -37,7 +40,7 @@ pub use dag::vertex::{
     Vertex, VertexError, VertexId, DOMAIN_TAG, FORMAT_VERSION, MAX_PARENTS, MAX_PAYLOAD_BYTES,
 };
 
-pub use node::{NetworkIngestOutcome, NodeState};
+pub use node::{EvmMakbuz, EvmMakbuzDurum, NetworkIngestOutcome, NodeState};
 pub use registry::{
     public_key_to_adres, KayitSonucu, KurumKategori, KurumKaydi, StakeRegistry, TokenRegistry,
 };

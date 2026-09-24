@@ -38,9 +38,18 @@ pub const MAINNET_GENESIS_PAYLOAD: &[u8] = b"AIDAG-MAINNET-GENESIS-v1";
 /// CEKEMEZ (on-satis tahsisleri bekler, claim 0 doner). **SABIT** olmali:
 /// `SystemTime::now()` kullanilirsa her dugum farkli kilit takvimi hesaplar →
 /// bakiye/transfer gecerliligi ayrisir (konsensus bolunmesi). Bu yuzden koda
-/// pinli. Referans: 2026-08-26 00:00:00 UTC (on-satis penceresinden ~1 ay sonra;
-/// bkz. ON_SATIS_BASLANGIC). GERCEK LAUNCH'ta bu deger guncellenip yeniden derlenir.
-pub const MAINNET_VESTING_BASLANGIC: u64 = 1_790_467_200;
+/// pinli.
+///
+/// DEGER: 4_102_444_800 = 2100-01-01 00:00:00 UTC = `TGE_BELIRSIZ` ("TGE henuz
+/// belirlenmedi"). Genesis dilimlerinin kilidi, on satis claim'inin ertelendigi
+/// ayni uzak tarihe baglidir: ekip dilimleri, on satis alicilari claim edemezken
+/// acilmaz (ekip ile yatirimci arasinda simetri). Gercek tarih ortaklik kurulunca
+/// belirlenecek; bkz. KARARLAR.md (K-2026-09-24-01).
+///
+/// GECMIS: 1_790_467_200 (2026-09-27 00:00 UTC) idi; yanindaki yorum hatali olarak
+/// "2026-08-26" diyordu. 2026-09-24'te, bu tarih gelmeden (hicbir genesis dilimi
+/// acilmadan) 2100'e alindi -> gecmis durum degismez (mainnet replay ozeti ayni).
+pub const MAINNET_VESTING_BASLANGIC: u64 = TGE_BELIRSIZ;
 
 // === Asagidaki degerler `uret_mainnet_genesis` ciktisiyla doldurulur ===
 

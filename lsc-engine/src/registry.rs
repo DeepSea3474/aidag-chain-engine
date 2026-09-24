@@ -345,6 +345,44 @@ impl BakiyeRegistry {
         self.bakiyeler = kaynak.clone();
     }
 
+    /// Bir adresin su an harcanabilir (vesting kilidi dusulmus) bakiyesi.
+    pub fn harcanabilir(&self, adres: &[u8; 20]) -> Tutar {
+        self.bakiye(adres)
+            .saturating_sub(self.vesting_kilitli(adres, self.simdi_zaman))
+    }
+
+    /// DENETIM K-04: EVM'e verilecek AIDAG gorunumu = HARCANABILIR bakiyeler.
+    /// Eskiden EVM ham bakiyeyi goruyordu ve sonuc deftere aynen yaziliyordu ->
+    /// kilitli AIDAG tip=9/tip=12 ile tasinabiliyordu. Kilitli kisim EVM'e hic
+    /// verilmez; `evm_sonucunu_aynala` geri eklerken toplam arz korunur.
+    pub fn evm_gorunumu(&self) -> HashMap<[u8; 20], Tutar> {
+        let mut g = self.bakiyeler.clone();
+        for adres in self.vesting.keys() {
+            if let Some(b) = g.get_mut(adres) {
+                let kilit = self.vesting_kilitli(adres, self.simdi_zaman).min(*b);
+                *b -= kilit;
+            }
+        }
+        g
+    }
+
+    /// DENETIM K-04: EVM sonucunu deftere aynala; `evm_gorunumu`nde dusulen kilitli
+    /// kisim her hesaba AYNEN geri eklenir. Kilit zaman icinde degismedigi (ayni
+    /// `simdi_zaman`) icin sum(sonuc) == onceki toplam arz.
+    pub fn evm_sonucunu_aynala(&mut self, kaynak: &HashMap<[u8; 20], Tutar>) {
+        let mut yeni = kaynak.clone();
+        for adres in self.vesting.keys() {
+            let kilit = self
+                .vesting_kilitli(adres, self.simdi_zaman)
+                .min(self.bakiye(adres));
+            if kilit > 0 {
+                let b = yeni.entry(*adres).or_insert(0);
+                *b = b.saturating_add(kilit);
+            }
+        }
+        self.bakiyeler = yeni;
+    }
+
     /// Defterdeki toplam serbest AIDAG (arz denetimi/test icin).
     pub fn toplam_arz(&self) -> Tutar {
         self.bakiyeler.values().copied().sum()

@@ -651,3 +651,19 @@ DURUST SINIR (gercekle ortusmeli):
   gorunumlerde "test_tahsisi" olarak isaretli. Toplam tavandan 10 AIDAG'i tuketir.
 - **Site tarafi olay defteri** (Next.js, off-chain) Rust mainnet'i DEGILDIR; arayuzde bu adla gosterilir.
 - **Bagimsiz guvenlik denetimi yapilmadi.**
+
+## 2026-09-24 — Genesis vesting tarihi ve TGE (bagimsiz denetim sonrasi)
+
+- **Degisiklik:** genesis vesting baslangici (`MAINNET_VESTING_BASLANGIC`) 2026-09-27 00:00 UTC'den
+  `TGE_BELIRSIZ` (2100-01-01) degerine alindi. Yanindaki yorum hatali olarak "2026-08-26" diyordu;
+  duzeltildi. Ayrinti ve tarih gecmisi: KARARLAR.md, K-2026-09-24-01.
+- **Neden:** on satis claim'i 22 Eylul'de (tip=15) 2100'e ertelenmisti; genesis dilimleri ise
+  27 Eylul'den itibaren acilacakti. Ekip ile yatirimci ayni "TGE belirlenmedi" tarihine baglandi.
+- **Sinir (teknik borc):** tarih hala KODA SABIT. Gercek tarihi ayarlamak yeni ikili + tum
+  dugumlerin es zamanli guncellenmesi demek. Hazine (%25) ve on satis emaneti (%8) tasarim
+  geregi kilitsiz; bu degisiklik onlari etkilemez.
+- **Sonraki is:** tarihi M-of-N imzali, bir kez ayarlanabilen, gecmise yazilamayan (zincir saati
+  + uzun bildirim suresi) bir zincir islemine baglamak; bu islem on satis TGE'sini ve genesis
+  vesting baslangicini BIRLIKTE ayarlamali, tek anahtarli tip=15 mainnet'te kapatilmali.
+- **Son tarih:** yeni ikili iki mainnet dugumunde 2026-09-27 00:00 UTC'den ONCE calisiyor
+  olmali; sonrasinda eski surume geri donulmemeli (eski surum dilimleri acik sayar).
