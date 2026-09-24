@@ -600,6 +600,59 @@ class T9_Etherscan(Temel):
         self.assertEqual(len(self.durum()["bekleyen"]), 1004)       # digerleri dogrulanmadi
 
 
+# ================================================================== 14: canli saglayici sinirlari
+# Canli kurulumda gorulen: publicnode eski bloklar icin getLogs'u 403 ile reddediyor,
+# blockrazor 25 bloktan buyuk araligi reddediyor. Kesif/dogrulama CALISMAYAN saglayiciyi
+# atlamali ama guvenlik sarti (en az 2 bagimsiz BASARILI + birebir ayni) korunmali.
+class T14_SaglayiciSinirlari(Temel):
+    URLLER = [A, B, C]
+
+    def _getlogs_reddet(self, url):
+        orj = self.ag[url].cagir
+        def f(method, params):
+            if method == "eth_getLogs":
+                raise OSError("HTTP Error 403: Forbidden (archive)")
+            return orj(method, params)
+        self.ag[url].cagir = f
+
+    def test_ilk_saglayici_getlogs_reddetse_de_kesif_ilerler_ve_tahsis_olur(self):
+        self.durum_baslat()
+        self._getlogs_reddet(A)
+        self.ag.hepsine("usdt_odeme", txh(1), ALICI, 100 * E18, 1010)
+        self.calistir()
+        self.assertEqual(self.dugum.toplam_aidag(ALICI), 500)
+        self.assertGreater(self.durum()["son_blok"], 1000)
+        # parcalar ADIM (25) blogu asmaz
+        self.assertTrue(all(e - s + 1 <= 25 for s, e, _ in self.ag[B].getlogs_cagri))
+
+    def test_yalniz_bir_saglayici_basariliysa_isaretci_ilerlemez(self):
+        self.durum_baslat()
+        self._getlogs_reddet(A); self._getlogs_reddet(B)
+        self.ag.hepsine("usdt_odeme", txh(2), ALICI, 100 * E18, 1010)
+        self.calistir()
+        self.assertEqual(self.durum()["son_blok"], 1000, "tek saglayiciyla isaretci ilerlememeli")
+        self.assertEqual(self.dugum.toplam_aidag(ALICI), 0)
+
+    def test_dogrulamada_hatali_saglayici_atlanir_farkli_cevap_bekletir(self):
+        # A receipt'te hata verir; B ve C ayni -> tahsis
+        self.durum_baslat()
+        self.ag.hepsine("usdt_odeme", txh(3), ALICI, 100 * E18, 1010)
+        orj = self.ag[A].cagir
+        self.ag[A].cagir = lambda m, p: (_ for _ in ()).throw(OSError("403")) if m == "eth_getTransactionReceipt" else orj(m, p)
+        self.calistir()
+        self.assertEqual(self.dugum.toplam_aidag(ALICI), 500)
+
+    def test_basarili_cevaplardan_biri_farkliysa_tahsis_yok(self):
+        # C sahte (farkli deger) receipt verir -> A,B ayni olsa bile UYUSMAZLIK -> bekler
+        self.durum_baslat()
+        self.ag[A].usdt_odeme(txh(4), ALICI, 100 * E18, 1010)
+        self.ag[B].usdt_odeme(txh(4), ALICI, 100 * E18, 1010)
+        self.ag[C].usdt_odeme(txh(4), ALICI, 9999 * E18, 1010)
+        self.calistir()
+        self.assertEqual(self.dugum.toplam_aidag(ALICI), 0)
+        self.assertIn(txh(4), self.durum()["bekleyen"])
+
+
 # ================================================================== betikler (10-13)
 def calistir_betik(args, env=None, cwd=None):
     return subprocess.run(args, capture_output=True, text=True, env=env, cwd=cwd, timeout=60)

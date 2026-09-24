@@ -64,8 +64,9 @@ TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523
 ONAY_DERINLIGI = int(os.environ.get("ONAY_DERINLIGI", "15"))   # blok
 MIN_SAGLAYICI  = max(2, int(os.environ.get("MIN_SAGLAYICI", "2")))  # asla 2'nin altina inmez
 ILK_GERI_BLOK  = int(os.environ.get("ILK_GERI_BLOK", "20"))
-MAX_TUR        = int(os.environ.get("MAX_TUR_BLOK", "400"))
-ADIM           = 400
+MAX_TUR        = int(os.environ.get("MAX_TUR_BLOK", "1200"))
+# Parca boyu: public saglayicilarin eth_getLogs siniri (blockrazor 25 blok) ile uyumlu.
+ADIM           = int(os.environ.get("ADIM_BLOK", "25"))
 ETHERSCAN_KEY  = os.environ.get("ETHERSCAN_API_KEY", "")
 BNB_TARA       = os.environ.get("BNB_TARA", "0") == "1"   # native BNB icin blok tarama (agir)
 ETHERSCAN_SAYFA = 1000
@@ -260,9 +261,11 @@ def operator_cagir(urller, method, params):
             son = e
     raise RuntimeError(f"operator yanit vermedi: {son}")
 
-def canli_operatorler(gerekli=MIN_SAGLAYICI):
-    """eth_blockNumber'a cevap veren ilk 'gerekli' bagimsiz operator ->
-    [(kimlik, url, guncel_blok)]. Her operator icin sonraki cagrilar AYNI url ile."""
+def canli_operatorler(gerekli=None):
+    """eth_blockNumber'a cevap veren bagimsiz operatorler -> [(kimlik, url, guncel_blok)].
+    Varsayilan: TUM cevap verenler (bazi saglayicilar getLogs/eski blok/receipt icin
+    reddedebilir; cagiran basarili olanlardan en az MIN_SAGLAYICI tanesini kullanir).
+    Her operator icin sonraki cagrilar AYNI url ile."""
     sonuc = []
     for kimlik, urller in bagimsiz_saglayicilar().items():
         try:
@@ -270,7 +273,7 @@ def canli_operatorler(gerekli=MIN_SAGLAYICI):
             sonuc.append((kimlik, url, int(bn, 16)))
         except Exception as e:
             print(f"saglayici {kimlik} yanitsiz: {e}")
-        if len(sonuc) >= gerekli:
+        if gerekli is not None and len(sonuc) >= gerekli:
             break
     return sonuc
 
@@ -379,13 +382,30 @@ def kesif(durum):
     islenmis = set(durum["islenmis"])
     start = son + 1
     while start <= hedef:
-        end = min(start + ADIM - 1, hedef)
+        # Etherscan tek kaynak (sayfalamali) -> buyuk parca; public RPC getLogs -> ADIM.
+        end = min(start + (400 if ETHERSCAN_KEY else ADIM) - 1, hedef)
+        # Parca icin operatorler sirayla denenir; EN AZ MIN_SAGLAYICI bagimsiz operator
+        # BASARIYLA cevap vermeli (getLogs siniri/arsiv/hiz siniri olan atlanir). Adaylar
+        # basarili operatorlerin BIRLESIMI (biri odemeyi atlasa digeri yakalar). Yeterli
+        # basari yoksa isaretci ILERLEMEZ (odeme kaybi yok).
         adaylar = {}
-        try:
-            for kimlik, _, tara in tarayicilar:
-                adaylar.update({h: t for h, t in tara(start, end).items() if h not in adaylar})
-        except Exception as e:
-            print(f"kesif hatasi [{start},{end}]: {e} -> isaretci ilerlemez"); return
+        basarili, hatalar = 0, []
+        # Etherscan modunda tek kesif kaynagi vardir (yalniz ADAY uretir; tahsis icin
+        # 2 saglayicili receipt dogrulamasi yine zorunludur).
+        gerekli = len(tarayicilar) if ETHERSCAN_KEY else MIN_SAGLAYICI
+        for kimlik, _, tara in tarayicilar:
+            if basarili >= gerekli:
+                break
+            try:
+                bulunan = tara(start, end)
+            except Exception as e:
+                hatalar.append(f"{kimlik}: {e}")
+                continue
+            basarili += 1
+            adaylar.update({h: t for h, t in bulunan.items() if h not in adaylar})
+        if basarili < gerekli:
+            print(f"kesif hatasi [{start},{end}]: yalniz {basarili} saglayici basarili "
+                  f"({'; '.join(hatalar)[:300]}) -> isaretci ilerlemez"); return
         yeni = 0
         for h, tur in adaylar.items():
             if h in islenmis or h in durum["bekleyen"] or h in durum["reddedilen"]:
@@ -437,16 +457,21 @@ def _receipt_ozet(tur, receipt, tx):
 
 def odeme_dogrula(h, tur, ops):
     """(sonuc, neden). sonuc: dict (dogrulandi) | 'KESIN_GECERSIZ' | None (bekle)."""
-    ozetler = []
+    # Cevap veren TUM operatorler sorulur; hata/eksik cevap veren ATLANIR, ama BASARILI
+    # cevaplar arasinda herhangi bir fark varsa odeme bekletilir (tek kotu saglayici
+    # sahte receipt ile tahsis yaptiramaz; en az MIN_SAGLAYICI birebir ayni cevap sart).
+    ozetler, atlanan = [], []
     for kimlik, url, guncel in ops:
         try:
             rc = rpc_cagir(url, "eth_getTransactionReceipt", [h])
             tx = rpc_cagir(url, "eth_getTransactionByHash", [h]) if tur == "bnb" else None
         except Exception as e:
-            return None, f"{kimlik}: {e}"
+            atlanan.append(f"{kimlik}: {e}")
+            continue
         oz, neden = _receipt_ozet(tur, rc, tx)
         if oz is None:
-            return None, f"{kimlik}: {neden}"
+            atlanan.append(f"{kimlik}: {neden}")
+            continue
         bn = oz["blockNumber"] if isinstance(oz, dict) else oz[2]
         if bn <= 0 or bn > guncel - ONAY_DERINLIGI:
             return None, f"{kimlik}: onay derinligi yetersiz"   # gecersizlik de reorg'a acik
@@ -454,7 +479,7 @@ def odeme_dogrula(h, tur, ops):
             return None, f"{kimlik}: receipt hash farkli"
         ozetler.append((kimlik, oz, neden))
     if len(ozetler) < MIN_SAGLAYICI:
-        return None, "yetersiz saglayici"
+        return None, "yetersiz saglayici (" + "; ".join(atlanan)[:200] + ")"
     ilk = ozetler[0][1]
     if any(o != ilk for _, o, _ in ozetler[1:]):
         return None, "saglayicilar UYUSMUYOR"
