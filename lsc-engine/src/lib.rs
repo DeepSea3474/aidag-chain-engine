@@ -23,6 +23,9 @@ pub mod node;
 pub mod registry;
 pub mod tx;
 
+#[cfg(test)]
+mod denetim_testleri;
+
 pub use consensus::finality::{
     equivocators, extends_final, final_block, is_final, pruning_anchor, FinalityDepth,
     FinalityState, DEFAULT_FINALITY_DEPTH, DEFAULT_PRUNING_DEPTH,

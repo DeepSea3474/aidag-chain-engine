@@ -1126,15 +1126,17 @@ impl NodeState {
                             let azami_ucret =
                                 crate::avm::gas_ucreti_hesapla(crate::avm::AVM_GAS_LIMIT)
                                     as crate::registry::Tutar;
-                            if self.bakiye_registry.bakiye(&gonderen) >= c.deger
+                            // DENETIM K-04: ust-seviye deger HARCANABILIR bakiyeden (kilit haric).
+                            if self.bakiye_registry.harcanabilir(&gonderen) >= c.deger
                                 && self.lsc_registry.bakiye(&gonderen) >= azami_ucret
                             {
                                 // B1 (SEED): EVM'e TAM AIDAG gorunumu ver. Yalniz gonderen
                                 // degil, TUM hesaplar yuklenir ki kontrat-ici hareketler
                                 // (payable/withdraw/ucuncu-tarafa odeme) dogru bakiyelerle
                                 // yurusun. gas_price=0 -> EVM native yaratmaz/yakmaz.
+                                // DENETIM K-04: kilitli (vesting) kisim EVM'e verilmez.
                                 self.avm_db
-                                    .aidag_yukle_hepsi(self.bakiye_registry.tum_bakiyeler());
+                                    .aidag_yukle_hepsi(&self.bakiye_registry.evm_gorunumu());
                                 // B6: CREATE nonce'unu BIRLESIK nonce_registry'ye senkronla
                                 // (c.nonce == beklenen, dogru_mu ile dogrulandi). Boylece
                                 // CREATE adresi = keccak(gonderen, birlesik_nonce) =
@@ -1174,7 +1176,9 @@ impl NodeState {
                                     // aynalama seed ile ayni kalir (guvenli no-op). Eski
                                     // ust-seviye `transfer` KALDIRILDI (deger'i EVM zaten tasidi;
                                     // aksi halde CIFT sayim olurdu).
-                                    self.bakiye_registry.aidag_aynala(self.avm_db.aidag_tumu());
+                                    // DENETIM K-04: kilitli kisim geri eklenir.
+                                    self.bakiye_registry
+                                        .evm_sonucunu_aynala(self.avm_db.aidag_tumu());
                                 }
                             }
                         }
@@ -1379,13 +1383,15 @@ impl NodeState {
                             let azami_ucret =
                                 crate::avm::gas_ucreti_hesapla(crate::avm::AVM_GAS_LIMIT)
                                     as crate::registry::Tutar;
-                            if self.bakiye_registry.bakiye(&gonderen) >= islem.deger
+                            // DENETIM K-04: ust-seviye deger HARCANABILIR bakiyeden (kilit haric).
+                            if self.bakiye_registry.harcanabilir(&gonderen) >= islem.deger
                                 && self.lsc_registry.bakiye(&gonderen) >= azami_ucret
                             {
                                 // B1 (SEED): EVM'e TAM AIDAG gorunumu ver (kontrat-ici
                                 // hareketler ucuncu-taraflar dahil dogru bakiyelerle yurusun).
+                                // DENETIM K-04: kilitli (vesting) kisim EVM'e verilmez.
                                 self.avm_db
-                                    .aidag_yukle_hepsi(self.bakiye_registry.tum_bakiyeler());
+                                    .aidag_yukle_hepsi(&self.bakiye_registry.evm_gorunumu());
                                 // B6: CREATE nonce'unu BIRLESIK nonce_registry'ye senkronla
                                 // (islem.nonce == beklenen). CREATE adresi eth_getTransactionCount
                                 // ile tutarli olur -> MetaMask/arac adres tahmini dogru.
@@ -1411,7 +1417,9 @@ impl NodeState {
                                     // B1 (MIRROR): EVM'in urettigi TUM AIDAG state-diff'i (ust
                                     // seviye deger dahil) gercek deftere aynala -> fon donmasi biter.
                                     // Eski ust-seviye transfer KALDIRILDI (cift sayim olurdu).
-                                    self.bakiye_registry.aidag_aynala(self.avm_db.aidag_tumu());
+                                    // DENETIM K-04: kilitli kisim geri eklenir.
+                                    self.bakiye_registry
+                                        .evm_sonucunu_aynala(self.avm_db.aidag_tumu());
                                 }
                             }
                         }
