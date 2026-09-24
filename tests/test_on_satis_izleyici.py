@@ -653,6 +653,32 @@ class T14_SaglayiciSinirlari(Temel):
         self.assertIn(txh(4), self.durum()["bekleyen"])
 
 
+class T15_YenidenDeneme(Temel):
+    def test_gecici_hata_bir_kez_yeniden_denenir_kalici_denenmez(self):
+        m = self.yukle()
+        cagri = []
+        def ham(url, method, params):
+            cagri.append(method)
+            if len(cagri) == 1:
+                raise OSError("HTTP Error 429: Too Many Requests")
+            return "0x10"
+        m._rpc_cagir_ham = ham
+        # ozgun rpc_cagir (test yamasi olmadan) modulden yeniden yuklenir
+        spec = importlib.util.spec_from_file_location("izl_ham", IZLEYICI)
+        orj = importlib.util.module_from_spec(spec); spec.loader.exec_module(orj)
+        orj._rpc_cagir_ham = ham
+        orj.time = types.SimpleNamespace(time=__import__("time").time, sleep=lambda x: None)
+        self.assertEqual(orj.rpc_cagir("u", "eth_blockNumber", []), "0x10")
+        self.assertEqual(len(cagri), 2, "gecici hata bir kez yeniden denendi")
+        cagri.clear()
+        def kalici(url, method, params):
+            cagri.append(method); raise OSError("HTTP Error 403: Forbidden")
+        orj._rpc_cagir_ham = kalici
+        with self.assertRaises(OSError):
+            orj.rpc_cagir("u", "eth_getLogs", [])
+        self.assertEqual(len(cagri), 1, "kalici hata yeniden denenmez")
+
+
 # ================================================================== betikler (10-13)
 def calistir_betik(args, env=None, cwd=None):
     return subprocess.run(args, capture_output=True, text=True, env=env, cwd=cwd, timeout=60)

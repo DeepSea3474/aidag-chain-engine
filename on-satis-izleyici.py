@@ -67,6 +67,10 @@ ILK_GERI_BLOK  = int(os.environ.get("ILK_GERI_BLOK", "20"))
 MAX_TUR        = int(os.environ.get("MAX_TUR_BLOK", "1200"))
 # Parca boyu: public saglayicilarin eth_getLogs siniri (blockrazor 25 blok) ile uyumlu.
 ADIM           = int(os.environ.get("ADIM_BLOK", "25"))
+# Public saglayici hiz sinirlari (429 / "limit exceeded" / zaman asimi): istekler
+# arasi tempo + gecici hatada geri cekilerek bir yeniden deneme.
+RPC_TEMPO_SN   = float(os.environ.get("RPC_TEMPO_SN", "0.3"))
+RPC_GECICI_BEKLE_SN = float(os.environ.get("RPC_GECICI_BEKLE_SN", "2"))
 ETHERSCAN_KEY  = os.environ.get("ETHERSCAN_API_KEY", "")
 BNB_TARA       = os.environ.get("BNB_TARA", "0") == "1"   # native BNB icin blok tarama (agir)
 ETHERSCAN_SAYFA = 1000
@@ -238,8 +242,24 @@ def bagimsiz_saglayicilar():
         gruplar.setdefault(saglayici_kimligi(u), []).append(u)
     return gruplar
 
+def _gecici_mi(e):
+    m = str(e).lower()
+    return any(k in m for k in ("429", "too many", "limit exceeded", "rate", "timed out", "timeout", "temporarily"))
+
 def rpc_cagir(url, method, params):
-    """TEK saglayiciya JSON-RPC cagrisi. Hata -> istisna. result None olabilir."""
+    """TEK saglayiciya JSON-RPC cagrisi; gecici hatada (hiz siniri/zaman asimi) bir kez
+    geri cekilip yeniden dener. Kalici hata -> istisna. result None olabilir."""
+    try:
+        time.sleep(RPC_TEMPO_SN)
+        return _rpc_cagir_ham(url, method, params)
+    except Exception as e:
+        if not _gecici_mi(e):
+            raise
+        time.sleep(RPC_GECICI_BEKLE_SN)
+        return _rpc_cagir_ham(url, method, params)
+
+def _rpc_cagir_ham(url, method, params):
+    """TEK saglayiciya tek JSON-RPC cagrisi. Hata -> istisna."""
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
     req = urllib.request.Request(url, data=body,
         headers={"Content-Type": "application/json", "User-Agent": BSC_UA, "Accept": "application/json"})
@@ -393,7 +413,9 @@ def kesif(durum):
         # Etherscan modunda tek kesif kaynagi vardir (yalniz ADAY uretir; tahsis icin
         # 2 saglayicili receipt dogrulamasi yine zorunludur).
         gerekli = len(tarayicilar) if ETHERSCAN_KEY else MIN_SAGLAYICI
-        for kimlik, _, tara in tarayicilar:
+        # Yuk dagitimi: her parcada operator sirasi doner (ayni saglayici hep ilk olmaz).
+        kaydir = ((start // max(ADIM, 1)) % len(tarayicilar)) if tarayicilar else 0
+        for kimlik, _, tara in tarayicilar[kaydir:] + tarayicilar[:kaydir]:
             if basarili >= gerekli:
                 break
             try:
