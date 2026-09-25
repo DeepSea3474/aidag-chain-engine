@@ -87,6 +87,7 @@ Uygulanmamış kararlar **[Sonraki iş]** olarak işaretlenir.
 - Neden: Ekip ve yatırımcı arasında simetri; ekip tokenleri yatırımcıdan önce açılmaz.
 - Tarih geçmişi: 15 Temmuz → 21 Eylül → 26 Ağustos → 27 Eylül → belirlenmedi.
 - **[Sonraki iş]** Tarihin koddan çıkarılıp M-of-N imzalı, yalnızca bir kez ayarlanabilen ve geçmişe yazılamayan bir zincir işlemine bağlanması.
+- Durum: Ana ağda yayında (25 Eylül 2026). Kod: `MAINNET_VESTING_BASLANGIC = TGE_BELIRSIZ`. Bkz. K-19.
 
 ### K-17 · Ön satış test kayıtları (Eylül 2026)
 - Ana ağdaki 3 ön satış kaydı (toplam 39 AIDAG) kurucunun test kayıtlarıdır; resmî ön satış rakamlarında ayrı gösterilecektir.
@@ -99,3 +100,36 @@ Uygulanmamış kararlar **[Sonraki iş]** olarak işaretlenir.
 - Her değişiklik: analiz → ayrı dalda geliştirme → tüm testler → canlı ağ geçmişiyle geriye uyumluluk → insan onayı → kontrollü yayın.
 - Canlıda çalışan kod ile ana depo her zaman aynı olmalıdır. Acil durumda canlıya doğrudan yapılan düzeltme en geç ertesi gün depoya alınır ve denetlenir.
 - Ayrıntı: CALISMA_VE_OGRENME_YONTEMI.md
+
+---
+
+## 6. Yayın ve denetim kayıtları
+
+### K-19 · Bağımsız denetim düzeltmelerinin ana ağ yayını (25 Eylül 2026)
+- Karar: Bağımsız güvenlik denetiminin (`DENETIM_ONCESI_RAPOR.md`) kritik bulguları için hazırlanan düzeltmeler, 27 Eylül'den önce ana ağın iki düğümüne alındı. Aşağıdaki "K-01…K-08" kısaltmaları denetim raporundaki bulgu kimlikleridir; bu belgedeki karar numaralarıyla ilgisi yoktur.
+- Ne değişti:
+  - Denetim K-01: yeni blok en fazla 8 uç seçer; paralel uç şişirmeyle zincir durdurulamaz.
+  - Denetim K-02: gelecek tarihli blok bekleme havuzu ya da disk yoluyla ağa sızamaz.
+  - Denetim K-03: başarısız bir akıllı sözleşme çağrısı sözleşme durumunu silmez.
+  - Denetim K-04: kilitli (vesting) token akıllı sözleşme yoluyla taşınamaz.
+  - Denetim K-05: işlem makbuzları gerçek sonucu gösterir; geçersiz işlem baştan reddedilir.
+  - Denetim K-06: başka zincirde imzalanmış işlem tekrar oynatılamaz (chainId zorunlu; ana ağ 3474 değişmedi).
+  - Denetim K-07 (ara çözüm): RPC yazmalarına istemci başına hız sınırı; ağ yalnızca doğrulanmış blokları iletir.
+  - Denetim K-08: belge kayıt betiği sabit, herkesçe bilinen anahtarı kullanmaz.
+  - Genesis vesting 2100 (K-16).
+  - Altyapı (depo dışı): nginx gerçek istemci IP'sini Cloudflare'in `X-Forwarded-For` başlığından alır (Cloudflare bu alan adında `CF-Connecting-IP` göndermiyor); düğümlerde ortak yazma tavanı pratikte kapalı, sınır istemci başına.
+- Yayın commit'i: `cb814390aeca03509eb192ae5d2a507b879da110` (`denetim/kritik-duzeltmeler`, `rwa-oracle-kyc` üzerine). Bu kayıt, o dalın ana depoya birleştirildiği commit'tedir (K-18: canlıdaki kod ile ana depo aynı).
+- Çalışan ikili: `/opt/aidag/lsc-node-cb81439/lsc-node`, sha256 `4e104c567097cda63495aef84dcdb3935524773963acbeb06c07365fea396d75` (önceki: `eaed5edf261d5798…`).
+- Kanıt:
+  - Testler: yayın dalı 469 geçti / 0 başarısız; bu birleştirme sonrası tüm testler başarılı (sayı birleştirme commit mesajında).
+  - Canlı ağ geçmişiyle geriye uyum: iki düğümün veri kopyaları (3.964 blok) eski ve yeni kodla birebir aynı sonucu verdi.
+  - Yayın sonrası: iki düğüm yeni ikilide, genesis `b82345008ae109d8`, blok sayıları eşit; 7 genesis adresinin bakiyesi ve ön satış özeti yayın öncesiyle aynı; hata yok.
+  - RWA modülleri ana ağda kapalı: aynı RWA senaryosu test ağında çalışıyor, ana ağda doğru imzayla bile hiçbir kayıt oluşturmuyor (test: `denetim_testleri::rwa_ana_ag`).
+- Yayın (UTC): 11:12 yedek · 11:14 ön satış izleyicisi ve kurtarma botu durduruldu, nginx · 11:18 ikinci düğüm · 11:23 herkese açık düğüm (birkaç saniyelik RPC kesintisi) · 11:26 servisler yeniden başlatıldı.
+- Duraklama sırasında ön satış izleyicisinin tek sağlayıcıyla taradığı BSC blokları (123.937.377–123.940.147) iki bağımsız sağlayıcıyla yeniden tarandı: ödeme yok.
+- Geri dönüş:
+  - 27 Eylül 2026 00:00 UTC'den önce: düğümlerdeki `cb81439.conf` systemd dosyası silinir, servis yeniden başlatılır → eski ikili. Veri biçimi aynı.
+  - Hız sınırı: önce düğümlerdeki `hiz-siniri.conf` kaldırılır, sonra nginx eski haline alınır (sıra önemli).
+  - 27 Eylül 00:00 UTC'den sonra eski ikiliye dönülmez (eski sürüm genesis dilimlerini açık sayar); yalnızca ileri düzeltme.
+- **[Sonraki iş]** 27 Eylül 00:00 UTC kontrolü; daha eski tek kaynaklı tarama aralıklarının yeniden taranması; denetim K-07'nin protokol çözümü (ücret ya da komite); denetim raporundaki yüksek ve orta bulgular.
+

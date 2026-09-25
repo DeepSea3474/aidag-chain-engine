@@ -176,12 +176,33 @@ Her biri once ESKI kodda BASARISIZ, yeni kodda BASARILI oldugu dogrulanarak ekle
 - on_satis_asamalar_otomatik_devam_toplam_tavan_asilamaz — 630k sonrasi satis kesilmez, 1.680.000'de durur
 - rpc::mainnet_kapisi_testleri — mainnet'te faucet/test_bakiye/lsc_test_bakiye hicbir vertex yazmaz
 
+## RWA ORACLE + KYC TESTLERI (dal: rwa-oracle-kyc) — bkz. RWA_ORACLE_KYC_TASARIM.md
+- node::rwa_tests::rwa_yonetim_* — M-of-N: 2 imza gecer, 1 imza red, ayni imzaci 2 kez sayilmaz, replay red, esik altina dusurme red, imzaci/esik degisikligi M-of-N, owner tek anahtarla veremez, suresi dolan/baska ag imzasi red, kurulmamis yonetim; rwa_mainnet_genesis_ve_dagitim_degismedi
+- node::rwa_tests::rwa_kubra_benzeri_rolsuz_servis_hicbir_rwa_islemi_yapamaz — rolsuz servis anahtari (yasak listesi olmadan) yalniz tip=1 yazar; 17/18/19/20 etkisiz
+- node::rwa_tests::rwa_eski_tarihli_vertex_bayatligi_atlatamaz — eski tarihli vertex zincir saatini geri almaz, bayat veriyi tazelemez, rapor zamani = zincir saati
+- node::rwa_tests::rwa_kurum_dogrulama_* — kurum dogrulama yalniz M-of-N; owner/kurum/tek imza veremez; kayitsiz adres dogrulanmaz; mevcut belge/kurum kayitlari birebir korunur
+- node::rwa_tests::rwa_mainnet_genesis_ve_mevcut_vertexler_kurum_dogrulamadan_etkilenmez — pinli genesis + mevcut tip vertex'ler; dogrulama denemesi kayitlari degistirmez
+- node::rwa_tests::rwa_gercek_kubra_adresi_yasakli_rol_alamaz — gercek KUBRA adresi sabit yasak listesinde; rol alamaz
+- node::rwa_tests::rwa_olcum_zamani_ileri_veya_eskiyse_rapor_reddedilir / rwa::tests::olcum_zamani_ileride_veya_pencereden_eskiyse_reddedilir — olcum zamani penceresi
+- rwa_precompile::tests — secici keccak, Ethereum precompile cakismasi (tum spec), Chainlink ABI, int256 isaret, bayat/durmus/hatali cagri revert, KYC isApproved, RWA kapaliyken Ethereum ile ayni, kontrat STATICCALL, sabit gaz (2599 OOG / 2600 basari, revert ayni gaz), deger reddi
+- node::rwa_tests::rwa_precompile_* — eth_call ile zincir durumunu okur; mainnet'te kapali
+- soulware-core imza_dosyasi::tests — anahtar fail-closed: yok/bozuk red, --yeni-anahtar-uret var olan dosyanin uzerine yazmaz, 0600, mesaj sizdirmaz
+- tx::rwa_tx_tests — tip 17..20 kodlama: gidis-donus, eksik/fazla bayt, yanlis tip, gecersiz alan, tip numarasi cakismasi
+- oracle_hesap::tests — alt medyan, sapma siniri, i128 sinirlarinda tasmasiz 256-bit karsilastirma, eleme, girdi sirasindan bagimsizlik, kesici, bayatlik
+- rwa::tests — tur kapanisi, tekrar rapor, yanlis tur, bayat acik tur, devre kesici durdur/ac, rolu iptal edilenin raporu, tur gecmisi budama, KYC onay/iptal
+- node::rwa_tests — bildirim suresi, kendi kendine kurum kaydi yetki vermez, owner/KUBRA yazamaz, rol iptali aninda, eski tarihli vertex bildirimi kisaltamaz, taze + ters sirali dugum ayni durum, mainnet'te kapali
+- rpc::rwa_rpc_testleri — /oracle, /kyc, /kurum roller (i128 deger string)
+
 ## MAINNET REPLAY (konsensus degisikligi oncesi ZORUNLU)
 Canli veri dosyasinin KOPYASI eski ve yeni kodla oynatilir; ozet birebir ayni olmali:
   cp /root/aidag-mainnet/aidag-data-mainnet.log /tmp/kopya.log
   MAINNET_REPLAY_DOSYA=/tmp/kopya.log CARGO_TARGET_DIR=/root/aidag-build \
     cargo test --release -p lsc-net --test mainnet_replay_ozet -- --ignored --nocapture | grep '^OZET'
-(on satis kayitlari, TGE, arz/hesap sayilari, tum imzalayan/alici adreslerin bakiye+nonce'u)
+(on satis kayitlari, TGE, arz/hesap sayilari, tum imzalayan/alici adreslerin bakiye+nonce'u,
+ dosyadaki HER belge hash'inin ve HER kurum imzalayaninin turetilmis kaydi)
+Kurum dogrulama geriye uyum kontrolu (ayni kopya ile):
+  MAINNET_REPLAY_DOSYA=/tmp/kopya.log CARGO_TARGET_DIR=/root/aidag-build \
+    cargo test --release -p lsc-net --test mainnet_kurum_dogrulama_ozet -- --ignored --nocapture
 
 ## TARIHCE (eski notlar — guncel durumu yansitmaz)
 

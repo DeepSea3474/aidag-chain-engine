@@ -310,6 +310,20 @@ pub fn avm_calistir(
     data: &[u8],
     zaman: u64,
 ) -> Result<AvmSonuc, &'static str> {
+    avm_calistir_rwa(db, gonderen, hedef, deger, data, zaman, None)
+}
+
+/// `avm_calistir` + RWA precompile gorunumu. `rwa = None` -> yalniz Ethereum
+/// precompile'lari (mainnet'te RWA kapaliyken HER ZAMAN None).
+pub fn avm_calistir_rwa(
+    db: &mut AidagDatabase,
+    gonderen: &[u8; 20],
+    hedef: &[u8; 20],
+    deger: crate::registry::Tutar,
+    data: &[u8],
+    zaman: u64,
+    rwa: Option<crate::rwa_precompile::RwaGorunum<'_>>,
+) -> Result<AvmSonuc, &'static str> {
     use revm::context::TxEnv;
     use revm::primitives::{Bytes, TxKind};
     use revm::{Context, ExecuteCommitEvm, MainBuilder, MainContext};
@@ -327,13 +341,10 @@ pub fn avm_calistir(
     // sonra okunamaz -> ONCE oku.
     let o_nonce = db.nonce_oku(gonderen);
 
-    // DETERMINIZM: blok timestamp'ini vertex zamanina sabitle.
-    let mut ctx = Context::mainnet().with_db(std::mem::replace(db, AidagDatabase::yeni()));
-    ctx.modify_block(|b| {
-        b.timestamp = U256::from(zaman);
-    });
-    let mut evm = ctx.build_mainnet();
-
+    // DENETIM K-03: tx, db EVM'e TASINMADAN once kurulur. Eskiden build hatasi da
+    // transact_commit hatasi da `?` ile db'yi GERI ALMADAN donuyordu -> self.avm_db
+    // bos kaliyordu (tum kontrat kodu/storage silinir; ornek: initcode sinirini asan
+    // deploy). Artik db her durumda geri alinir.
     let tx = TxEnv::builder()
         .caller(adres_to_evm(gonderen))
         .nonce(o_nonce)
@@ -345,13 +356,24 @@ pub fn avm_calistir(
         .build()
         .map_err(|_| "tx olusturulamadi")?;
 
-    let sonuc = evm
-        .transact_commit(tx)
-        .map_err(|_| "revm calistirilamadi")?;
+    // DETERMINIZM: blok timestamp'ini vertex zamanina sabitle.
+    let mut ctx = Context::mainnet().with_db(std::mem::replace(db, AidagDatabase::yeni()));
+    ctx.modify_block(|b| {
+        b.timestamp = U256::from(zaman);
+    });
+    let evm = ctx.build_mainnet();
+    let eth = evm.precompiles.clone();
+    let mut evm =
+        evm.with_precompiles(crate::rwa_precompile::AidagPrecompiles::new(eth, rwa));
 
-    // db'yi geri al: evm.ctx uzerinden db_mut() ile eris, mem::replace ile cikar.
+    let sonuc = evm.transact_commit(tx);
+
+    // db'yi geri al (BASARI VE HATA yolunda): evm.ctx uzerinden db_mut() ile eris.
+    // Dogrulama hatasinda revm state'e yazmaz -> geri alinan db islem oncesiyle ayni.
     use revm::context_interface::ContextTr;
     *db = std::mem::replace(evm.ctx.db_mut(), AidagDatabase::yeni());
+
+    let sonuc = sonuc.map_err(|_| "revm calistirilamadi")?;
 
     let basarili = sonuc.is_success();
     let gas_used = sonuc.tx_gas_used();
@@ -379,6 +401,17 @@ pub fn avm_call_oku(
     hedef: &[u8; 20],
     data: &[u8],
 ) -> Result<Vec<u8>, &'static str> {
+    avm_call_oku_rwa(db, gonderen, hedef, data, None)
+}
+
+/// `avm_call_oku` + RWA precompile gorunumu (eth_call ile oracle/KYC okunabilsin).
+pub fn avm_call_oku_rwa(
+    db: &AidagDatabase,
+    gonderen: &[u8; 20],
+    hedef: &[u8; 20],
+    data: &[u8],
+    rwa: Option<crate::rwa_precompile::RwaGorunum<'_>>,
+) -> Result<Vec<u8>, &'static str> {
     use revm::context::TxEnv;
     use revm::primitives::{Bytes, TxKind};
     use revm::{Context, ExecuteEvm, MainBuilder, MainContext};
@@ -386,7 +419,10 @@ pub fn avm_call_oku(
     // OKUMA-ONLY: db'nin KOPYASI uzerinde calis (gercek state degismez).
     let db_kopya = db.clone();
     let ctx = Context::mainnet().with_db(db_kopya);
-    let mut evm = ctx.build_mainnet();
+    let evm = ctx.build_mainnet();
+    let eth = evm.precompiles.clone();
+    let mut evm =
+        evm.with_precompiles(crate::rwa_precompile::AidagPrecompiles::new(eth, rwa));
 
     let tx = TxEnv::builder()
         .caller(adres_to_evm(gonderen))
@@ -428,14 +464,36 @@ pub fn eth_tx_hash(raw: &[u8]) -> [u8; 32] {
     keccak256(raw).into()
 }
 
-pub fn ham_eth_tx_coz(raw: &[u8]) -> Result<HamEthIslem, &'static str> {
+/// DENETIM K-06: bir AIDAG agi (network_id) icin EVM chain id'si.
+/// Mainnet = 3474 (MetaMask/cuzdan ayari degismez). Diger aglar mainnet'ten
+/// FARKLI ve Ethereum'un bilinen chain id'leriyle cakismayan bir alanda:
+/// 34_740_000 + network_id. Boylece testnet imzasi mainnet'te, Ethereum/BSC
+/// imzasi AIDAG'da tekrar oynatilamaz.
+pub fn evm_chain_id(network_id: u32) -> u64 {
+    if network_id == crate::mainnet::MAINNET_NETWORK_ID {
+        crate::mainnet::MAINNET_NETWORK_ID as u64
+    } else {
+        34_740_000 + network_id as u64
+    }
+}
+
+/// Ham eth tx'i coz + gondereni kurtar. DENETIM K-06: tx'in chain id'si
+/// `beklenen_chain_id` ile AYNI olmali; chain id'siz (EIP-155 oncesi legacy) tx
+/// REDDEDILIR. Gonderen `recover_signer` ile (EIP-2 low-S zorunlu) kurtarilir ->
+/// ayni tx'in ikinci (high-S) bir tx_hash'i olamaz.
+pub fn ham_eth_tx_coz(raw: &[u8], beklenen_chain_id: u64) -> Result<HamEthIslem, &'static str> {
     use alloy_consensus::transaction::{SignerRecoverable, Transaction};
     use alloy_consensus::TxEnvelope;
     use alloy_eips::eip2718::Decodable2718;
 
     let zarf = TxEnvelope::decode_2718(&mut &raw[..]).map_err(|_| "raw tx cozulemedi (RLP)")?;
+    match zarf.chain_id() {
+        Some(c) if c == beklenen_chain_id => {}
+        Some(_) => return Err("yanlis chain id (baska aga imzalanmis tx)"),
+        None => return Err("chain id'siz (EIP-155 oncesi) tx kabul edilmez"),
+    }
     let gonderen_addr = zarf
-        .recover_signer_unchecked()
+        .recover_signer()
         .map_err(|_| "imzadan gonderen kurtarilamadi")?;
     let gonderen = evm_to_adres(&gonderen_addr);
 
@@ -465,18 +523,31 @@ pub fn ham_eth_tx_isle(
     db: &mut AidagDatabase,
     raw: &[u8],
     zaman: u64,
+    beklenen_chain_id: u64,
+) -> Result<([u8; 32], AvmSonuc), &'static str> {
+    ham_eth_tx_isle_rwa(db, raw, zaman, beklenen_chain_id, None)
+}
+
+/// `ham_eth_tx_isle` + RWA precompile gorunumu.
+pub fn ham_eth_tx_isle_rwa(
+    db: &mut AidagDatabase,
+    raw: &[u8],
+    zaman: u64,
+    beklenen_chain_id: u64,
+    rwa: Option<crate::rwa_precompile::RwaGorunum<'_>>,
 ) -> Result<([u8; 32], AvmSonuc), &'static str> {
     use revm::primitives::keccak256;
 
-    // 1) Coz + gonderen kurtar (imzadan)
-    let islem = ham_eth_tx_coz(raw)?;
+    // 1) Coz + gonderen kurtar (imzadan) + chain id kapisi (DENETIM K-06)
+    let islem = ham_eth_tx_coz(raw, beklenen_chain_id)?;
 
     // 2) tx hash = keccak256(raw bytes) - Ethereum standardi
     let tx_hash: [u8; 32] = keccak256(raw).into();
 
     // 3) AVM'de calistir: hedef None -> deploy, dolu -> call
     let hedef = islem.hedef.unwrap_or([0u8; 20]);
-    let sonuc = avm_calistir(db, &islem.gonderen, &hedef, islem.deger, &islem.veri, zaman)?;
+    let sonuc =
+        avm_calistir_rwa(db, &islem.gonderen, &hedef, islem.deger, &islem.veri, zaman, rwa)?;
 
     Ok((tx_hash, sonuc))
 }
@@ -1311,7 +1382,7 @@ mod tests {
         println!("Raw tx uzunluk: {} bayt", raw.len());
 
         // COZ
-        let cozulmus = ham_eth_tx_coz(&raw).expect("ham tx cozulmeli");
+        let cozulmus = ham_eth_tx_coz(&raw, 3474).expect("ham tx cozulmeli");
         println!("Cozulen gonderen: 0x{}", hex_encode(&cozulmus.gonderen));
         println!(
             "Cozulen hedef: {:?}",
@@ -1389,7 +1460,7 @@ mod tests {
         let raw = zarf.encoded_2718();
 
         // ISLE (coz + AVM'de calistir)
-        let (tx_hash, sonuc) = ham_eth_tx_isle(&mut db, &raw, 200).expect("isle");
+        let (tx_hash, sonuc) = ham_eth_tx_isle(&mut db, &raw, 200, 3474).expect("isle");
         println!(
             "ISLE testi: tx_hash=0x{} basarili={}",
             hex_encode(&tx_hash),

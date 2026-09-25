@@ -38,9 +38,18 @@ pub const MAINNET_GENESIS_PAYLOAD: &[u8] = b"AIDAG-MAINNET-GENESIS-v1";
 /// CEKEMEZ (on-satis tahsisleri bekler, claim 0 doner). **SABIT** olmali:
 /// `SystemTime::now()` kullanilirsa her dugum farkli kilit takvimi hesaplar →
 /// bakiye/transfer gecerliligi ayrisir (konsensus bolunmesi). Bu yuzden koda
-/// pinli. Referans: 2026-08-26 00:00:00 UTC (on-satis penceresinden ~1 ay sonra;
-/// bkz. ON_SATIS_BASLANGIC). GERCEK LAUNCH'ta bu deger guncellenip yeniden derlenir.
-pub const MAINNET_VESTING_BASLANGIC: u64 = 1_790_467_200;
+/// pinli.
+///
+/// DEGER: 4_102_444_800 = 2100-01-01 00:00:00 UTC = `TGE_BELIRSIZ` ("TGE henuz
+/// belirlenmedi"). Genesis dilimlerinin kilidi, on satis claim'inin ertelendigi
+/// ayni uzak tarihe baglidir: ekip dilimleri, on satis alicilari claim edemezken
+/// acilmaz (ekip ile yatirimci arasinda simetri). Gercek tarih ortaklik kurulunca
+/// belirlenecek; bkz. KARARLAR.md (K-16).
+///
+/// GECMIS: 1_790_467_200 (2026-09-27 00:00 UTC) idi; yanindaki yorum hatali olarak
+/// "2026-08-26" diyordu. 2026-09-24'te, bu tarih gelmeden (hicbir genesis dilimi
+/// acilmadan) 2100'e alindi -> gecmis durum degismez (mainnet replay ozeti ayni).
+pub const MAINNET_VESTING_BASLANGIC: u64 = TGE_BELIRSIZ;
 
 // === Asagidaki degerler `uret_mainnet_genesis` ciktisiyla doldurulur ===
 
@@ -373,3 +382,47 @@ pub const TGE_MIN_BILDIRIM_SURESI: u64 = 3 * 86_400;
 /// tarih olarak DEGIL "belirlenmedi" olarak gosterir. Karar alininca owner gercek
 /// tarihi (>= simdi + bildirim) ayarlar.
 pub const TGE_BELIRSIZ: u64 = 4_102_444_800;
+
+/// RWA (oracle + KYC, tip=17..20) MAINNET AKTIVASYON zincir saati. Bu saatten ONCE
+/// mainnet'te tip=17..20 vertex'leri ETKISIZDIR (bugun bilinmeyen tip gibi yok
+/// sayilir) -> mevcut mainnet gecmisinin yeniden oynatilmasi DEGISMEZ.
+/// None = KAPALI (karar verilmedi). Acmak mainnet-etkili bir karardir: tum
+/// dugumlerde ayni surum + gelecekteki bir tarih (Some(t)) ile ayri PR'da ayarlanir.
+/// Devnet/testnet'te (mainnet=false) RWA her zaman aciktir.
+pub const RWA_MAINNET_AKTIVASYON: Option<u64> = None;
+
+/// RWA ROL BILDIRIM SURESI: M-of-N yonetimin tip=17 ile verdigi rol, zincir
+/// saatinden bu kadar SONRA yururluge girer (TGE_MIN_BILDIRIM_SURESI ile ayni ilke:
+/// ele gecen imzaci anahtarlari "hemen" raporlayici/onaylayici atayamaz, her atama
+/// zincirde onceden gorunur). Rol GERI ALMA aninda etkilidir (guvenlik yonu).
+pub const RWA_ROL_BILDIRIM_SURESI: u64 = 3 * 86_400;
+
+/// RWA YASAKLI IMZALAYANLAR: bu adreslere rol VERILEMEZ ve bu adreslerin imzaladigi
+/// oracle raporu / KYC kaydi YOK SAYILIR. Owner (kurucu) her zaman ayrica yasaklidir
+/// (node.rs). Buraya KUBRA (soulware-core) imza adresi eklenmelidir: yapay zeka bu
+/// modullerde imza/yazma yetkisine SAHIP DEGILDIR. Adres ACIK bilgidir
+/// (soulware-core acilisinda "imzalayan : 0x..." satiri) — ozel anahtar gerekmez.
+pub const RWA_YASAKLI_ADRESLER: &[[u8; 20]] = &[KUBRA_IMZA_ADRESI];
+
+/// KUBRA (soulware-core / soulware-kubra servisi) zincir imza adresi:
+/// 0x1f4b6bc66533f80f76c0823d5553b1456653d747. Kaynak: servis gunlugundeki
+/// "imzalayan : 0x..." satiri (soulware-core main.rs: public_key_to_adres ile
+/// turetilir, konsensusle AYNI turetim). Yalniz ACIK adres; ozel anahtar DEGIL.
+/// ANAHTAR ROTASYONU: KUBRA anahtari degisirse bu sabit yeni adresle guncellenir,
+/// ESKI adres ayri sabit olarak RWA_YASAKLI_ADRESLER'de KALIR (cikarilmaz).
+/// Prosedur: BAKIM-REHBERI.md bolum 8.
+pub const KUBRA_IMZA_ADRESI: [u8; 20] = [
+    0x1f, 0x4b, 0x6b, 0xc6, 0x65, 0x33, 0xf8, 0x0f, 0x76, 0xc0, 0x82, 0x3d, 0x55, 0x53, 0xb1, 0x45,
+    0x66, 0x53, 0xd7, 0x47,
+];
+
+/// RWA YONETIM (M-of-N) MAINNET IMZACILARI: ed25519 ACIK anahtarlari (32 bayt).
+/// Rol verme/iptal, imzaci ve esik degisikligi YALNIZ bu kumenin esik kadar
+/// imzasiyla (tip=17) yapilir; owner tek anahtarla rol VEREMEZ. Ozel anahtarlar
+/// sunucuda TUTULMAZ, imzalar cevrimdisi uretilir. BOS = yonetim kurulmamis ->
+/// mainnet'te hicbir rol islemi gecmez. Pinlemek mainnet-etkili karardir
+/// (ayri PR + onay); kurulum genesis'e DEGIL baslangic durumuna yazilir.
+pub const RWA_YONETIM_IMZACILARI: &[[u8; 32]] = &[];
+
+/// RWA yonetim baslangic esigi (M). Baslangic: 2-of-3.
+pub const RWA_YONETIM_BASLANGIC_ESIK: u8 = 2;

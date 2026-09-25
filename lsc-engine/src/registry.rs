@@ -13,7 +13,7 @@
 pub type Tutar = u128;
 
 use crate::tx::{StakeKaydi, TokenKaydi};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// Bir ed25519 public key'den (32 bayt) KANONIK ADRES (20 bayt) turet.
 /// Yontem: blake3(public_key)'in ilk 20 bayti. Hem STAKE hem TOKEN KAYDI ayni
@@ -345,6 +345,44 @@ impl BakiyeRegistry {
         self.bakiyeler = kaynak.clone();
     }
 
+    /// Bir adresin su an harcanabilir (vesting kilidi dusulmus) bakiyesi.
+    pub fn harcanabilir(&self, adres: &[u8; 20]) -> Tutar {
+        self.bakiye(adres)
+            .saturating_sub(self.vesting_kilitli(adres, self.simdi_zaman))
+    }
+
+    /// DENETIM K-04: EVM'e verilecek AIDAG gorunumu = HARCANABILIR bakiyeler.
+    /// Eskiden EVM ham bakiyeyi goruyordu ve sonuc deftere aynen yaziliyordu ->
+    /// kilitli AIDAG tip=9/tip=12 ile tasinabiliyordu. Kilitli kisim EVM'e hic
+    /// verilmez; `evm_sonucunu_aynala` geri eklerken toplam arz korunur.
+    pub fn evm_gorunumu(&self) -> HashMap<[u8; 20], Tutar> {
+        let mut g = self.bakiyeler.clone();
+        for adres in self.vesting.keys() {
+            if let Some(b) = g.get_mut(adres) {
+                let kilit = self.vesting_kilitli(adres, self.simdi_zaman).min(*b);
+                *b -= kilit;
+            }
+        }
+        g
+    }
+
+    /// DENETIM K-04: EVM sonucunu deftere aynala; `evm_gorunumu`nde dusulen kilitli
+    /// kisim her hesaba AYNEN geri eklenir. Kilit zaman icinde degismedigi (ayni
+    /// `simdi_zaman`) icin sum(sonuc) == onceki toplam arz.
+    pub fn evm_sonucunu_aynala(&mut self, kaynak: &HashMap<[u8; 20], Tutar>) {
+        let mut yeni = kaynak.clone();
+        for adres in self.vesting.keys() {
+            let kilit = self
+                .vesting_kilitli(adres, self.simdi_zaman)
+                .min(self.bakiye(adres));
+            if kilit > 0 {
+                let b = yeni.entry(*adres).or_insert(0);
+                *b = b.saturating_add(kilit);
+            }
+        }
+        self.bakiyeler = yeni;
+    }
+
     /// Defterdeki toplam serbest AIDAG (arz denetimi/test icin).
     pub fn toplam_arz(&self) -> Tutar {
         self.bakiyeler.values().copied().sum()
@@ -452,13 +490,122 @@ pub struct KurumKaydi {
 #[derive(Debug, Default)]
 pub struct KurumRegistry {
     kayitlar: HashMap<[u8; 20], KurumKaydi>,
+    /// RWA YETKI KATMANI: (kurum, rol, kapsam) -> rol kaydi. Kurum kaydi herkese
+    /// acik (kendi kendine kayit); YETKI ise yalniz tip=17 ile verilir. BTreeMap:
+    /// gezinme sirasi tum dugumlerde ayni (deterministik).
+    yetkiler: BTreeMap<([u8; 20], u8, u32), RolKaydi>,
+    /// KURUM DOGRULAMA (yalniz M-of-N yonetim, tip=17): kurum -> son durum.
+    /// GOSTERIM bilgisidir: kurum/belge kayitlarini silmez, reddetmez; kaydi
+    /// olmayan kurum "dogrulanmamis" sayilir (geriye uyum).
+    dogrulamalar: BTreeMap<[u8; 20], KurumDogrulama>,
+}
+
+/// Bir kurumun dogrulama durumu (son degisiklik).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KurumDogrulama {
+    pub dogrulanmis: bool,
+    /// Son degisikligin zincir saati.
+    pub zaman: u64,
+}
+
+/// Bir kurumun bir roldeki durumu. Rol, `etkin` zincir saatinden itibaren ve
+/// `iptal` olmadikca AKTIFTIR.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RolKaydi {
+    /// Rolun yururluge girdigi zincir saati (verilis + bildirim suresi).
+    pub etkin: u64,
+    /// Rolun geri alindigi zincir saati (None = aktif/bekliyor).
+    pub iptal: Option<u64>,
 }
 
 impl KurumRegistry {
     pub fn yeni() -> Self {
         KurumRegistry {
             kayitlar: HashMap::new(),
+            yetkiler: BTreeMap::new(),
+            dogrulamalar: BTreeMap::new(),
         }
+    }
+
+    /// Kurum dogrulama bayragini ayarla. Yalniz KAYITLI kurum (dogrulanan kimlik =
+    /// ilk kayitta sabitlenen ad + kategori). Durum ayniysa DOKUNULMAZ.
+    /// Donus: true = durum degisti.
+    pub fn dogrulama_ayarla(&mut self, kurum: [u8; 20], dogrulanmis: bool, zaman: u64) -> bool {
+        if !self.kayitlar.contains_key(&kurum) {
+            return false;
+        }
+        if self.dogrulamalar.get(&kurum).map(|d| d.dogrulanmis) == Some(dogrulanmis) {
+            return false;
+        }
+        if !dogrulanmis && !self.dogrulamalar.contains_key(&kurum) {
+            return false; // hic dogrulanmamis kurumdan kaldirilacak bir sey yok
+        }
+        self.dogrulamalar.insert(kurum, KurumDogrulama { dogrulanmis, zaman });
+        true
+    }
+
+    /// Kurumun dogrulama kaydi (hic islem gormediyse None = dogrulanmamis).
+    pub fn dogrulama(&self, kurum: &[u8; 20]) -> Option<KurumDogrulama> {
+        self.dogrulamalar.get(kurum).copied()
+    }
+
+    /// Kurum SU AN dogrulanmis mi?
+    pub fn dogrulanmis_mi(&self, kurum: &[u8; 20]) -> bool {
+        self.dogrulamalar.get(kurum).is_some_and(|d| d.dogrulanmis)
+    }
+
+    /// Kuruma rol ver; `etkin` zincir saatinden itibaren gecerli. Kurum
+    /// KurumRegistry'de KAYITLI olmali (kayitsiz adrese rol verilmez).
+    /// Rol zaten verilmis ve iptal edilmemisse DOKUNULMAZ (bekleme suresi
+    /// tekrar tekrar uzatilamaz/kisaltilamaz). Iptalden sonra yeniden verilebilir.
+    /// Donus: true = rol kaydi olusturuldu/yenilendi.
+    pub fn rol_ver(&mut self, kurum: [u8; 20], rol: u8, kapsam: u32, etkin: u64) -> bool {
+        if !self.kayitlar.contains_key(&kurum) {
+            return false;
+        }
+        let anahtar = (kurum, rol, kapsam);
+        if matches!(self.yetkiler.get(&anahtar), Some(k) if k.iptal.is_none()) {
+            return false;
+        }
+        self.yetkiler.insert(anahtar, RolKaydi { etkin, iptal: None });
+        true
+    }
+
+    /// Rolu geri al (ANINDA). Donus: true = aktif/bekleyen rol iptal edildi.
+    pub fn rol_al(&mut self, kurum: [u8; 20], rol: u8, kapsam: u32, zaman: u64) -> bool {
+        match self.yetkiler.get_mut(&(kurum, rol, kapsam)) {
+            Some(k) if k.iptal.is_none() => {
+                k.iptal = Some(zaman);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Kurum bu rolde `simdi` (zincir saati) itibariyla aktif mi?
+    pub fn rol_aktif_mi(&self, kurum: &[u8; 20], rol: u8, kapsam: u32, simdi: u64) -> bool {
+        matches!(
+            self.yetkiler.get(&(*kurum, rol, kapsam)),
+            Some(k) if k.iptal.is_none() && simdi >= k.etkin
+        )
+    }
+
+    /// Bir kurumun tum rol kayitlari: (rol, kapsam, kayit), sirali.
+    pub fn roller(&self, kurum: &[u8; 20]) -> Vec<(u8, u32, RolKaydi)> {
+        self.yetkiler
+            .range((*kurum, 0, 0)..=(*kurum, u8::MAX, u32::MAX))
+            .map(|((_, r, k), v)| (*r, *k, *v))
+            .collect()
+    }
+
+    /// Bu (rol, kapsam) icin `simdi` itibariyla aktif kurum sayisi (oracle N).
+    pub fn aktif_rol_sayisi(&self, rol: u8, kapsam: u32, simdi: u64) -> usize {
+        self.yetkiler
+            .iter()
+            .filter(|((_, r, k), v)| {
+                *r == rol && *k == kapsam && v.iptal.is_none() && simdi >= v.etkin
+            })
+            .count()
     }
 
     /// Kurum/firma kaydet: adres -> (ad, kategori, zaman). ILK KAYIT KAZANIR;
