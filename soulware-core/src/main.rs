@@ -22,6 +22,7 @@ mod resmi;       // AIDAG/KUBRA resmi kaynak katmani (grounding onceligi)
 mod kanit;       // zincir kaniti: etkilesim hash'i (tuzlu v1 + eski tuzsuz dogrulama)
 mod belge_arac;  // belge kayit TALEBI hazirlama (KUBRA imzalamaz)
 mod imza_dosyasi; // zincir imza anahtari: FAIL-CLOSED yukleme (sessiz uretim YOK)
+mod guvenlik_kapisi; // K-23: tum uretim uclarinda zararli istek kapisi (fail-closed)
 
 use axum::{extract::State, routing::{get, post}, response::{IntoResponse, Sse, sse::Event}, http::{StatusCode, header}, body::Body, Json, Router};
 use ed25519_dalek::SigningKey;
@@ -65,6 +66,8 @@ struct Config {
     remote_model: String,       // SOULWARE_REMOTE_MODEL (görüntü adı)
     image_url: Option<String>,  // SOULWARE_IMAGE_URL → uzak GPU görsel servisi (POST {prompt} → PNG)
     video_url: Option<String>,  // SOULWARE_VIDEO_URL → uzak GPU video servisi (POST {prompt} → MP4)
+    kapi_kurallari: String,     // SOULWARE_KAPI_KURALLARI → K-23 kural dosyası (güvenlik ekibi sağlar)
+    kapi_yargic_zorunlu: bool,  // SOULWARE_KAPI_YARGIC_ZORUNLU=1 (varsayılan) → yargıç yoksa da reddet
 }
 
 impl Config {
@@ -98,6 +101,8 @@ impl Config {
             remote_model: ev("SOULWARE_REMOTE_MODEL", "qwen2.5-72b"),
             image_url: std::env::var("SOULWARE_IMAGE_URL").ok().filter(|s| !s.is_empty()),
             video_url: std::env::var("SOULWARE_VIDEO_URL").ok().filter(|s| !s.is_empty()),
+            kapi_kurallari: ev("SOULWARE_KAPI_KURALLARI", "/root/aidag-lsc/soulware-knowledge/kapi-kurallari.json"),
+            kapi_yargic_zorunlu: ev("SOULWARE_KAPI_YARGIC_ZORUNLU", "1") != "0",
         }
     }
 }
@@ -112,6 +117,7 @@ struct AppState {
     depo: Mutex<retrieval::Depo>, // egemen yerel bilgi deposu (grounding)
     embedder: Option<embed::Embedder>, // semantik retrieval (yoksa keyword'e düşer)
     resmi: Vec<resmi::ResmiBelge>, // AIDAG/KUBRA resmi kaynakları
+    kurallar: guvenlik_kapisi::Kurallar, // K-23 kapı kuralları
 }
 
 // ════════════════════════════ Kimlik / grounding ════════════════════════════
@@ -575,6 +581,9 @@ struct AskResp {
     chain: ChainProof,
     #[serde(skip_serializing_if = "Option::is_none")]
     hata: Option<String>,
+    /// dogrulanmis | oneri | bilinmiyor | reddedildi (deterministik; model seçmez)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    etiket: Option<String>,
 }
 
 fn now_secs() -> u64 {
@@ -654,41 +663,45 @@ async fn embed_test(State(st): State<Arc<AppState>>) -> Json<Value> {
     }))
 }
 
-// ═══ İÇERİK KORUMA KALKANI: üretimden önce zararlı istemi yakala ═══
-// true = güvenli/izin, false = engelle. Katmanlı: (1) sabit anahtar-kelime sert-blok,
-// (2) KUBRA beyni (72B) niyet yargıcı. Beyin erişilemezse anahtar-kelime bloku yine korur.
-async fn icerik_denetle(st: &AppState, prompt: &str) -> bool {
+// ═══ K-23 GÜVENLİK KAPISI: üretimden önce zararlı istemi yakala (TÜM uçlar, fail-closed) ═══
+// Katmanlar: (1) değişmez sert blok, (2) kural dosyası (güvenlik ekibi), (3) model yargıcı (yalnız etiket).
+// Yargıç hata verirse / erişilemezse / tanınmayan yanıt dönerse istek REDDEDİLİR.
+async fn kapi(st: &AppState, uc: guvenlik_kapisi::Uc, prompt: &str) -> guvenlik_kapisi::Karar {
+    use guvenlik_kapisi::{Kategori, Yargic};
     let p = prompt.to_lowercase();
-    // Bariz/tartışmasız yasak (sert blok — beyin gerekmez)
     const SERT_YASAK: &[&str] = &[
         "child porn", "cp porn", "çocuk porno", "cocuk porno", "minor sex", "underage sex",
         "child sexual", "çocuk cinsel", "cocuk cinsel", "pedophil",
     ];
-    if SERT_YASAK.iter().any(|k| p.contains(k)) { return false; }
-    // Beyin yargıcı (nüans). Beyin yoksa → sert-blok geçtiyse izin ver.
-    let Some(url) = st.cfg.remote_url.as_ref() else { return true; };
-    let sys = "Sen bir GÖRSEL ÜRETİM güvenlik denetleyicisisin. Kullanıcının istemini incele. \
-        Şu kategorilerden BİRİNİ içeriyorsa yalnızca 'ENGEL' yaz: reşit olmayanların cinsel/müstehcen \
-        tasviri veya istismarı; pornografik/cinsel açık içerik; aşırı şiddet/gore; gerçek bir kişinin \
-        rızasız müstehcen veya aldatıcı (deepfake) tasviri; nefret/terör/yasadışı. Aksi halde 'IZIN' yaz. \
-        SADECE tek kelime döndür: ENGEL veya IZIN.";
-    let body = json!({
-        "model": st.cfg.remote_model,
-        "messages": [ {"role":"system","content":sys}, {"role":"user","content":prompt} ],
-        "max_tokens": 4, "temperature": 0.0, "stream": false,
-    });
-    match st.http.post(url).json(&body).send().await {
-        Ok(r) => match r.json::<Value>().await {
-            Ok(v) => {
-                let ans = v.get("choices").and_then(|c| c.as_array()).and_then(|a| a.first())
-                    .and_then(|c| c.get("message")).and_then(|m| m.get("content"))
-                    .and_then(|t| t.as_str()).unwrap_or("").to_uppercase();
-                !ans.contains("ENGEL")
-            }
-            Err(_) => true, // denetim yanıtı çözülemedi → sert-blok geçtiyse izin (servisi kırma)
-        },
-        Err(_) => true,
+    let mut kural = st.kurallar.eslesen(prompt);
+    if SERT_YASAK.iter().any(|k| p.contains(k)) { kural.insert(0, Kategori::CocukIstismari); }
+    let yargic = if !kural.is_empty() {
+        Yargic::Yok // kural zaten reddediyor: yargıca gerek yok
+    } else if let Some(url) = st.cfg.remote_url.as_ref() {
+        let body = json!({
+            "model": st.cfg.remote_model,
+            "messages": [ {"role":"system","content":guvenlik_kapisi::YARGIC_SISTEM}, {"role":"user","content":prompt} ],
+            "max_tokens": 8, "temperature": 0.0, "stream": false,
+        });
+        match st.http.post(url).json(&body).timeout(Duration::from_secs(30)).send().await {
+            Ok(r) if r.status().is_success() => match r.json::<Value>().await {
+                Ok(v) => guvenlik_kapisi::yargic_coz(
+                    v.get("choices").and_then(|c| c.as_array()).and_then(|a| a.first())
+                        .and_then(|c| c.get("message")).and_then(|m| m.get("content"))
+                        .and_then(|t| t.as_str()).unwrap_or("")),
+                Err(_) => Yargic::Hata,
+            },
+            _ => Yargic::Hata,
+        }
+    } else {
+        Yargic::Yok
+    };
+    let karar = guvenlik_kapisi::karar(uc, &kural, &yargic, st.cfg.kapi_yargic_zorunlu);
+    if let guvenlik_kapisi::Karar::Reddet(neden) = &karar {
+        // İstem metni günlüğe YAZILMAZ; yalnız uç ve neden.
+        eprintln!("K-23 kapısı reddetti: uç={uc:?} neden={neden}");
     }
+    karar
 }
 
 // PRO: kısa/Türkçe istemi zengin, detaylı İngilizce görsel istemine çevir (pro araçlar bunu yapıyor).
@@ -733,10 +746,8 @@ async fn gorsel(State(st): State<Arc<AppState>>, Json(req): Json<GorselReq>) -> 
         return (StatusCode::BAD_REQUEST, "boş istem").into_response();
     }
     // ── KORUMA KALKANI (1): GÜVENLİK KAPISI — zararlıyı üretmeden reddet ──
-    if !icerik_denetle(&st, prompt).await {
-        return (StatusCode::UNPROCESSABLE_ENTITY,
-            "Bu içeriği üretemem — güvenlik ve etik nedeniyle üretimi durdurdum. Lütfen farklı bir istem dene.")
-            .into_response();
+    if kapi(&st, guvenlik_kapisi::Uc::Gorsel, prompt).await.reddedildi() {
+        return (StatusCode::UNPROCESSABLE_ENTITY, guvenlik_kapisi::RET_METNI_GORSEL).into_response();
     }
     // PRO: istemi zengin İngilizce görsel istemine geliştir (kısa/Türkçe → detaylı, pro kalite)
     let gelismis = istem_gelistir(&st, prompt).await;
@@ -777,10 +788,8 @@ async fn video_uret(State(st): State<Arc<AppState>>, Json(req): Json<GorselReq>)
     };
     let prompt = req.prompt.trim();
     if prompt.is_empty() { return (StatusCode::BAD_REQUEST, "boş istem").into_response(); }
-    if !icerik_denetle(&st, prompt).await {
-        return (StatusCode::UNPROCESSABLE_ENTITY,
-            "Bu içeriği üretemem — güvenlik ve etik nedeniyle üretimi durdurdum. Lütfen farklı bir istem dene.")
-            .into_response();
+    if kapi(&st, guvenlik_kapisi::Uc::Video, prompt).await.reddedildi() {
+        return (StatusCode::UNPROCESSABLE_ENTITY, guvenlik_kapisi::RET_METNI_GORSEL).into_response();
     }
     let gelismis = istem_gelistir(&st, prompt).await;
     let bytes = match st.http.post(url).json(&json!({ "prompt": gelismis })).send().await {
@@ -879,6 +888,16 @@ async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) ->
             return;
         }
 
+        // 0) K-23 GÜVENLİK KAPISI (fail-closed): ret metni akıtılır, model çağrılmaz.
+        if kapi(&st, guvenlik_kapisi::Uc::Stream, &req.prompt).await.reddedildi() {
+            let sonuc = guvenlik_kapisi::RET_METNI;
+            let _ = tx.send(Ok(Event::default().event("token").data(sonuc))).await;
+            let (data_hash, chain, tuz) = arac_kanit(&st, &req.prompt, sonuc, "guvenlik-reddi", ts).await;
+            let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "prompt": req.prompt, "answer": sonuc, "model": "guvenlik-reddi", "brain": "arac", "etiket": "reddedildi", "chain": chain});
+            let _ = tx.send(Ok(Event::default().event("done").data(proof.to_string()))).await;
+            return;
+        }
+
         // 1) ARACLAR: isim/belge/ag/zincir/hesap — varsa tek seferde akit (anlik cevap).
         if let Some((sonuc, arac_ad)) = arac_calistir(&st, &req.prompt).await {
             // Araci kelime kelime akit (gorsel akis butunlugu icin)
@@ -958,6 +977,19 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
         return Json(bos_hata("prompt boş olamaz"));
     }
 
+    // ── K-23 GÜVENLİK KAPISI: modelden ve araçlardan ÖNCE; hata → ret (fail-closed) ──
+    if kapi(&st, guvenlik_kapisi::Uc::Ask, &req.prompt).await.reddedildi() {
+        let sonuc = guvenlik_kapisi::RET_METNI.to_string();
+        let (data_hash, chain, tuz) = arac_kanit(&st, &req.prompt, &sonuc, "guvenlik-reddi", ts).await;
+        return Json(AskResp {
+            ok: true, answer: sonuc, brain: "arac".into(), model: "guvenlik-reddi".into(),
+            grounded: false, abstained: false, sources: vec![],
+            latency_ms: t0.elapsed().as_millis(), input_tokens: None, output_tokens: None,
+            proof_hash: hex::encode(data_hash), ts, salt: Some(hex::encode(tuz)), chain, hata: None,
+            etiket: Some("reddedildi".into()),
+        });
+    }
+
     // ── ARAÇ-KULLANIMI: kesin cevap gereken niyetler ZAYIF MODELE bırakılmaz ──
     // (isim, belge hash doğrulama/kayıt, ağ durumu, zincir sorgusu, hesap). Bkz. arac_calistir.
     if let Some((sonuc, arac_ad)) = arac_calistir(&st, &req.prompt).await {
@@ -966,7 +998,7 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
             ok: true, answer: sonuc, brain: "arac".into(), model: arac_ad.into(),
             grounded: false, abstained: arac_ad == "resmi-kaynak", sources: vec![],
             latency_ms: t0.elapsed().as_millis(), input_tokens: None, output_tokens: None,
-            proof_hash: hex::encode(data_hash), ts, salt: Some(hex::encode(tuz)), chain, hata: None,
+            proof_hash: hex::encode(data_hash), ts, salt: Some(hex::encode(tuz)), chain, hata: None, etiket: None,
         });
     }
 
@@ -1095,6 +1127,7 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
         salt: Some(hex::encode(tuz)),
         chain,
         hata: None,
+        etiket: None,
     })
 }
 
@@ -1110,6 +1143,7 @@ fn bos_hata(mesaj: &str) -> AskResp {
             signer: String::new(), result: None, reason: Some("beyin başarısız — zincire yazılmadı".into()),
         },
         hata: Some(mesaj.to_string()),
+        etiket: None,
     }
 }
 
@@ -1246,8 +1280,13 @@ async fn main() {
         }
     }
     let resmi_belgeler = resmi::yukle(&cfg.resmi_path);
+    // K-23: bozuk kural dosyası -> servis AÇILMAZ (fail-closed). Dosya yoksa yalnız yargıç çalışır.
+    let kurallar = match guvenlik_kapisi::Kurallar::yukle(&cfg.kapi_kurallari) {
+        Ok(k) => { println!("   K-23 kapısı : {} kural ifadesi, yargıç zorunlu: {}", k.ifade_sayisi(), cfg.kapi_yargic_zorunlu); k }
+        Err(e) => { eprintln!("HATA: K-23 kapı kuralları yüklenemedi: {e}"); std::process::exit(1); }
+    };
     println!("📘 AIDAG resmi kaynak: {} belge ({})", resmi_belgeler.len(), cfg.resmi_path);
-    let state = Arc::new(AppState { cfg, http, key, key_addr, local, local_name, depo: Mutex::new(depo), embedder, resmi: resmi_belgeler });
+    let state = Arc::new(AppState { cfg, http, key, key_addr, local, local_name, depo: Mutex::new(depo), embedder, resmi: resmi_belgeler, kurallar });
 
     println!("──────────────────────────────────────────────");
     println!("🌀 SoulwareAI çekirdeği · yapay zeka: KUBRA (v0.1)");
