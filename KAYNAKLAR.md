@@ -68,6 +68,8 @@ Durum kodları: **Bekliyor** · **Lisans kontrolünde** · **Eklendi** · **Redd
 
 ## 4 · Siber güvenlik
 
+**İlke:** KUBRA saldırı bilgisini yalnızca savunma için öğrenir: tespit, önleme, sertleştirme ve öncelik belirleme. Çalışır istismar kodu veya zararlı yazılım üretmez. Sızma testleri yetkili insan ekipler tarafından, yazılı izinle yapılır. (K-23)
+
 | Kaynak | Lisans (ilk tahmin) | Lisans (doğrulandı) | Öncelik | Durum |
 |---|---|---|---|---|
 | NIST Siber Güvenlik Çerçevesi (CSF 2.0) | ABD kamu yayını | ABD kamu eseri + NIST izni (CSWP kapsamı çıkarım, kısmen doğrulandı) | Yüksek | Bekliyor |
@@ -81,6 +83,11 @@ Durum kodları: **Bekliyor** · **Lisans kontrolünde** · **Eklendi** · **Redd
 | Güvenlik firmalarının herkese açık denetim raporları | Rapor bazında doğrulanacak | ⚠ **Ticari kullanım kısıtlı:** varsayılan telifli; rapor bazında (doğrulanmadı) | Orta | Bekliyor |
 | CIS Benchmarks | Ticari kullanım kısıtlı olabilir | ⚠ **Ticari kullanım kısıtlı:** CC BY-NC-SA 4.0; ticari kullanım CIS onayı/üyeliği gerektirir | — | Lisans kontrolünde |
 | IEC 62443 (endüstriyel siber güvenlik) | Telifli, ücretli | ⚠ **Ticari kullanım kısıtlı:** ücretli, telifli; ISA yapay zekâ araçlarına girişi açıkça yasaklıyor | — | Eklenmez, adıyla anılır |
+| MITRE D3FEND (savunma teknikleri bilgi tabanı) | — | MITRE Kullanım Şartları: telifsiz, ticari dahil; MITRE telif bildirimi ve lisans korunur (ontoloji deposu MIT). Not: altbilgideki DFARS "Noncommercial Computer Software" ibaresi şartlarla çelişiyor | Yüksek | Bekliyor |
+| MITRE CAPEC (saldırı örüntüleri) | — | MITRE Kullanım Şartları: telifsiz, ticari dahil; telif bildirimi korunur | Orta | Bekliyor |
+| MITRE CWE (yazılım zafiyet türleri) | — | MITRE Kullanım Şartları: telifsiz, ticari dahil; telif bildirimi korunur | Yüksek | Bekliyor |
+| CISA Bilinen İstismar Edilen Açıklar kataloğu (KEV) | — | CC0 1.0; CISA logosu ve DHS mührü kullanılamaz | Yüksek | Bekliyor |
+| Sigma tespit kuralları | — | Detection Rule License 1.1: ticari serbest; paylaşımda yazar, kural bağlantısı ve lisans belirtilir, kural çıktılarında (alarm) yazar alanı korunur. pySigma aracı LGPL-2.1 | Orta | Bekliyor |
 
 ## 5 · Yapay zekâ, araç kullanımı ve güvenli ajan tasarımı
 
@@ -157,6 +164,40 @@ Lisans doğrulaması: 26 Eylül 2026, resmî sayfalardan. Hiçbir kaynak KUBRA'y
 | PennyLane belgeleri | Apache-2.0 | Kütüphane ve demolar (PennyLaneAI/qml) Apache-2.0. pennylane.ai sitesi ve Codebook koşulları okunamadı (doğrulanmadı) | Orta | Bekliyor |
 | arXiv kuantum fiziği / kuantum hesaplama makaleleri | Makale bazında; yalnızca açık lisanslı (CC BY / CC0) olanların tam metni, diğerlerinin yalnızca özet ve künyesi | ⚠ **Ticari kullanım kısıtlı:** makale bazında. arXiv varsayılan lisansı yalnız arXiv'e dağıtım hakkı verir; NC ve ND lisanslılar kısıtlı. Metaveri CC0. API: 3 saniyede 1 istek | Orta | Bekliyor |
 | Nielsen & Chuang ve benzeri temel ders kitapları | Telifli | ⚠ **Ticari kullanım kısıtlı:** telifli (Cambridge University Press) (kısmen doğrulandı) | — | Eklenmez, adıyla anılır |
+
+## 10 · Programlama dilleri: Python ve C++
+
+**Araç notu:** KUBRA'nın kod çalıştırma aracı izole olacak; internete, anahtarlara ve canlı sistemlere erişemeyecek.
+
+Lisans doğrulaması: 26 Eylül 2026, resmî sayfalardan. Öncelikler öneridir. Hiçbir kaynak KUBRA'ya eklenmedi.
+
+### Python
+
+| Kaynak | Lisans (ilk tahmin) | Lisans (doğrulandı) | Öncelik | Durum |
+|---|---|---|---|---|
+| Python resmî belgeleri | — | PSF License v2; belgelerdeki örnek kodlar ayrıca 0BSD | Yüksek | Bekliyor |
+| PEP'ler (Python geliştirme önerileri) | — | Kamu malı veya CC0-1.0 (hangisi daha serbestse); eski PEP'lerde kendi telif bölümüne bakılır | Orta | Bekliyor |
+| Python Packaging User Guide | — | ◐ ShareAlike: CC BY-SA 3.0 | Orta | Bekliyor |
+| NumPy belgeleri | — | BSD-3-Clause | Orta | Bekliyor |
+| pandas belgeleri | — | BSD-3-Clause | Orta | Bekliyor |
+| pytest belgeleri | — | MIT | Orta | Bekliyor |
+
+### C++
+
+| Kaynak | Lisans (ilk tahmin) | Lisans (doğrulandı) | Öncelik | Durum |
+|---|---|---|---|---|
+| cppreference | — | ◐ ShareAlike: CC BY-SA 3.0 ve GFDL (değişmez bölümsüz) | Yüksek | Bekliyor |
+| C++ Core Guidelines | — | ⚠ **Ticari kullanım kısıtlı:** Standard C++ Foundation lisansı: yalnızca kişisel veya kurum içi kullanım | — | Lisans kontrolünde |
+| ISO C++ açık çalışma taslakları (WG21) | — | ⚠ **Ticari kullanım kısıtlı:** açık lisans yok, varsayılan olarak tüm hakları saklı; taslak deposunda ISO telif ibaresi (kısmen doğrulandı) | — | Lisans kontrolünde |
+| SEI CERT C++ Kodlama Standardı | — | Güncel sürüm CC BY 4.0, kod örnekleri MIT. Eski 2016 PDF baskısı harici/ticari kullanımda izne tabi; yalnızca güncel sürüm kullanılır | Yüksek | Bekliyor |
+| Google C++ Style Guide | — | CC BY 3.0 | Orta | Bekliyor |
+| CMake belgeleri | — | BSD-3-Clause (depo lisansı; belgeleri kapsadığı çıkarım) | Orta | Bekliyor |
+| GoogleTest belgeleri | — | BSD-3-Clause (depo lisansı; belgeleri kapsadığı çıkarım) | Orta | Bekliyor |
+| GCC belgeleri | — | ◐ ShareAlike: GFDL 1.3, değişmez bölüm ("Funding Free Software") ve kapak metinleriyle; dağıtımda bunlar değiştirilmeden eklenir | Orta | Bekliyor |
+| Clang/LLVM belgeleri | — | Apache-2.0 WITH LLVM-exception (depo lisansı; belgeleri kapsadığı çıkarım) | Orta | Bekliyor |
+| AUTOSAR C++14 yönergeleri | — | ⚠ **Ticari kullanım kısıtlı:** yalnızca bilgi amaçlı, değiştirmeden; ticari kullanım lisansa bağlı | — | Lisans kontrolünde |
+| ISO C++ standardı (ISO/IEC 14882) | Telifli, ücretli | ⚠ **Ticari kullanım kısıtlı:** ücretli; ISO lisansı yapay zekâ ve makine öğrenmesi kullanımını ayrı lisans olmadan yasaklıyor (kısmen doğrulandı) | — | Eklenmez, adıyla anılır |
+| MISRA C++ | Telifli, ücretli | ⚠ **Ticari kullanım kısıtlı:** ücretli, adlandırılmış tek kullanıcı lisansı (kısmen doğrulandı) | — | Eklenmez, adıyla anılır |
 
 ---
 
