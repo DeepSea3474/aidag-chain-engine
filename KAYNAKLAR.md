@@ -128,6 +128,36 @@ Durum kodları: **Bekliyor** · **Lisans kontrolünde** · **Eklendi** · **Redd
 | GHG Protocol standartları | Kullanım koşulları doğrulanacak | ⚠ **Ticari kullanım kısıtlı:** Kullanım Şartları: ticari, türev ve otomatik veri madenciliği yasak | Orta | Bekliyor |
 | ISO standartları (14064, 27001 vb.) | Telifli, ücretli | ⚠ **Ticari kullanım kısıtlı:** ücretli, telifli; ML/AI kullanımı ayrı lisans olmadan yasak (kısmen doğrulandı) | — | Eklenmez, adıyla anılır |
 
+## 9 · Kuantum hesaplama ve kuantum sonrası kriptografi
+
+Amaç: KUBRA'nın kuantum hesaplama ve kuantum sonrası güvenlik konusunda uzman danışman olması; kurumlar için "kuantum hazırlık değerlendirmesi" (kripto envanteri ve geçiş planı) yapabilmesi. Kuantum yapay zekâ kapsam dışıdır (K-22).
+
+Lisans doğrulaması: 26 Eylül 2026, resmî sayfalardan. Hiçbir kaynak KUBRA'ya eklenmedi.
+
+### Kuantum sonrası kriptografi
+
+| Kaynak | Lisans (ilk tahmin) | Lisans (doğrulandı) | Öncelik | Durum |
+|---|---|---|---|---|
+| NIST FIPS 203 / 204 / 205 (Kriptografi başlığında da var) | ABD kamu yayını | ABD kamu eseri + NIST telifsiz dünya çapında izin; "Republished courtesy of NIST" atfı, onay ima edilemez | Yüksek | Bekliyor |
+| NIST SP 800-208 (durum bilgili hash tabanlı imzalar) | ABD kamu yayını | ABD kamu eseri + NIST izni (aynı politika) | Orta | Bekliyor |
+| NIST IR 8547 (kuantum sonrası kriptografiye geçiş) | ABD kamu yayını | ABD kamu eseri + NIST izni. **Not:** hâlâ taslak (Initial Public Draft, Kasım 2024); içerik değişebilir | Yüksek | Bekliyor |
+| ABD CISA / NSA kuantum sonrası geçiş rehberleri (CNSA 2.0 dahil) | ABD kamu yayını | CISA: TLP:CLEAR, serbest paylaşım; logo ve onay ima edilemez. NSA: kamu malı, kaynak belirtilir (NSA sayfaları okunamadı; kısmen doğrulandı) | Orta | Bekliyor |
+| IETF hibrit anahtar değişimi ve kuantum sonrası imza belgeleri (RFC 8391 XMSS, RFC 8554 LMS, TLS hibrit tasarım taslakları) | IETF Trust koşulları, doğrulanacak | RFC 8391 / 8554 (IRTF-CFRG): atıfla sınırsız türev eser izni. IETF akışı RFC ve taslaklar: tam metin serbest, kod bileşenleri Simplified BSD, düzyazının türev yayını kısıtlı (TLP sayfası okunamadı; kısmen doğrulandı) | Yüksek | Bekliyor |
+| Open Quantum Safe (liboqs) belgeleri | MIT | MIT; alt bileşenler Apache-2.0, CC0, public domain, BSD (hepsi izin verici, bildirimler korunur) | Yüksek | Bekliyor |
+| Almanya BSI ve Fransa ANSSI kuantum sonrası geçiş önerileri | Kullanım koşulları doğrulanacak | ⚠ **Ticari kullanım kısıtlı:** BSI: indirilen yayınlar yalnız ticari olmayan amaçla, ticari kullanım BSI ön onayına bağlı. ANSSI: Licence ouverte, ancak ticari kullanım ANSSI ön iznine bağlı (sayfa altbilgisi "etalab-2.0" diyor; çelişki, yazılı teyit gerekli) | Orta | Bekliyor |
+| ETSI kuantum güvenli kriptografi raporları | Kullanım koşulları doğrulanacak | ⚠ **Ticari kullanım kısıtlı:** © ETSI, tüm hakları saklı; çoğaltma ve değiştirme yazılı izne bağlı (TR 103 619 okundu; GR QSC aynı varsayıldı, doğrulanmadı) | Orta | Bekliyor |
+
+### Kuantum hesaplama
+
+| Kaynak | Lisans (ilk tahmin) | Lisans (doğrulandı) | Öncelik | Durum |
+|---|---|---|---|---|
+| Qiskit belgeleri ve eğitim materyalleri | Apache-2.0 | ◐ ShareAlike: Qiskit/documentation: içerik (rehber, eğitim, kurs) CC BY-SA 4.0, kod Apache-2.0. IBM Quantum Learning platform koşulları okunamadı (doğrulanmadı) | Yüksek | Bekliyor |
+| Qiskit Aer simülatörü (araç olarak) | Apache-2.0 | Apache-2.0 | Yüksek | Bekliyor |
+| Cirq belgeleri | Apache-2.0 | Depo Apache-2.0; belge sitesi içeriği CC BY 4.0, kod örnekleri Apache-2.0 | Orta | Bekliyor |
+| PennyLane belgeleri | Apache-2.0 | Kütüphane ve demolar (PennyLaneAI/qml) Apache-2.0. pennylane.ai sitesi ve Codebook koşulları okunamadı (doğrulanmadı) | Orta | Bekliyor |
+| arXiv kuantum fiziği / kuantum hesaplama makaleleri | Makale bazında; yalnızca açık lisanslı (CC BY / CC0) olanların tam metni, diğerlerinin yalnızca özet ve künyesi | ⚠ **Ticari kullanım kısıtlı:** makale bazında. arXiv varsayılan lisansı yalnız arXiv'e dağıtım hakkı verir; NC ve ND lisanslılar kısıtlı. Metaveri CC0. API: 3 saniyede 1 istek | Orta | Bekliyor |
+| Nielsen & Chuang ve benzeri temel ders kitapları | Telifli | ⚠ **Ticari kullanım kısıtlı:** telifli (Cambridge University Press) (kısmen doğrulandı) | — | Eklenmez, adıyla anılır |
+
 ---
 
 ## Ekleme sırası
