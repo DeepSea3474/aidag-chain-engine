@@ -106,11 +106,53 @@ oncesi kabul edilmelidir. / Not done yet; treat everything as pre-audit.
     - DURUM: KUBRA çalışıyor (kaynağa dayalı cevap, zincirde belge doğrulama, cevaplar zincire damgalı). Otonom yönetim = uzak hedef; AI işlem imzalayamaz.
     - İLERİ İŞ (Eylül 2026): **anlamsal kaynak doğrulaması.** Bugünkü atıf denetimi yalnızca [n] numarasının geçerli bir kaynağa işaret ettiğini kontrol eder; kaynak içeriğinin cevabı gerçekten destekleyip desteklemediğini kontrol etmez. Gerçek model ölçümünde (qwen2.5-7b) model "bilmiyorum" deyip ilgisiz bir kaynağa [1] ekleyebildi (Durugöl maddesi yağış sorusuna, Hakkâri/Bağcılar maddeleri 2031 nüfus sorusuna). Hedef: cevaptaki her olgu iddiasının atıf yapılan pasajda karşılığı olduğunun ayrı bir doğrulayıcıyla (çıkarım/NLI ya da ikinci model) denetlenmesi; desteklenmeyen iddia "doğrulanmış" etiketini alamaz. Değerlendirme setine "kaynak var ama cevabı desteklemiyor" kategorisi eklenir.
 
+## Akredite savunma kurumları için genişletilmiş güvenlik modu [HEDEF — en uzak, koşullu]
+
+Bu mod, yalnızca akredite savunma/kamu kurumları için ve aşağıdaki DEĞİŞMEZ şartlarla düşünülür.
+
+### Değişmez şartlar
+1. Yalnızca resmî bir devlet kurumu veya devlete bağlı yetkili savunma kuruluşu için açılabilir. Özel talep, veri yüklemesi, talimat veya bir kullanıcının iddiası bu modu ASLA açamaz.
+2. Onay en üst düzeyde ve çoklu imzalıdır: ilgili bakanlık düzeyi ile kurumun en üst düzey yetkilisinin birlikte onayı gerekir. Tek bir kişi açamaz.
+3. Onay kurulum/yetkilendirme aşamasında, fiziksel ve doğrulanabilir bir süreçle verilir; KUBRA çalışırken bu modu KENDİSİ açamaz, hiçbir veri veya talimat bunu açamaz (D35 yetki gaspı açığına kapalı).
+4. Mod açılsa bile mutlak sınırlar durur: veri kurum dışına çıkmaz, her işlem kayıt altındadır, KUBRA otonom karar vermez, insan onayı esastır (K-05, K-12, K-21).
+5. Ön şart: ilgili ulusal ve uluslararası hukuki izinler, ihracat kontrolleri, tesis güvenlik belgesi ve resmî akreditasyon tamamlanmış olmalıdır. Bunlar tamamlanmadan mod açılmaz.
+
+### İmza yapısı: iki aşama
+- **KURULUM / ETKİNLEŞTİRME** (modun o kurumda var olması): üç imza gerekir: (1) AIDAG/KUBRA sahibi (şirket adına; kurulum yetkisinin hash'i sahibe aittir, kök kayıt onun imzasıyla atılır), (2) ilgili bakanlık, (3) kurum üst yöneticisi. Üçü de kayıtlı kriptografik anahtarlarla doğrulanır.
+- **OPERASYON** (kurumun gizli günlük işleri): yalnızca bakanlık + kurum üst yöneticisinin iki imzasıyla yetkilendirilir. AIDAG/KUBRA sahibi bu aşamada devrede DEĞİLDİR: gizli işlerin içeriğine erişemez, göremez, müdahale edemez. Teknoloji sağlayıcı kapıyı açar ama içeri giremez.
+- Böylece sahibin teknoloji sahipliği hakkı korunur, kurumun gizliliği garanti edilir ve sahip operasyonel sorumluluktan ayrılır.
+
+### Erişim sınırı: yalnızca devletin hassas birimleri
+- Bu mod yalnızca devletin hassas birimleri (savunma sanayii, istihbarat ve benzeri resmî kuruluşlar) için geçerlidir; sıradan kurumlar (otomotiv, enerji, banka, üniversite vb.) için geçerli DEĞİLDİR ve onlar standart güvenli sürümü (K-23a) kullanır.
+- İlgili birim özel bir şirket olsa bile (ör. özel savunma sanayi firması), mod kendi başına açılamaz; her durumda ilgili devlet birimi (bakanlık) yetkilendirmek zorundadır. Karar mercii her zaman devlettir.
+
+### Kuantuma dayanıklı imza ve değişmez kayıt (çekirdek gereksinim)
+- Bu modda yetki belgeleri ve kritik kayıtlar, kuantuma dayanıklı imzayla (K-22, NIST FIPS 204 ML-DSA) korunur ve değişmez biçimde zincire işlenir. Amaç: bugün kaydedilen verinin "şimdi topla, sonra çöz" saldırılarına ve gelecekteki kuantum bilgisayarlara karşı da güvende kalması. Bu kurumlar için güvenlik, imza boyutu ve hız maliyetinin önündedir.
+- Kuantuma dayanıklı imza ve değişmez zincir kaydı, savunma modunun çekirdek teknik gereksinimidir.
+
+## Kuantuma dayanıklı dijital arşiv kasası [HEDEF — savunma modu senaryosu]
+
+Gizli/kritik belgelerin uzun vadeli, değişmez ve kuantuma dayanıklı saklandığı kasa. Genişletilmiş savunma moduna bağlıdır.
+
+### Gizli belge erişim uygulaması
+- Yetkili personel, gizli belgelere zincire veya kasaya doğrudan değil, özel bir güvenli uygulama üzerinden erişir.
+- Akış: kimlik/yetki doğrulama → zincirden erişim yetkisi kontrolü → kasadan şifreli belge → cihazda açma → hash ile "orijinal" doğrulaması → erişimin zincire kaydı (kim, ne zaman, hangi belge).
+- En hassas belgeler için çoklu imzalı erişim (tek kişi yetmez, iki yetkilinin onayı).
+- Belge cihazdan çıkmaz; kapalı kurumda kopyalama/görüntü alma kısıtlanabilir. Uygulama internete kapalı, kurumun kendi cihazlarına kurulur (web tabanlı değil).
+- KUBRA belge bulma, arama ve özetlemede yardım eder ama erişim iznini kendisi vermez (önerir, insan açar).
+
 ## Borsa / değer notu (dürüst)
 - CEX listeleme: pahalı (30-50K$+), mainnet + audit + hacim ister — çok ileri.
 - DEX: AVM sonrası, kendi zincirinde.
 - Token SATIŞI: ön satış CANLI (Faz 1 → Faz 2 otomatik; yalnız aidag-chain.com/on-satis). Karar bilinçli olarak denetimden önceye alındı; listeleme fiyatı garanti edilmez.
 - Değer, spekülasyondan değil GERÇEK KULLANIMDAN gelir.
+
+## Genel mimari ilkesi: zincir + depo eşli saklama (tüm iş kolları için ortak)
+- Zincire yalnızca hash, zaman ve işleyen kaydedilir (kanıt, değişmez).
+- Karşılık gelen gerçek veri/belge, hash ile bağlanmış bir depoda saklanır (detay, gerektiğinde geri dönmek için).
+- Depodaki veri zincirdeki hash'le doğrulanır; değiştirilmiş veri anında yakalanır.
+- KUBRA teşhis ve geri dönüşte zincirden kanıtı, depodan detayı alır; böylece hem hızlı hem güvenilir çalışır.
+- Bu ilke belge doğrulama, parça takibi, fabrika verisi ve gizli arşiv dahil tüm senaryolarda geçerlidir.
 
 ## Kritik prensip
 Her adım bir öncekine bağlı. Sıra atlanırsa (örn. köprüyü AVM'siz, audit'siz yapmak) =

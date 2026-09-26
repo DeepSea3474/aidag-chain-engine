@@ -199,6 +199,38 @@ Lisans doğrulaması: 26 Eylül 2026, resmî sayfalardan. Öncelikler öneridir.
 | ISO C++ standardı (ISO/IEC 14882) | Telifli, ücretli | ⚠ **Ticari kullanım kısıtlı:** ücretli; ISO lisansı yapay zekâ ve makine öğrenmesi kullanımını ayrı lisans olmadan yasaklıyor (kısmen doğrulandı) | — | Eklenmez, adıyla anılır |
 | MISRA C++ | Telifli, ücretli | ⚠ **Ticari kullanım kısıtlı:** ücretli, adlandırılmış tek kullanıcı lisansı (kısmen doğrulandı) | — | Eklenmez, adıyla anılır |
 
+## 11 · Eğitim ve tanıtım içeriği üretimi
+
+**Amaç:** KUBRA'nın ürettiği video ve tanıtım içeriği slayt düzeyinde değil, profesyonel prodüksiyon kalitesinde (sinematik kurgu, akıcı geçişler, hareketli grafik, renk ve ses tasarımı) olacaktır. İçerik hem Türkçe hem İngilizce üretilebilecektir. Üretilen her içerik açıkça "yapay zekâ üretimi" olarak işaretlenir ve kaynağı zincire kaydedilir; gerçek kişiler taklit edilmez.
+
+Lisans doğrulaması: 26 Eylül 2026, resmî sayfalardan. Hiçbir kaynak KUBRA'ya eklenmedi.
+
+### Sinematik prodüksiyon ve hareketli grafik
+
+| Kaynak | Lisans (ilk tahmin) | Lisans (doğrulandı) | Öncelik | Durum |
+|---|---|---|---|---|
+| Blender (3D, hareketli grafik, kurgu) belgeleri | GPL, doğrulanacak | ◐ ShareAlike: Belgeler (Blender Manual) CC BY-SA 4.0; yazılım GPL-2.0-or-later. Blender ile üretilen görüntü ve videolar kullanıcıya aittir, GPL kapsamında değildir | Yüksek | Bekliyor |
+| Blender Video Sequence Editor belgeleri | GPL, doğrulanacak | ◐ ShareAlike: CC BY-SA 4.0 (Blender Manual'ın parçası); yazılım GPL-2.0-or-later | Orta | Bekliyor |
+| ffmpeg gelişmiş filtre, geçiş (xfade) ve renk belgeleri | LGPL/GPL, doğrulanacak | Yazılım LGPL-2.1-or-later; `--enable-gpl` ile derlenirse GPL-2.0-or-later, `--enable-nonfree` ile derlenen ikili dağıtılamaz. xfade ve temel renk filtreleri (colorbalance, colorchannelmixer, lut3d, colorlevels) LGPL; eq, colormatrix gibi bazı filtreler GPL. Belgeler için ayrı lisans beyanı yok (kısmen doğrulandı) | Yüksek | Bekliyor |
+| Natron (kompozisyon) belgeleri | GPL/Mozilla, doğrulanacak | ◐ ShareAlike: Belgeler CC BY-SA 4.0; yazılım GPL-2.0. Eski sürümlerin MPL-2.0 olduğu doğrulanmadı. Bakım zayıf (son kararlı sürüm 2022) | Orta | Bekliyor |
+| Açık kaynak motion graphics ve sinematik kurgu eğitim materyalleri (yalnız izin verici lisanslı) | Kaynak bazında doğrulanacak | Kategori bütün olarak doğrulanmadı. Doğrulanan örnek: Blender Studio içerikleri CC BY 4.0 ("aksi belirtilmedikçe"; her eğitim ayrıca kontrol edilir) | Orta | Lisans kontrolünde |
+
+### Çok dilli seslendirme
+
+| Kaynak | Lisans (ilk tahmin) | Lisans (doğrulandı) | Öncelik | Durum |
+|---|---|---|---|---|
+| Piper TTS Türkçe ve İngilizce ses modelleri | Model bazında doğrulanacak | ⚠ **Ticari kullanım kısıtlı:** kod MIT (rhasspy/piper, arşivlendi) ve GPL-3.0 (OHF-Voice/piper1-gpl). Türkçe: tr_TR-dfki CC BY-NC-SA 4.0 (ticari yasak); tr_TR-fahrettin ve tr_TR-fettah katkıcı isteğiyle kaldırıldı (kullanılmaz). İngilizce: en_US-lessac yalnız araştırma (ticari yasak), en_GB-alan "tüm hakları saklı", en_US-libritts_r lessac tabanlı (belirsiz). Ticari kullanıma uygun doğrulanmış Türkçe ses bulunamadı | Yüksek | Lisans kontrolünde |
+| Coqui TTS Türkçe ve İngilizce ses modelleri | Model bazında doğrulanacak | Kod MPL-2.0 (asıl depo bakımsız; idiap/coqui-ai-TTS çatalı aktif). Uygun adaylar: tr/common-voice/glow-tts MIT; en/ljspeech modelleri Apache-2.0/MPL (veri kamu malı); en/vctk/vits Apache-2.0 (VCTK atfı). ⚠ **Ticari kullanım kısıtlı:** XTTS-v2 (CPML, çıktılar dahil yalnız ticari olmayan), your_tts ve vctk/fast_pitch (CC BY-NC-ND 4.0), MMS (CC BY-NC 4.0) | Orta | Lisans kontrolünde |
+
+**Araç ve donanım notu:**
+- Sinematik üretim yüksek GPU gücü ister; kurumsal kurulumda bu bir donanım maliyetidir.
+- Tüm üretim izole ortamda, internete ve canlı sistemlere erişemeden çalışır.
+- **GPL ayrımı (lisans doğrulamasında netleşti):**
+  - GPL lisanslı araçlar (Blender, bazı ffmpeg yapıları, Natron, piper1-gpl) ürüne gömülmeden, KUBRA'nın sunucusunda ayrı süreç (komut satırı) olarak çalıştırılır. Bu biçimde KUBRA kodu GPL kapsamına girmez ve üretilen videolar ile sesler aracın lisansına tabi değildir (GNU GPL SSS: "mere aggregation", "output of a program").
+  - KUBRA kodunu bu araçlara bağlamak (libav* ile linkleme, Blender'ı Python modülü olarak içe aktarma) birleşik eser sayılabilir; yapılmaz.
+  - Araç ikilileri müşteriye ya da kurumsal kuruluma teslim edilirse bu dağıtımdır: lisans metni, telif bildirimleri ve kaynak kod (ya da yazılı teklif) verilir. ffmpeg için ffmpeg.org/legal.html kontrol listesi uygulanır; GPL ya da nonfree yapı dağıtılacaksa ayrıca değerlendirilir.
+- Belgelerin (CC BY-SA) ince ayarda kullanılmasının ShareAlike etkisi hukuken net değildir; ince ayar öncesi hukuk görüşü alınır.
+
 ---
 
 ## Ekleme sırası
