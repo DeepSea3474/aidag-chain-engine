@@ -129,6 +129,17 @@ Bu mod, yalnızca akredite savunma/kamu kurumları için ve aşağıdaki DEĞİ�
 - Bu modda yetki belgeleri ve kritik kayıtlar, kuantuma dayanıklı imzayla (K-22, NIST FIPS 204 ML-DSA) korunur ve değişmez biçimde zincire işlenir. Amaç: bugün kaydedilen verinin "şimdi topla, sonra çöz" saldırılarına ve gelecekteki kuantum bilgisayarlara karşı da güvende kalması. Bu kurumlar için güvenlik, imza boyutu ve hız maliyetinin önündedir.
 - Kuantuma dayanıklı imza ve değişmez zincir kaydı, savunma modunun çekirdek teknik gereksinimidir.
 
+## Kuantuma dayanıklı dijital arşiv kasası [HEDEF — savunma modu senaryosu]
+
+Gizli/kritik belgelerin uzun vadeli, değişmez ve kuantuma dayanıklı saklandığı kasa. Genişletilmiş savunma moduna bağlıdır.
+
+### Gizli belge erişim uygulaması
+- Yetkili personel, gizli belgelere zincire veya kasaya doğrudan değil, özel bir güvenli uygulama üzerinden erişir.
+- Akış: kimlik/yetki doğrulama → zincirden erişim yetkisi kontrolü → kasadan şifreli belge → cihazda açma → hash ile "orijinal" doğrulaması → erişimin zincire kaydı (kim, ne zaman, hangi belge).
+- En hassas belgeler için çoklu imzalı erişim (tek kişi yetmez, iki yetkilinin onayı).
+- Belge cihazdan çıkmaz; kapalı kurumda kopyalama/görüntü alma kısıtlanabilir. Uygulama internete kapalı, kurumun kendi cihazlarına kurulur (web tabanlı değil).
+- KUBRA belge bulma, arama ve özetlemede yardım eder ama erişim iznini kendisi vermez (önerir, insan açar).
+
 ## Borsa / değer notu (dürüst)
 - CEX listeleme: pahalı (30-50K$+), mainnet + audit + hacim ister — çok ileri.
 - DEX: AVM sonrası, kendi zincirinde.
