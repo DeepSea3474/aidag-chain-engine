@@ -786,11 +786,6 @@ def calistir_betik(args, env=None, cwd=None):
     return subprocess.run(args, capture_output=True, text=True, env=env, cwd=cwd, timeout=60)
 
 
-# Bu testlerin denetledigi betik duzeltmeleri (on-satis-kaydet.sh, tge-ayarla-kaydet.sh, yayinla.sh,
-# zincire-yaz.js, web/belge-dogrulama.html, .gitignore) henuz main'de degil; ayri adimda alininca skip kaldirilir.
-BETIKLER_MAINDE_DEGIL = unittest.skip("betik duzeltmeleri main'de degil (izleyici-minimum-alti dalinda); ayri adimda alinacak")
-
-
 class T10_Betikler(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="betik-test-")
@@ -827,7 +822,6 @@ case "$u" in
   */submit) echo '{{"ok":true}}';;
 esac''')
 
-    @BETIKLER_MAINDE_DEGIL
     def test_on_satis_kaydet_binary_ye_9_arguman_ve_en_fazla_8_tip(self):
         self._sahte_curl()
         kayit = os.path.join(self.tmp, "args.txt")
@@ -841,7 +835,6 @@ esac''')
         self.assertEqual(satir[1:], [anahtar, "1", ALICI, ALICI, "500", "2", "123", satir[8], satir[9]])
         self.assertEqual(len(satir[9].split(",")), 8)
 
-    @BETIKLER_MAINDE_DEGIL
     def test_tge_ayarla_kaydet_en_fazla_8_tip(self):
         self._sahte_curl(tge="4102444800")
         kayit = os.path.join(self.tmp, "args.txt")
@@ -874,7 +867,6 @@ esac''')
         dallar = calistir_betik(["git", "--git-dir", uzak, "branch", "--list"]).stdout
         return r, repo, dallar
 
-    @BETIKLER_MAINDE_DEGIL
     def test_yayinla_ikinci_grup_kirmizi_ise_durur(self):
         r, _, dallar = self._yayinla("test result: ok. 100 passed; 0 failed\ntest result: FAILED. 5 passed; 2 failed")
         self.assertNotEqual(r.returncode, 0); self.assertEqual(dallar.strip(), "")
@@ -883,12 +875,10 @@ esac''')
         r, _, dallar = self._yayinla("error[E0425]: cannot find value\ntest result: ok. 1 passed; 0 failed", kod=101)
         self.assertNotEqual(r.returncode, 0); self.assertEqual(dallar.strip(), "")
 
-    @BETIKLER_MAINDE_DEGIL
     def test_yayinla_error_satiri_cikis_0_olsa_bile_durur(self):
         r, _, dallar = self._yayinla("error: could not compile\ntest result: ok. 1 passed; 0 failed")
         self.assertNotEqual(r.returncode, 0); self.assertEqual(dallar.strip(), "")
 
-    @BETIKLER_MAINDE_DEGIL
     def test_yayinla_yesil_ise_dala_pushlar_main_e_degil_izlenmeyeni_eklemez(self):
         r, repo, dallar = self._yayinla("test result: ok. 100 passed; 0 failed\ntest result: ok. 7 passed; 0 failed")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -899,26 +889,30 @@ esac''')
         self.assertIn("107 tests, fmt", open(os.path.join(repo, "README.md")).read())
 
     # ---- zincire-yaz.js
-    @BETIKLER_MAINDE_DEGIL
     def test_zincire_yaz_anahtarsiz_hata_verir_sabit_seed_yok(self):
+        # DENETIM K-08: anahtar yalniz AIDAG_KAYIT_ANAHTARI dosyasindan; 0600 zorunlu; demo tohum reddedilir.
         js = os.path.join(KOK, "zincire-yaz.js")
-        self.assertNotIn("fill(7)", open(js).read())
+        kaynak = open(js).read()
+        self.assertNotIn("fill(7)", kaynak)
+        self.assertIn("Rejected", kaynak)                      # /submit reddi hata sayilir
         if not shutil.which("node"):
             self.skipTest("node yok")
-        r = calistir_betik(["node", js])
-        self.assertNotEqual(r.returncode, 0); self.assertIn("anahtar", r.stderr)
-        kotu = os.path.join(self.tmp, "k"); open(kotu, "wb").write(b"\x07" * 32)
-        r = calistir_betik(["node", js, kotu, js])
-        self.assertNotEqual(r.returncode, 0); self.assertIn("bicimi", r.stderr)
+        e = {"PATH": "/usr/bin:/bin", "HOME": self.tmp}
+        r = calistir_betik(["node", js], env=e)
+        self.assertNotEqual(r.returncode, 0); self.assertIn("AIDAG_KAYIT_ANAHTARI", r.stderr)
+        acik = os.path.join(self.tmp, "acik"); open(acik, "wb").write(os.urandom(32)); os.chmod(acik, 0o644)
+        r = calistir_betik(["node", js], env=dict(e, AIDAG_KAYIT_ANAHTARI=acik))
+        self.assertNotEqual(r.returncode, 0); self.assertIn("0600", r.stderr)
+        demo = os.path.join(self.tmp, "demo"); open(demo, "wb").write(b"\x07" * 32); os.chmod(demo, 0o600)
+        r = calistir_betik(["node", js], env=dict(e, AIDAG_KAYIT_ANAHTARI=demo))
+        self.assertNotEqual(r.returncode, 0); self.assertIn("demo", r.stderr)
 
-    @BETIKLER_MAINDE_DEGIL
     def test_eski_belge_sayfasi_yonlendirme(self):
         s = open(os.path.join(KOK, "web", "belge-dogrulama.html")).read()
         self.assertIn('http-equiv="refresh" content="0; url=/belge"', s)
         self.assertIn('href="/belge"', s)
         self.assertNotIn("NETWORK_ID", s)
 
-    @BETIKLER_MAINDE_DEGIL
     def test_durum_dosyalari_git_te_izlenmiyor(self):
         r = calistir_betik(["git", "-C", KOK, "ls-files", ".on-satis-islenmis.json", ".on-satis-adres-usd.json"])
         self.assertEqual(r.stdout.strip(), "")
