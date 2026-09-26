@@ -41,7 +41,8 @@ pub async fn json_oku(r: reqwest::Response, uc: &str) -> Option<serde_json::Valu
 }
 
 fn niyet_cikar(sorgu: &str) -> Option<(&'static str, serde_json::Value, String)> {
-    let s = sorgu.to_lowercase();
+    // sade(): Türkçe harfler katlanır ("kaç" = "kac", "yüksekliği" = "yuksekligi").
+    let s = sade(sorgu);
     if s.contains("bakiye") || s.contains("balance") {
         if let Some(adr) = adres_bul(sorgu) {
             return Some(("eth_getBalance", json!([adr, "latest"]),

@@ -55,17 +55,19 @@ fn kod_kalibi_var(s: &str) -> bool {
     c.windows(3).any(|w| w[0].is_alphabetic() && matches!(w[1], '-' | '–') && w[2].is_ascii_digit())
 }
 
-/// "12 ile 12'yi çarp(arsan)", "5 ile 3'ü topla", "10 ile 4'ü böl" → "12 * 12" vb. (tam iki sayı).
+/// "12 ile 12'yi çarp(arsan)", "5 ile 3'ü topla", "45 ve 55'in toplamı", "10 ile 3'ün farkı" → "12 * 12" vb. (tam iki sayı).
 fn ile_kalibi(s: &str) -> Option<String> {
     let sade = crate::retrieval::sade(s);
     let t: Vec<&str> = sade.split(' ').collect();
-    if !t.contains(&"ile") {
+    if !t.contains(&"ile") && !t.contains(&"ve") {
         return None;
     }
     let op = if t.iter().any(|w| w.starts_with("carp") && *w != "carpi") {
         "*"
     } else if t.iter().any(|w| w.starts_with("topla")) {
         "+"
+    } else if t.iter().any(|w| w.starts_with("fark")) {
+        "-"
     } else if t.iter().any(|w| (w.starts_with("bol") && *w != "bolu") || w.starts_with("bolers")) {
         "/"
     } else {
@@ -224,5 +226,9 @@ mod tests {
         assert_eq!(hesapla("5 ile 3'ü topla").as_deref(), Some("8"));
         assert_eq!(hesapla("10 ile 4'ü bölersen?").as_deref(), Some("2.5"));
         assert_eq!(hesapla("Ali ile Veli 2 elma aldı"), None);
+        assert_eq!(hesapla("45 ve 55'in toplamı nedir?").as_deref(), Some("100"));
+        assert_eq!(hesapla("10 ile 3'ün farkı").as_deref(), Some("7"));
+        assert_eq!(hesapla("2 elma ve 3 armut aldım"), None);
+        assert_eq!(hesapla("K-20 ve K-21'in farkı ne?"), None);
     }
 }

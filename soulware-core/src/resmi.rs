@@ -89,7 +89,7 @@ pub fn sec(belgeler: &[ResmiBelge], prompt: &str, k: usize) -> Vec<Pasaj> {
 pub fn resmi_user(prompt: &str, baglam: &str) -> String {
     format!(
         "ÖNEMLİ: Yanıtını YALNIZCA TÜRKÇE yaz. Aşağıda AIDAG-Chain'in RESMİ ve DOĞRULANMIŞ kaynakları var. \
-Soruyu YALNIZCA bu kaynaklardaki bilgiyle cevapla; kaynakta olmayan hiçbir bilgi, rakam, özellik, \
+Soruyu YALNIZCA bu kaynaklardaki bilgiyle cevapla ve kullandığın her bilginin sonuna kaynak numarasını köşeli parantezle yaz (örn. [1]); kaynakta olmayan hiçbir bilgi, rakam, özellik, \
 tarih veya iddia EKLEME, tahmin yürütme. Kaynakta 'plan', 'tasarım' veya 'geliştirme aşamasında' \
 diye geçen bir şeyi ASLA 'çalışıyor' diye sunma. Ön satış/fiyat bilgisini kaynaktaki gibi aktarabilirsin \
 ama yatırım tavsiyesi, fiyat tahmini veya getiri vaadi VERME. \

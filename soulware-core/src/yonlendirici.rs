@@ -100,8 +100,13 @@ fn on_satis_mi(s: &str, ham: &str) -> bool {
 }
 
 fn ag_durumu_mi(s: &str, ham: &str) -> bool {
-    let konu = kelime(s, "ag") || ["zincir", "mainnet", "network", "dugum", "node"].iter().any(|k| anahtar_var(s, k));
-    let durum = ["calisiyor mu", "ayakta", "durum", "saglik", "aktif mi", "canli mi"].iter().any(|k| anahtar_var(s, k));
+    // "ağ" kısa olduğu için önekle değil, hâl ekli biçimleriyle tam eşleşir ("ağda", "ağın", ...; "ağaç" değil).
+    const AG: &[&str] = &["ag", "agda", "agdaki", "agdan", "agi", "agin", "aga"];
+    let konu = s.split(' ').any(|t| AG.contains(&t))
+        || ["zincir", "mainnet", "network", "dugum", "node"].iter().any(|k| anahtar_var(s, k));
+    let durum = ["calisiyor mu", "ayakta", "durum", "saglik", "aktif mi", "canli mi", "sorun var", "ariza", "kesinti"]
+        .iter()
+        .any(|k| anahtar_var(s, k));
     (konu && durum) || zincir::ag_niyeti_mi(ham)
 }
 
@@ -159,6 +164,8 @@ mod testler {
         assert_eq!(t("Ağ şu an çalışıyor mu?"), Some(AgDurumu));
         assert_eq!(t("AIDAG zinciri çalışıyor mu?"), Some(AgDurumu));
         assert_eq!(t("Mainnet'in durumu nasıl?"), Some(AgDurumu));
+        assert_eq!(t("Ağda bir sorun var mı?"), Some(AgDurumu));
+        assert_eq!(t("Mainnet'te kesinti mi var?"), Some(AgDurumu));
     }
 
     #[test]
@@ -167,7 +174,8 @@ mod testler {
             "İmzalanmış belgeyi nasıl doğrularım?", "Token nasıl gönderilir?", "AIDAG zinciri nasıl çalışır?",
             "Ön satışta neden yalnızca USDT kabul ediliyor?", "KUBRA neden imza atamıyor?", "Merhaba, nasılsın?",
             "Hash fonksiyonu nedir, basitçe anlatır mısın?", "SQL enjeksiyonuna karşı nasıl korunurum?",
-            "Parolaları saklarken hangi hash algoritmasını kullanmalıyım?",
+            "Parolaları saklarken hangi hash algoritmasını kullanmalıyım?", "AIDAG zinciri nasıl çalışıyor?",
+            "Zincirde sorun çözme süreci nasıl işler?",
         ] {
             assert_eq!(niyet_bul(q), None, "{q}");
         }
