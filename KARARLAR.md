@@ -97,9 +97,9 @@ Uygulanmamış kararlar **[Sonraki iş]** olarak işaretlenir.
 - Neden: Otomatik ödeme izleyicisi BNB ödemelerini tespit edemiyor (denetim bulgusu CANLI-3); BNB fiyatı değişken ve tek bir fiyat kaynağına bağlı (CANLI-5).
 - Minimum alım: 10 USDT. Hem sayfada hem ödeme izleyicisinde geçerlidir. 10 USDT altındaki ödemelere tahsis yazılmaz; ödeme "minimum altı" olarak kaydedilir ve iade için yöneticiye bildirilir.
 - Uygulama: Ön satış sayfalarına (`/on-satis`, `/on-satis.html`) iki dilli uyarı eklenir: "Yalnızca BEP-20 ağındaki USDT kabul edilir; başka token veya ağ ile gönderilen ödemeler işlenmez." Sayfalardaki kullanılmayan BNB/ETH kur değerleri kaldırılır. "BNB Smart Chain" ağ adı ve işlem ücreti (gas) için cüzdanda az miktarda BNB gerektiği bilgisi korunur.
-- Durum:
+- Durum: **Canlı.**
   - Site: yayında (26 Eylül 2026). Uyarı ve minimum 10 USDT, site deposu `13f5920` (dal `on-satis-yalniz-usdt`).
-  - Ödeme izleyicisi: minimum altı ödemelerin ayrı kaydı ve bildirimi hazırlanıyor; yayın onayı bekliyor.
+  - Ödeme izleyicisi: canlı (26 Eylül 2026). Minimum altı ödemeler ayrı `minimum_alti` kaydına yazılır, günlüğe "MINIMUM ALTI ODEME (iade gerekli)" satırı düşer; iade bekleyenler `on-satis-izleyici.py --minimum-alti` ile listelenir. Motor deposu dal `izleyici-minimum-alti` (`7af969b`), `/opt/aidag/izleyici` üzerinde çalışıyor.
 - **[Sonraki iş]** Ödeme izleyicisinde BNB yolunu kod düzeyinde kapatmak (bugün yalnızca Etherscan anahtarı ya da `BNB_TARA=1` ile açılıyor; ikisi de kapalı). Yanlış token veya ağ ile gelen ödemeler için iade sürecinin yazılması.
 
 ---
