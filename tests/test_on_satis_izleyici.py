@@ -859,6 +859,11 @@ esac''')
         return repo, uzak
 
     def _yayinla(self, cargo_cikti, kod=0):
+        # GUVENLIK: eski yayinla.sh DIZIN'i sabit /root/aidag-lsc aliyor ve orada commit+push yapiyordu.
+        # Betik DIZIN ortam degiskenine uymuyorsa CALISTIRMADAN kal (gercek depoya dokunulmaz).
+        kaynak = open(os.path.join(KOK, "yayinla.sh")).read()
+        if 'DIZIN="${DIZIN:-' not in kaynak:
+            self.fail("yayinla.sh DIZIN ortam degiskenine uymuyor; gercek depoya dokunmamak icin calistirilmadi")
         repo, uzak = self._repo()
         self.arac("cargo", f"cat <<'X'\n{cargo_cikti}\nX\nexit {kod}")
         r = calistir_betik(["bash", os.path.join(KOK, "yayinla.sh"), "deneme"],
