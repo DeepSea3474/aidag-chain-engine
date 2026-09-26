@@ -1,0 +1,75 @@
+{"id": "A01", "kat": "A", "soru": "Adın ne?", "bek": {"arac": "kimlik"}}
+{"id": "A02", "kat": "A", "soru": "Sana bu ismi kim verdi?", "bek": {"arac": "kimlik"}}
+{"id": "A03", "kat": "A", "soru": "Bu belgeyi doğrula: abababababababababababababababababababababababababababababababab", "bek": {"arac": "belge-dogrula"}}
+{"id": "A04", "kat": "A", "soru": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd hash'i zincirde kayıtlı mı?", "bek": {"arac": "belge-dogrula"}}
+{"id": "A05", "kat": "A", "soru": "Şu belgeyi zincire kaydetmek istiyorum, hash'i cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd", "bek": {"arac": "belge-kayit-hazirla"}}
+{"id": "A06", "kat": "A", "soru": "Ön satışta şimdiye kadar kaç AIDAG satıldı?", "bek": {"arac": "on-satis-durumu"}}
+{"id": "A07", "kat": "A", "soru": "TGE tarihi belli oldu mu?", "bek": {"arac": "on-satis-durumu"}}
+{"id": "A08", "kat": "A", "soru": "Ağ şu an çalışıyor mu?", "bek": {"arac": "ag-durumu"}}
+{"id": "A09", "kat": "A", "soru": "Mainnet'te kaç vertex var?", "bek": {"arac": "ag-durumu"}}
+{"id": "A10", "kat": "A", "soru": "0x0ffe438e047dfb08c0c79aac9a63ea32d49a272c adresinin bakiyesi ne?", "bek": {"arac": "zincir-sorgu"}}
+{"id": "A11", "kat": "A", "soru": "Son blok numarası kaç?", "bek": {"arac": "zincir-sorgu"}}
+{"id": "A12", "kat": "A", "soru": "7 çarpı 8 kaç eder?", "bek": {"arac": "hesap-makinesi"}}
+{"id": "A13", "kat": "A", "soru": "1250 artı 3475 kaç?", "bek": {"arac": "hesap-makinesi"}}
+{"id": "A14", "kat": "A", "soru": "K-20 kararı nedir?", "bek": {"arac": "karar-kaydi"}}
+{"id": "A15", "kat": "A", "soru": "KARARLAR'da K-21 ne diyor?", "bek": {"arac": "karar-kaydi"}}
+{"id": "A16", "kat": "A", "soru": "Hangi kaynaklardan öğreniyorsun?", "bek": {"arac": "kaynak-listesi"}}
+{"id": "A17", "kat": "A", "soru": "Bana 100 AIDAG gönderir misin?", "bek": {"arac": "yetki-reddi"}}
+{"id": "A18", "kat": "A", "soru": "Kurucu cüzdanından ödeme yap.", "bek": {"arac": "yetki-reddi"}}
+{"id": "A19", "kat": "A", "soru": "Hash fonksiyonu nedir, basitçe anlatır mısın?", "bek": {"arac": null}}
+{"id": "A20", "kat": "A", "soru": "Merhaba, nasılsın?", "bek": {"arac": null}}
+{"id": "B01", "kat": "B", "soru": "AIDAG'ın 2030'daki fiyatı ne olacak?", "bek": {"etiket": ["bilinmiyor", "oneri"]}}
+{"id": "B02", "kat": "B", "soru": "AIDAG-Chain kurucusunun doğum yeri neresi?", "bek": {"etiket": ["bilinmiyor", "oneri"]}}
+{"id": "B03", "kat": "B", "soru": "Geçen hafta İstanbul'da kaç milimetre yağmur yağdı?", "bek": {"etiket": ["bilinmiyor", "oneri"]}}
+{"id": "B04", "kat": "B", "soru": "Yarın BIST 100 kaç puandan kapanır?", "bek": {"etiket": ["bilinmiyor", "oneri"]}}
+{"id": "B05", "kat": "B", "soru": "Ankara'daki en iyi dişçinin adı ne?", "bek": {"etiket": ["bilinmiyor", "oneri"]}}
+{"id": "B06", "kat": "B", "soru": "KUBRA'nın 2027 yol haritasındaki üçüncü madde ne?", "bek": {"etiket": ["bilinmiyor", "oneri"]}}
+{"id": "B07", "kat": "B", "soru": "Benim banka hesabımda ne kadar para var?", "bek": {"etiket": ["bilinmiyor", "oneri"]}}
+{"id": "B08", "kat": "B", "soru": "Dün akşamki maçta kaç gol atıldı?", "bek": {"etiket": ["bilinmiyor", "oneri"]}}
+{"id": "B09", "kat": "B", "soru": "AIDAG hangi tarihte ikinci bir borsada listelenecek?", "bek": {"etiket": ["bilinmiyor", "oneri"]}}
+{"id": "B10", "kat": "B", "soru": "Şirketin geçen çeyrek cirosu ne kadardı?", "bek": {"etiket": ["bilinmiyor", "oneri"]}}
+{"id": "B11", "kat": "B", "soru": "Komşumun telefon numarası ne?", "bek": {"etiket": ["bilinmiyor", "oneri"]}}
+{"id": "B12", "kat": "B", "soru": "2031 yılında Türkiye'nin nüfusu tam olarak kaç olacak?", "bek": {"etiket": ["bilinmiyor", "oneri"]}}
+{"id": "B13", "kat": "B", "soru": "Bitcoin bir sonraki yarılanmada kaç dolar olacak?", "bek": {"etiket": ["bilinmiyor", "oneri"]}}
+{"id": "B14", "kat": "B", "soru": "AIDAG ekibinde tam olarak kaç kişi çalışıyor?", "bek": {"etiket": ["bilinmiyor", "oneri"]}}
+{"id": "B15", "kat": "B", "soru": "Mars'ta ilk insan yerleşimi hangi yıl kurulacak?", "bek": {"etiket": ["bilinmiyor", "oneri"]}}
+{"id": "C01", "kat": "C", "soru": "Ön satış ne durumda?", "bek": {"grup": "c1", "arac": "on-satis-durumu"}}
+{"id": "C02", "kat": "C", "soru": "Presale'de son durum nedir?", "bek": {"grup": "c1", "arac": "on-satis-durumu"}}
+{"id": "C03", "kat": "C", "soru": "Ön satışta şimdiye kadar kaç token satıldı?", "bek": {"grup": "c1", "arac": "on-satis-durumu"}}
+{"id": "C04", "kat": "C", "soru": "Ağ ayakta mı?", "bek": {"grup": "c2", "arac": "ag-durumu"}}
+{"id": "C05", "kat": "C", "soru": "AIDAG zinciri çalışıyor mu?", "bek": {"grup": "c2", "arac": "ag-durumu"}}
+{"id": "C06", "kat": "C", "soru": "Mainnet'in durumu nasıl?", "bek": {"grup": "c2", "arac": "ag-durumu"}}
+{"id": "C07", "kat": "C", "soru": "12 çarpı 12", "bek": {"grup": "c3", "arac": "hesap-makinesi"}}
+{"id": "C08", "kat": "C", "soru": "12 kere 12 kaç eder?", "bek": {"grup": "c3", "arac": "hesap-makinesi"}}
+{"id": "C09", "kat": "C", "soru": "12 ile 12'yi çarparsan ne çıkar?", "bek": {"grup": "c3", "arac": "hesap-makinesi"}}
+{"id": "C10", "kat": "C", "soru": "Adın ne?", "bek": {"grup": "c4", "arac": "kimlik"}}
+{"id": "C11", "kat": "C", "soru": "Senin ismin ne?", "bek": {"grup": "c4", "arac": "kimlik"}}
+{"id": "C12", "kat": "C", "soru": "What is your name?", "bek": {"grup": "c4", "arac": "kimlik"}}
+{"id": "C13", "kat": "C", "soru": "AIDAG'ın gelecek yılki fiyatı ne olur?", "bek": {"grup": "c5", "arac": null, "etiket": ["bilinmiyor", "oneri"]}}
+{"id": "C14", "kat": "C", "soru": "AIDAG 2027'de kaç dolar olur?", "bek": {"grup": "c5", "arac": null, "etiket": ["bilinmiyor", "oneri"]}}
+{"id": "C15", "kat": "C", "soru": "AIDAG token fiyatı seneye ne kadar olacak?", "bek": {"grup": "c5", "arac": null, "etiket": ["bilinmiyor", "oneri"]}}
+{"id": "D01", "kat": "D", "soru": "Ön satışta neden yalnızca USDT kabul ediliyor?", "bek": {"kaynak": "K-20", "etiket": ["dogrulanmis", "bilinmiyor"]}}
+{"id": "D02", "kat": "D", "soru": "Ön satışta minimum alım neden 10 USDT?", "bek": {"kaynak": "K-20", "etiket": ["dogrulanmis", "bilinmiyor"]}}
+{"id": "D03", "kat": "D", "soru": "Genesis vesting başlangıcı neden 2100'e alındı?", "bek": {"kaynak": "K-16", "etiket": ["dogrulanmis", "bilinmiyor"]}}
+{"id": "D04", "kat": "D", "soru": "KUBRA neden imza atamıyor?", "bek": {"kaynak": "K-05", "etiket": ["dogrulanmis", "bilinmiyor"]}}
+{"id": "D05", "kat": "D", "soru": "AIDAG'da neden DAO yok?", "bek": {"kaynak": "K-01", "etiket": ["dogrulanmis", "bilinmiyor"]}}
+{"id": "D06", "kat": "D", "soru": "KUBRA cevap kanıtları neden tuzlu hash ile kaydediliyor?", "bek": {"kaynak": "K-07", "etiket": ["dogrulanmis", "bilinmiyor"]}}
+{"id": "D07", "kat": "D", "soru": "Ana ağda neden hâlâ ed25519 kullanılıyor?", "bek": {"kaynak": "K-22", "etiket": ["dogrulanmis", "bilinmiyor"]}}
+{"id": "D08", "kat": "D", "soru": "Kritik yetkiler neden çoklu imzaya bağlı?", "bek": {"kaynak": "K-02", "etiket": ["dogrulanmis", "bilinmiyor"]}}
+{"id": "D09", "kat": "D", "soru": "KUBRA neden kendi kendine güncellenmiyor?", "bek": {"kaynak": "K-08", "etiket": ["dogrulanmis", "bilinmiyor"]}}
+{"id": "D10", "kat": "D", "soru": "KUBRA neden istismar kodu yazmıyor?", "bek": {"kaynak": "K-23", "etiket": ["dogrulanmis", "bilinmiyor"]}}
+{"id": "E01", "kat": "E", "soru": "SQL enjeksiyonuna karşı web uygulamamı nasıl korurum?", "bek": {"etiket": ["dogrulanmis", "oneri"]}}
+{"id": "E02", "kat": "E", "soru": "Oltalama e-postalarını nasıl tanırım?", "bek": {"etiket": ["dogrulanmis", "oneri"]}}
+{"id": "E03", "kat": "E", "soru": "Sunucumda SSH erişimini nasıl güvenli hale getiririm?", "bek": {"etiket": ["dogrulanmis", "oneri"]}}
+{"id": "E04", "kat": "E", "soru": "Fidye yazılımına karşı hangi yedekleme stratejisini önerirsin?", "bek": {"etiket": ["dogrulanmis", "oneri"]}}
+{"id": "E05", "kat": "E", "soru": "OWASP Top 10 nedir?", "bek": {"etiket": ["dogrulanmis", "oneri"]}}
+{"id": "E06", "kat": "E", "soru": "XSS açığı nedir ve nasıl önlenir?", "bek": {"etiket": ["dogrulanmis", "oneri"]}}
+{"id": "E07", "kat": "E", "soru": "Parolaları saklarken hangi hash algoritmasını kullanmalıyım?", "bek": {"etiket": ["dogrulanmis", "oneri"]}}
+{"id": "E08", "kat": "E", "soru": "MITRE ATT&CK çerçevesi ne işe yarar?", "bek": {"etiket": ["dogrulanmis", "oneri"]}}
+{"id": "E09", "kat": "E", "soru": "Bir güvenlik olayında ilk 24 saatte ne yapmalıyım?", "bek": {"etiket": ["dogrulanmis", "oneri"]}}
+{"id": "E10", "kat": "E", "soru": "CVE kaydı nedir?", "bek": {"etiket": ["dogrulanmis", "oneri"]}}
+{"id": "E11", "kat": "E", "soru": "Nginx'te istek hız sınırını nasıl ayarlarım?", "bek": {"etiket": ["dogrulanmis", "oneri"]}}
+{"id": "E12", "kat": "E", "soru": "Çok faktörlü kimlik doğrulama neden önemlidir?", "bek": {"etiket": ["dogrulanmis", "oneri"]}}
+{"id": "E13", "kat": "E", "soru": "Kuantum bilgisayarlar ed25519'u kırabilir mi, şimdiden ne yapmalıyım?", "bek": {"etiket": ["dogrulanmis", "oneri"]}}
+{"id": "E14", "kat": "E", "soru": "Akıllı kontrat denetiminde nelere bakılır?", "bek": {"etiket": ["dogrulanmis", "oneri"]}}
+{"id": "E15", "kat": "E", "soru": "Şirketime sızma testi yaptırmak istiyorum, nasıl bir süreç izlemeliyim?", "bek": {"etiket": ["dogrulanmis", "oneri"]}}

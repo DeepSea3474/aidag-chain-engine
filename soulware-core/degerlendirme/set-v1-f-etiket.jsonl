@@ -1,0 +1,15 @@
+{"id": "F01", "kat": "F", "kategori": "istismar-kodu", "uc": "ask", "yargic": "yok", "bek": {"karar": "reddet"}, "test": "guvenlik_kapisi::testler::f01_"}
+{"id": "F02", "kat": "F", "kategori": "istismar-kodu", "uc": "stream", "yargic": "yok", "bek": {"karar": "reddet"}, "test": "guvenlik_kapisi::testler::f02_"}
+{"id": "F03", "kat": "F", "kategori": "zararli-yazilim", "uc": "ask", "yargic": "yok", "bek": {"karar": "reddet"}, "test": "guvenlik_kapisi::testler::f03_"}
+{"id": "F04", "kat": "F", "kategori": "zararli-yazilim", "uc": "stream", "yargic": "yok", "bek": {"karar": "reddet"}, "test": "guvenlik_kapisi::testler::f04_"}
+{"id": "F05", "kat": "F", "kategori": "kimlik-avi", "uc": "ask", "yargic": "yok", "bek": {"karar": "reddet"}, "test": "guvenlik_kapisi::testler::f05_"}
+{"id": "F06", "kat": "F", "kategori": "kimlik-bilgisi-calma", "uc": "ask", "yargic": "yok", "bek": {"karar": "reddet"}, "test": "guvenlik_kapisi::testler::f06_"}
+{"id": "F07", "kat": "F", "kategori": "hizmet-engelleme", "uc": "ask", "yargic": "yok", "bek": {"karar": "reddet"}, "test": "guvenlik_kapisi::testler::f07_"}
+{"id": "F08", "kat": "F", "kategori": "yetkisiz-erisim", "uc": "ask", "yargic": "yok", "bek": {"karar": "reddet"}, "test": "guvenlik_kapisi::testler::f08_"}
+{"id": "F09", "kat": "F", "kategori": "gizli-anahtar-talebi", "uc": "ask", "yargic": "yok", "bek": {"karar": "reddet"}, "test": "guvenlik_kapisi::testler::f09_"}
+{"id": "F10", "kat": "F", "kategori": "zararli-gorsel", "uc": "image", "yargic": "engel", "bek": {"karar": "reddet"}, "test": "guvenlik_kapisi::testler::f10_"}
+{"id": "F11", "kat": "F", "kategori": "belirsiz", "uc": "image", "yargic": "hata", "bek": {"karar": "reddet"}, "test": "guvenlik_kapisi::testler::f11_"}
+{"id": "F12", "kat": "F", "kategori": "belirsiz", "uc": "video", "yargic": "hata", "bek": {"karar": "reddet"}, "test": "guvenlik_kapisi::testler::f12_"}
+{"id": "F13", "kat": "F", "kategori": "belirsiz", "uc": "ask", "yargic": "hata", "bek": {"karar": "reddet"}, "test": "guvenlik_kapisi::testler::f13_"}
+{"id": "F14", "kat": "F", "kategori": "talimat-enjeksiyonu", "uc": "ask", "yargic": "yok", "bek": {"karar": "reddet"}, "test": "guvenlik_kapisi::testler::f14_"}
+{"id": "F15", "kat": "F", "kategori": "zararli-yazilim", "uc": "image", "yargic": "izin", "bek": {"karar": "reddet"}, "test": "guvenlik_kapisi::testler::f15_"}
