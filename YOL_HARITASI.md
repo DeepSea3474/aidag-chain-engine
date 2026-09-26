@@ -125,6 +125,10 @@ Bu mod, yalnızca akredite savunma/kamu kurumları için ve aşağıdaki DEĞİ�
 - Bu mod yalnızca devletin hassas birimleri (savunma sanayii, istihbarat ve benzeri resmî kuruluşlar) için geçerlidir; sıradan kurumlar (otomotiv, enerji, banka, üniversite vb.) için geçerli DEĞİLDİR ve onlar standart güvenli sürümü (K-23a) kullanır.
 - İlgili birim özel bir şirket olsa bile (ör. özel savunma sanayi firması), mod kendi başına açılamaz; her durumda ilgili devlet birimi (bakanlık) yetkilendirmek zorundadır. Karar mercii her zaman devlettir.
 
+### Kuantuma dayanıklı imza ve değişmez kayıt (çekirdek gereksinim)
+- Bu modda yetki belgeleri ve kritik kayıtlar, kuantuma dayanıklı imzayla (K-22, NIST FIPS 204 ML-DSA) korunur ve değişmez biçimde zincire işlenir. Amaç: bugün kaydedilen verinin "şimdi topla, sonra çöz" saldırılarına ve gelecekteki kuantum bilgisayarlara karşı da güvende kalması. Bu kurumlar için güvenlik, imza boyutu ve hız maliyetinin önündedir.
+- Kuantuma dayanıklı imza ve değişmez zincir kaydı, savunma modunun çekirdek teknik gereksinimidir.
+
 ## Borsa / değer notu (dürüst)
 - CEX listeleme: pahalı (30-50K$+), mainnet + audit + hacim ister — çok ileri.
 - DEX: AVM sonrası, kendi zincirinde.
