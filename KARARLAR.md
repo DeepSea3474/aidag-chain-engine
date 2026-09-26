@@ -92,6 +92,16 @@ Uygulanmamış kararlar **[Sonraki iş]** olarak işaretlenir.
 ### K-17 · Ön satış test kayıtları (Eylül 2026)
 - Ana ağdaki 3 ön satış kaydı (toplam 39 AIDAG) kurucunun test kayıtlarıdır; resmî ön satış rakamlarında ayrı gösterilecektir.
 
+### K-20 · Ön satışta yalnızca USDT (BEP-20) kabul edilir (Eylül 2026)
+- Karar: Ön satış ödemeleri yalnızca BNB Smart Chain üzerindeki USDT (BEP-20) ile alınır. BNB ile ya da başka bir token veya ağ ile gönderilen ödemeler işlenmez.
+- Neden: Otomatik ödeme izleyicisi BNB ödemelerini tespit edemiyor (denetim bulgusu CANLI-3); BNB fiyatı değişken ve tek bir fiyat kaynağına bağlı (CANLI-5).
+- Minimum alım: 10 USDT. Hem sayfada hem ödeme izleyicisinde geçerlidir. 10 USDT altındaki ödemelere tahsis yazılmaz; ödeme "minimum altı" olarak kaydedilir ve iade için yöneticiye bildirilir.
+- Uygulama: Ön satış sayfalarına (`/on-satis`, `/on-satis.html`) iki dilli uyarı eklenir: "Yalnızca BEP-20 ağındaki USDT kabul edilir; başka token veya ağ ile gönderilen ödemeler işlenmez." Sayfalardaki kullanılmayan BNB/ETH kur değerleri kaldırılır. "BNB Smart Chain" ağ adı ve işlem ücreti (gas) için cüzdanda az miktarda BNB gerektiği bilgisi korunur.
+- Durum:
+  - Site: yayında (26 Eylül 2026). Uyarı ve minimum 10 USDT, site deposu `13f5920` (dal `on-satis-yalniz-usdt`).
+  - Ödeme izleyicisi: minimum altı ödemelerin ayrı kaydı ve bildirimi hazırlanıyor; yayın onayı bekliyor.
+- **[Sonraki iş]** Ödeme izleyicisinde BNB yolunu kod düzeyinde kapatmak (bugün yalnızca Etherscan anahtarı ya da `BNB_TARA=1` ile açılıyor; ikisi de kapalı). Yanlış token veya ağ ile gelen ödemeler için iade sürecinin yazılması.
+
 ---
 
 ## 5. Çalışma yöntemi
