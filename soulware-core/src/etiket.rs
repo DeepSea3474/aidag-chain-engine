@@ -132,7 +132,7 @@ pub fn kaynakli_cevap_etiketi(cevap: &str, kaynak_metni: &str, kaynak_sayisi: us
 pub fn arac_etiketi(arac_ad: &str) -> &'static str {
     match arac_ad {
         "resmi-kaynak" | "karar-bulunamadi" => BILINMIYOR,
-        "yetki-reddi" | "guvenlik-reddi" => "reddedildi",
+        "yetki-reddi" | "yetki-gasbi" | "guvenlik-reddi" => "reddedildi",
         _ => DOGRULANMIS,
     }
 }
