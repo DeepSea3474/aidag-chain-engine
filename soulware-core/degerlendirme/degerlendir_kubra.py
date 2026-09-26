@@ -34,6 +34,7 @@ def argumanlar():
     a.add_argument("--gercek-model", default=None, help="GGUF model dosyasi: sahte beyin yerine gercek model (izole llama-server)")
     a.add_argument("--llama", default="/root/llama.cpp/build/bin/llama-server")
     a.add_argument("--llama-thread", type=int, default=6)
+    a.add_argument("--sadece", default=None, help="Virgulle ayrilmis soru kimlikleri (alt kume)")
     a.add_argument("--f-commit", default=None,
                    help="F birim testleri bu commit'ten olculur (olculen ikilinin commit'i). Verilmezse calisma agaci.")
     return a.parse_args()
@@ -172,6 +173,9 @@ def main():
         os.execvp("unshare", ["unshare", "-n", "bash", "-c", kom])
 
     setler = [json.loads(l) for l in open(arg.set, encoding="utf-8") if l.strip()]
+    if arg.sadece:
+        secili = set(arg.sadece.split(","))
+        setler = [x for x in setler if x["id"] in secili]
     fset = [json.loads(l) for l in open(arg.f_set, encoding="utf-8") if l.strip()]
     tmp = tempfile.mkdtemp(prefix="kubra-olcum-")
     for f in ("kb.json", "kb.json.emb.json", "kb.seed.json", "kb.aidag.json"):
@@ -252,7 +256,15 @@ def main():
             ok, notu = puanla(s, r, fark, grup_imzasi)
             sonuclar.append({"id": s["id"], "kat": s["kat"], "gecti": bool(ok), "not": notu, "http": kod,
                              "arac": arac(r), "etiket": etiket(r), "beyin_cagrisi": fark,
-                             "reddedildi": etiket(r) == "reddedildi", "iz_tam": iz_tam_mi(r)})
+                             "reddedildi": etiket(r) == "reddedildi", "iz_tam": iz_tam_mi(r),
+                             "soru": s["soru"], "cevap": (r.get("answer") or "")[:2000],
+                             "kaynaklar": r.get("sources") or []})
+            if s["kat"] == "B" and etiket(r) == "dogrulanmis":  # elle kontrol icin kaynak pasajlari
+                _, pg = post(f"http://127.0.0.1:{KUB}/retrieve", {"prompt": s["soru"]})
+                try:
+                    sonuclar[-1]["pasajlar"] = json.loads(pg).get("pasajlar", [])
+                except Exception:
+                    pass
         # G: yargic erisilemezken gorsel/video reddedilmeli (zararsiz istem; puana girmez)
         post(f"http://127.0.0.1:{BEYIN}/mod", {"yargic": "hata"})
         for ad, uc in [] if gercek else (("G1 gorsel, yargic hata", "/v1/image"), ("G2 video, yargic hata", "/v1/video")):
@@ -265,7 +277,7 @@ def main():
     finally:
         for p in sureler:
             p.terminate()
-    if not any(x["kat"] == "F" for x in setler):  # F set icinde degilse: etiketli birim testleri
+    if not any(x["kat"] == "F" for x in setler) and not arg.sadece:  # F set icinde degilse: etiketli birim testleri
         sonuclar += f_olc(fset, arg.f_commit)
 
     katlar = ["A", "B", "C", "D", "E", "F"]

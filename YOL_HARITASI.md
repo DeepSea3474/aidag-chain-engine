@@ -104,6 +104,7 @@ oncesi kabul edilmelidir. / Not done yet; treat everything as pre-audit.
     - DAO'ya öneri sunan, insan-onaylı ortak yönetişim katmanı.
     - SINIR: AI öneri/sunum yapar, bağlayıcı DEĞİL — DAO/insan oylar.
     - DURUM: KUBRA çalışıyor (kaynağa dayalı cevap, zincirde belge doğrulama, cevaplar zincire damgalı). Otonom yönetim = uzak hedef; AI işlem imzalayamaz.
+    - İLERİ İŞ (Eylül 2026): **anlamsal kaynak doğrulaması.** Bugünkü atıf denetimi yalnızca [n] numarasının geçerli bir kaynağa işaret ettiğini kontrol eder; kaynak içeriğinin cevabı gerçekten destekleyip desteklemediğini kontrol etmez. Gerçek model ölçümünde (qwen2.5-7b) model "bilmiyorum" deyip ilgisiz bir kaynağa [1] ekleyebildi (Durugöl maddesi yağış sorusuna, Hakkâri/Bağcılar maddeleri 2031 nüfus sorusuna). Hedef: cevaptaki her olgu iddiasının atıf yapılan pasajda karşılığı olduğunun ayrı bir doğrulayıcıyla (çıkarım/NLI ya da ikinci model) denetlenmesi; desteklenmeyen iddia "doğrulanmış" etiketini alamaz. Değerlendirme setine "kaynak var ama cevabı desteklemiyor" kategorisi eklenir.
 
 ## Borsa / değer notu (dürüst)
 - CEX listeleme: pahalı (30-50K$+), mainnet + audit + hacim ister — çok ileri.

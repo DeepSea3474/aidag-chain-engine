@@ -71,16 +71,100 @@ pub fn sade(s: &str) -> String {
         .join(" ")
 }
 
-/// Sade metinde anahtar var mı? Boşluklu anahtar → ifade (kelime sınırlı) eşleşmesi;
-/// tek kelime → token eşitliği, ≥5 harfliyse önek (Türkçe ekler: "zincirde" ~ "zincir").
-/// Kısa anahtarlar önekle eşleşmez ("rwa" ≠ "rwanda", "tps" ≠ "https").
-pub fn anahtar_var(sade_metin: &str, anahtar: &str) -> bool {
-    if anahtar.contains(' ') {
-        return format!(" {sade_metin} ").contains(&format!(" {anahtar}"));
+/// Sade (Türkçe harfleri katlanmış) ek kalıpları: iyelik/çoğul + hâl. "ağ" → "agi", "aginda", "agindaki";
+/// "blok" → "bloku", "blogu" (yumuşama); "belge" → "belgeyi". Tam kelime değilse eşleşmez ("agac" ≠ "ag").
+fn ek_kumesi() -> &'static std::collections::HashSet<String> {
+    static K: std::sync::OnceLock<std::collections::HashSet<String>> = std::sync::OnceLock::new();
+    K.get_or_init(|| {
+        const IYELIK: &[&str] = &["", "i", "u", "si", "su", "in", "un", "imiz", "umuz", "lar", "ler", "lari", "leri"];
+        const HAL: &[&str] = &[
+            "", "i", "u", "yi", "yu", "ni", "nu", "a", "e", "ya", "ye", "na", "ne", "da", "de", "ta", "te", "nda", "nde",
+            "dan", "den", "tan", "ten", "ndan", "nden", "in", "un", "nin", "nun", "la", "le", "yla", "yle", "daki", "deki",
+            "taki", "teki", "ndaki", "ndeki", "mi", "mu", "dir", "dur", "tir", "tur",
+        ];
+        let mut k = std::collections::HashSet::new();
+        // "n" kaynaştırmalı hâl ekleri (nda, na, ni, ...) yalnız iyelikten sonra gelir: ağ-ı-nda; "rwa"+"nda" ≠ "rwanda".
+        const YALNIZ_IYELIKLE: &[&str] = &["ni", "nu", "na", "ne", "nda", "nde", "ndan", "nden", "ndaki", "ndeki"];
+        for i in IYELIK {
+            for h in HAL {
+                if i.is_empty() && YALNIZ_IYELIKLE.contains(h) {
+                    continue;
+                }
+                let e = format!("{i}{h}");
+                if !e.is_empty() {
+                    k.insert(e);
+                }
+            }
+        }
+        k
+    })
+}
+
+/// Kelime, kök + geçerli Türkçe ek mi? Son ünsüz yumuşaması (k→g, p→b, t→d) dahil.
+pub fn ek_ile_eslesir(kelime: &str, kok: &str) -> bool {
+    let mut kokler = vec![kok.to_string()];
+    if let Some(son) = kok.chars().last() {
+        let yumusak = match son { 'k' => Some('g'), 'p' => Some('b'), 't' => Some('d'), _ => None };
+        if let Some(y) = yumusak {
+            kokler.push(format!("{}{y}", &kok[..kok.len() - son.len_utf8()]));
+        }
     }
-    sade_metin
-        .split(' ')
-        .any(|t| t == anahtar || (anahtar.chars().count() >= 5 && t.starts_with(anahtar)))
+    kokler.iter().any(|k| kelime.strip_prefix(k.as_str()).map_or(false, |kalan| ek_kumesi().contains(kalan)))
+}
+
+fn kelime_eslesir(kelime: &str, anahtar: &str, son_kelime: bool) -> bool {
+    kelime == anahtar
+        || ek_ile_eslesir(kelime, anahtar)
+        // ≥5 harfli anahtar önekle (serbest ek) eşleşir ("zincirde" ~ "zincir"); ifadenin son kelimesi her uzunlukta.
+        || ((son_kelime || anahtar.chars().count() >= 5) && kelime.starts_with(anahtar))
+}
+
+/// Sade metinde anahtar var mı? Her kelime tam, geçerli Türkçe ekle ("ağında", "bloğu") ya da ≥5 harfliyse
+/// önekle ("zincirde" ~ "zincir") eşleşir. Çok kelimeli anahtar ardışık kelimelerle eşleşir; son kelimesi
+/// önekle de eşleşebilir ("ag durumu" ~ "ag durumunu"). Kısa anahtarlar serbest önekle eşleşmez
+/// ("rwa" ≠ "rwanda", "tps" ≠ "https", "ag" ≠ "agac").
+pub fn anahtar_var(sade_metin: &str, anahtar: &str) -> bool {
+    let t: Vec<&str> = sade_metin.split(' ').filter(|x| !x.is_empty()).collect();
+    let k: Vec<&str> = anahtar.split(' ').filter(|x| !x.is_empty()).collect();
+    if k.is_empty() || t.len() < k.len() {
+        return false;
+    }
+    if k.len() == 1 {
+        return t.iter().any(|x| kelime_eslesir(x, k[0], false));
+    }
+    t.windows(k.len()).any(|w| {
+        w.iter().zip(&k).enumerate().all(|(i, (x, y))| {
+            kelime_eslesir(x, y, i == k.len() - 1)
+        })
+    })
+}
+
+#[cfg(test)]
+mod ek_testleri {
+    use super::*;
+
+    #[test]
+    fn turkce_ekler_tutarli() {
+        for (metin, anahtar) in [
+            ("agi", "ag"), ("aginda", "ag"), ("agindaki", "ag"), ("agda", "ag"), ("agin", "ag"),
+            ("bloku", "blok"), ("blogu", "blok"), ("bloklari", "blok"), ("belgeyi", "belge"), ("belgenin", "belge"),
+            ("hashi", "hash"), ("tgenin", "tge"), ("rwada", "rwa"),
+        ] {
+            assert!(anahtar_var(metin, anahtar), "{metin} ~ {anahtar}");
+        }
+        for (metin, anahtar) in [("agac", "ag"), ("rwanda", "rwa"), ("https", "tps"), ("blokaj", "blok"), ("agir", "ag")] {
+            assert!(!anahtar_var(metin, anahtar), "{metin} !~ {anahtar}");
+        }
+    }
+
+    #[test]
+    fn ifade_eslesmesi() {
+        assert!(anahtar_var("aidag aginda bir sorun var mi", "sorun var"));
+        assert!(anahtar_var("ag durumunu goster", "ag durumu"));
+        assert!(anahtar_var("hangi kaynaklardan ogreniyorsun", "hangi kaynak"));
+        assert!(anahtar_var("on satista kac token satildi", "on satis"));
+        assert!(!anahtar_var("satis on", "on satis"));
+    }
 }
 
 /// Sorguyu/metni token'lara ayır: küçük harf + Türkçe→ascii katlama, alfanümerik

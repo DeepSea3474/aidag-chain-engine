@@ -79,7 +79,15 @@ pub fn atif_gecerli(cevap: &str, kaynak_sayisi: usize) -> bool {
 /// Model "doğrulanmış bilgim yok" dedi mi (resmî kaynak talimatındaki sabit metin dahil)?
 pub fn bilgi_yok_dedi(cevap: &str) -> bool {
     let s = retrieval::sade(cevap);
-    ["dogrulanmis bilgim yok", "bu konuda bilgim yok", "kaynaklarda bu bilgi yok"].iter().any(|k| s.contains(k))
+    // Gerçek model "bilmiyorum" deyip yine de [1] ekleyebiliyor: ret ifadesi atıftan ÖNCE gelir (dogrulanmis sayılmaz).
+    [
+        "dogrulanmis bilgim yok", "bu konuda bilgim yok", "kaynaklarda bu bilgi yok", "bilmiyorum",
+        "bilgi bulunmamaktadir", "bilgi bulunmuyor", "bilgi yer almiyor", "bilgiye ulasamiyorum",
+        "cevap vermek mumkun degil", "yanit vermek mumkun degil", "kesin bir tarih mevcut degil",
+        "i don t know", "no information",
+    ]
+    .iter()
+    .any(|k| s.contains(k))
 }
 
 /// Kaynaklı model cevabının etiketi.
@@ -146,6 +154,10 @@ mod testler {
         assert_eq!(kaynakli_cevap_etiketi("Bilgi şöyle [1].", 2), DOGRULANMIS);
         assert_eq!(kaynakli_cevap_etiketi("Bilgi şöyle.", 2), ONERI);
         assert_eq!(kaynakli_cevap_etiketi("Bu konuda doğrulanmış bilgim yok.", 2), BILINMIYOR);
+        // Gerçek model örnekleri (değerlendirme B03/B12/B15): ret + ilgisiz [1] -> bilinmiyor
+        assert_eq!(kaynakli_cevap_etiketi("Bilmiyorum, bu bilgiye ulaşamıyorum. [1]", 1), BILINMIYOR);
+        assert_eq!(kaynakli_cevap_etiketi("Verilen kaynaklarda doğrudan bilgi bulunmamaktadır. [1] [2]", 3), BILINMIYOR);
+        assert_eq!(kaynakli_cevap_etiketi("Şu anda bir cevap vermek mümkün değil. [1]", 1), BILINMIYOR);
         assert_eq!(arac_etiketi("resmi-kaynak"), BILINMIYOR);
         assert_eq!(arac_etiketi("hesap-makinesi"), DOGRULANMIS);
     }

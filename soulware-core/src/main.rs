@@ -745,7 +745,9 @@ async fn embed_test(State(st): State<Arc<AppState>>) -> Json<Value> {
 // ═══ K-23 GÜVENLİK KAPISI: üretimden önce zararlı istemi yakala (TÜM uçlar, fail-closed) ═══
 // Katmanlar: (1) değişmez sert blok, (2) kural dosyası (güvenlik ekibi), (3) model yargıcı (yalnız etiket).
 // Yargıç hata verirse / erişilemezse / tanınmayan yanıt dönerse istek REDDEDİLİR.
-async fn kapi(st: &AppState, uc: guvenlik_kapisi::Uc, prompt: &str) -> guvenlik_kapisi::Karar {
+/// `yargic_sor=false`: yalnız kurallar (sert blok + kural dosyası). Kesin araç ve gerekçe yolları için
+/// (bkz. guvenlik_kapisi::yargic_atlanir); kural eşleşmesi yine reddeder.
+async fn kapi(st: &AppState, uc: guvenlik_kapisi::Uc, prompt: &str, yargic_sor: bool) -> guvenlik_kapisi::Karar {
     use guvenlik_kapisi::{Kategori, Yargic};
     let p = prompt.to_lowercase();
     const SERT_YASAK: &[&str] = &[
@@ -756,6 +758,8 @@ async fn kapi(st: &AppState, uc: guvenlik_kapisi::Uc, prompt: &str) -> guvenlik_
     if SERT_YASAK.iter().any(|k| p.contains(k)) { kural.insert(0, Kategori::CocukIstismari); }
     let yargic = if !kural.is_empty() {
         Yargic::Yok // kural zaten reddediyor: yargıca gerek yok
+    } else if !yargic_sor {
+        Yargic::Guvenli // yargıç bu yol için atlandı (kurallar geçti)
     } else if let Some(url) = st.cfg.remote_url.as_ref() {
         let mut body = json!({
             "model": st.cfg.remote_model,
@@ -829,7 +833,7 @@ async fn gorsel(State(st): State<Arc<AppState>>, Json(req): Json<GorselReq>) -> 
         return (StatusCode::BAD_REQUEST, "boş istem").into_response();
     }
     // ── KORUMA KALKANI (1): GÜVENLİK KAPISI — zararlıyı üretmeden reddet ──
-    if kapi(&st, guvenlik_kapisi::Uc::Gorsel, prompt).await.reddedildi() {
+    if kapi(&st, guvenlik_kapisi::Uc::Gorsel, prompt, true).await.reddedildi() {
         return (StatusCode::UNPROCESSABLE_ENTITY, guvenlik_kapisi::RET_METNI_GORSEL).into_response();
     }
     // PRO: istemi zengin İngilizce görsel istemine geliştir (kısa/Türkçe → detaylı, pro kalite)
@@ -871,7 +875,7 @@ async fn video_uret(State(st): State<Arc<AppState>>, Json(req): Json<GorselReq>)
     };
     let prompt = req.prompt.trim();
     if prompt.is_empty() { return (StatusCode::BAD_REQUEST, "boş istem").into_response(); }
-    if kapi(&st, guvenlik_kapisi::Uc::Video, prompt).await.reddedildi() {
+    if kapi(&st, guvenlik_kapisi::Uc::Video, prompt, true).await.reddedildi() {
         return (StatusCode::UNPROCESSABLE_ENTITY, guvenlik_kapisi::RET_METNI_GORSEL).into_response();
     }
     let gelismis = istem_gelistir(&st, prompt).await;
@@ -971,14 +975,9 @@ async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) ->
             return;
         }
 
-        // 0) K-23 GÜVENLİK KAPISI (fail-closed): ret metni akıtılır, model çağrılmaz.
-        if kapi(&st, guvenlik_kapisi::Uc::Stream, &req.prompt).await.reddedildi() {
-            let sonuc = guvenlik_kapisi::RET_METNI;
-            let _ = tx.send(Ok(Event::default().event("token").data(sonuc))).await;
-            let iz = iz_yap(&req.prompt, Some("guvenlik-reddi"), "reddetti", vec![], "arac", "guvenlik-reddi", "reddedildi");
-            let (data_hash, chain, tuz) = arac_kanit(&st, &req.prompt, sonuc, "guvenlik-reddi", ts).await;
-            let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "prompt": req.prompt, "answer": sonuc, "model": "guvenlik-reddi", "brain": "arac", "etiket": "reddedildi", "iz": iz, "chain": chain});
-            let _ = tx.send(Ok(Event::default().event("done").data(proof.to_string()))).await;
+        // 0) K-23 KURALLARI (her yoldan önce): ret metni akıtılır, model çağrılmaz.
+        if kapi(&st, guvenlik_kapisi::Uc::Stream, &req.prompt, false).await.reddedildi() {
+            ret_akit(&st, &req.prompt, ts, &tx).await;
             return;
         }
 
@@ -996,6 +995,15 @@ async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) ->
             // satir sonlarini kaybedebilir; kanit dosyasi bunu kullanir).
             let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "prompt": req.prompt, "answer": sonuc, "model": arac_ad, "brain": "arac", "etiket": etiket::arac_etiketi(arac_ad), "iz": iz, "chain": chain});
             let _ = tx.send(Ok(Event::default().event("done").data(proof.to_string()))).await;
+            return;
+        }
+
+        // 1b) K-23 YARGICI: kesin araç değil; KARARLAR'da karşılığı olan gerekçe sorusu da değilse.
+        let gerekce = gerekce_karari_var(&st, &req.prompt);
+        if !guvenlik_kapisi::yargic_atlanir(guvenlik_kapisi::Uc::Stream, false, gerekce)
+            && kapi(&st, guvenlik_kapisi::Uc::Stream, &req.prompt, true).await.reddedildi()
+        {
+            ret_akit(&st, &req.prompt, ts, &tx).await;
             return;
         }
 
@@ -1081,6 +1089,35 @@ async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) ->
     Sse::new(stream)
 }
 
+/// Gerekçe sorusu ve KARARLAR.md'de karşılığı var mı (yargıç atlanır; model yalnız karar metniyle cevaplar)?
+fn gerekce_karari_var(st: &AppState, prompt: &str) -> bool {
+    kayitlar::neden_sorusu_mu(prompt) && !kayitlar::ilgili_kararlar(&st.kararlar, prompt, 1).is_empty()
+}
+
+/// K-23 ret yanıtı (ask): model çağrılmaz; tuzlu kanıt zincire yazılır.
+async fn ret_yaniti(st: &AppState, prompt: &str, ts: u64, t0: std::time::Instant) -> AskResp {
+    let sonuc = guvenlik_kapisi::RET_METNI.to_string();
+    let iz = iz_yap(prompt, Some("guvenlik-reddi"), "reddetti", vec![], "arac", "guvenlik-reddi", "reddedildi");
+    let (data_hash, chain, tuz) = arac_kanit(st, prompt, &sonuc, "guvenlik-reddi", ts).await;
+    AskResp {
+        ok: true, answer: sonuc, brain: "arac".into(), model: "guvenlik-reddi".into(),
+        grounded: false, abstained: false, sources: vec![],
+        latency_ms: t0.elapsed().as_millis(), input_tokens: None, output_tokens: None,
+        proof_hash: hex::encode(data_hash), ts, salt: Some(hex::encode(tuz)), chain, hata: None,
+        etiket: Some("reddedildi".into()), iz: Some(iz),
+    }
+}
+
+/// K-23 ret (akış): ret metni akıtılır, model çağrılmaz.
+async fn ret_akit(st: &AppState, prompt: &str, ts: u64, tx: &tokio::sync::mpsc::Sender<Result<Event, std::convert::Infallible>>) {
+    let sonuc = guvenlik_kapisi::RET_METNI;
+    let _ = tx.send(Ok(Event::default().event("token").data(sonuc))).await;
+    let iz = iz_yap(prompt, Some("guvenlik-reddi"), "reddetti", vec![], "arac", "guvenlik-reddi", "reddedildi");
+    let (data_hash, chain, tuz) = arac_kanit(st, prompt, sonuc, "guvenlik-reddi", ts).await;
+    let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "prompt": prompt, "answer": sonuc, "model": "guvenlik-reddi", "brain": "arac", "etiket": "reddedildi", "iz": iz, "chain": chain});
+    let _ = tx.send(Ok(Event::default().event("done").data(proof.to_string()))).await;
+}
+
 // Beyin çağrısı (ask): Uzak GPU > yerel > Claude. Hata → hazır hata yanıtı.
 type BeyinSonucu = (String, String, String, Option<u64>, Option<u64>);
 async fn beyin_uret(st: &Arc<AppState>, req: &AskReq, uc_arg: &str) -> Result<BeyinSonucu, AskResp> {
@@ -1149,18 +1186,9 @@ async fn ask_ic(st: Arc<AppState>, req: AskReq) -> Json<AskResp> {
         return Json(bos_hata("prompt boş olamaz"));
     }
 
-    // ── K-23 GÜVENLİK KAPISI: modelden ve araçlardan ÖNCE; hata → ret (fail-closed) ──
-    if kapi(&st, guvenlik_kapisi::Uc::Ask, &req.prompt).await.reddedildi() {
-        let sonuc = guvenlik_kapisi::RET_METNI.to_string();
-        let iz = iz_yap(&req.prompt, Some("guvenlik-reddi"), "reddetti", vec![], "arac", "guvenlik-reddi", "reddedildi");
-        let (data_hash, chain, tuz) = arac_kanit(&st, &req.prompt, &sonuc, "guvenlik-reddi", ts).await;
-        return Json(AskResp {
-            ok: true, answer: sonuc, brain: "arac".into(), model: "guvenlik-reddi".into(),
-            grounded: false, abstained: false, sources: vec![],
-            latency_ms: t0.elapsed().as_millis(), input_tokens: None, output_tokens: None,
-            proof_hash: hex::encode(data_hash), ts, salt: Some(hex::encode(tuz)), chain, hata: None,
-            etiket: Some("reddedildi".into()), iz: Some(iz),
-        });
+    // ── K-23 KURALLARI: her yoldan (araçlar dahil) ÖNCE; eşleşme → ret ──
+    if kapi(&st, guvenlik_kapisi::Uc::Ask, &req.prompt, false).await.reddedildi() {
+        return Json(ret_yaniti(&st, &req.prompt, ts, t0).await);
     }
 
     // ── ARAÇ-KULLANIMI: kesin cevap gereken niyetler ZAYIF MODELE bırakılmaz ──
@@ -1175,6 +1203,14 @@ async fn ask_ic(st: Arc<AppState>, req: AskReq) -> Json<AskResp> {
             proof_hash: hex::encode(data_hash), ts, salt: Some(hex::encode(tuz)), chain, hata: None,
             etiket: Some(etiket::arac_etiketi(arac_ad).into()), iz: Some(iz),
         });
+    }
+
+    // ── K-23 YARGICI (fail-closed): kesin araç değil ve KARARLAR'da karşılığı olan gerekçe sorusu değilse ──
+    let gerekce = gerekce_karari_var(&st, &req.prompt);
+    if !guvenlik_kapisi::yargic_atlanir(guvenlik_kapisi::Uc::Ask, false, gerekce)
+        && kapi(&st, guvenlik_kapisi::Uc::Ask, &req.prompt, true).await.reddedildi()
+    {
+        return Json(ret_yaniti(&st, &req.prompt, ts, t0).await);
     }
 
     // ── GROUNDING: açık bağlam yoksa ve grounding açıksa KAYNAK getir ──

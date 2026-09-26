@@ -100,10 +100,8 @@ fn on_satis_mi(s: &str, ham: &str) -> bool {
 }
 
 fn ag_durumu_mi(s: &str, ham: &str) -> bool {
-    // "ağ" kısa olduğu için önekle değil, hâl ekli biçimleriyle tam eşleşir ("ağda", "ağın", ...; "ağaç" değil).
-    const AG: &[&str] = &["ag", "agda", "agdaki", "agdan", "agi", "agin", "aga"];
-    let konu = s.split(' ').any(|t| AG.contains(&t))
-        || ["zincir", "mainnet", "network", "dugum", "node"].iter().any(|k| anahtar_var(s, k));
+    // Türkçe ekler genel olarak anahtar_var'da işlenir ("ağında", "zincirin"; "ağaç" değil).
+    let konu = ["ag", "zincir", "mainnet", "network", "dugum", "node"].iter().any(|k| anahtar_var(s, k));
     let durum = ["calisiyor mu", "ayakta", "durum", "saglik", "aktif mi", "canli mi", "sorun var", "ariza", "kesinti"]
         .iter()
         .any(|k| anahtar_var(s, k));
@@ -166,6 +164,8 @@ mod testler {
         assert_eq!(t("Mainnet'in durumu nasıl?"), Some(AgDurumu));
         assert_eq!(t("Ağda bir sorun var mı?"), Some(AgDurumu));
         assert_eq!(t("Mainnet'te kesinti mi var?"), Some(AgDurumu));
+        assert_eq!(t("AIDAG ağında bir sorun var mı?"), Some(AgDurumu));
+        assert_eq!(t("Ağın durumu nedir?"), Some(AgDurumu));
     }
 
     #[test]

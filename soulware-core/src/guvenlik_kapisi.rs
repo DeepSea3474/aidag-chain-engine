@@ -184,6 +184,13 @@ pub fn karar(uc: Uc, kural: &[Kategori], yargic: &Yargic, yargic_zorunlu: bool) 
     }
 }
 
+/// Yargıç atlanabilir mi? Yalnızca (a) modeli HİÇ çağırmayan kesin araç cevapları (bakiye, blok, belge, hesap,
+/// karar maddesi...) ve (b) KARARLAR.md'de karşılığı olan gerekçe soruları (model yalnız karar metniyle cevaplar).
+/// Zararlı istek KURALLARI her durumda bundan ÖNCE çalışır; görsel/video uçlarında yargıç hiçbir zaman atlanmaz.
+pub fn yargic_atlanir(uc: Uc, kesin_arac: bool, gerekce_karari: bool) -> bool {
+    matches!(uc, Uc::Ask | Uc::Stream) && (kesin_arac || gerekce_karari)
+}
+
 pub const RET_METNI: &str = "Bu isteğe yardımcı olamam. KUBRA saldırı bilgisini yalnızca savunma için kullanır; \
 çalışır istismar kodu, zararlı yazılım ya da yetkisiz erişim için içerik üretmez (K-23). Korunma, tespit veya \
 sertleştirme konusunda yardımcı olabilirim. Sızma testleri yetkili ekipler tarafından yazılı izinle yapılır.";
@@ -217,6 +224,15 @@ mod testler {
     #[test] fn f15_kural_yargic_izninden_once_gelir() { assert!(red(&karar(Uc::Gorsel, &[ZararliYazilim], &Yargic::Guvenli, true))); }
 
     // ---- kontroller (puana girmez)
+    #[test]
+    fn yargic_yalniz_kesin_arac_ve_gerekce_icin_atlanir() {
+        assert!(yargic_atlanir(Uc::Ask, true, false));
+        assert!(yargic_atlanir(Uc::Stream, false, true));
+        assert!(!yargic_atlanir(Uc::Ask, false, false));
+        assert!(!yargic_atlanir(Uc::Gorsel, true, true));
+        assert!(!yargic_atlanir(Uc::Video, true, true));
+    }
+
     #[test]
     fn guvenli_istek_gecer() {
         assert_eq!(karar(Uc::Ask, &[], &Yargic::Guvenli, true), Karar::Izin);
