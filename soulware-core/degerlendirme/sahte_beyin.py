@@ -21,7 +21,7 @@ def _kelimeler(t):
 
 
 def cevap_uret(sistem, kullanici):
-    """Kaynaga sadik model benzetimi (v2): soru ile kaynak arasinda en az 2 ortak anlamli kelime
+    """Kaynaga sadik model benzetimi (v3; v2 + pasajdan alinti): soru ile kaynak arasinda en az 2 ortak anlamli kelime
     yoksa 'dogrulanmis bilgim yok' der; varsa kaynaga [1] atfiyla cevap verir."""
     if "prompt engineer" in sistem:
         return kullanici  # gorsel istem gelistirme: aynen don
@@ -30,6 +30,10 @@ def cevap_uret(sistem, kullanici):
     if "KAYNAKLAR:" in kullanici:
         kaynak, _, soru = kullanici.partition("SORU:")
         if len(_kelimeler(soru) & _kelimeler(kaynak)) >= 2:
+            # v3: kaynağa sadık model -> ilk pasajdan alıntılayarak cevaplar (içerik desteği ölçülebilsin)
+            for satir in kaynak.splitlines():
+                if satir.startswith("[1] ") and "): " in satir:
+                    return " ".join(satir.split("): ", 1)[1].split()[:30]) + " [1]"
             return "Kaynaklara göre bu konudaki bilgi şöyledir [1]."
         return "Bu konuda doğrulanmış bilgim yok."
     if "DOĞRULANMIŞ bir kaynak YOK" in kullanici:

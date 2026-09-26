@@ -1066,8 +1066,8 @@ async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) ->
             Ok(metin) => {
                 let (metin, etiket_s) = if oneri {
                     (format!("{}{metin}", etiket::ONERI_ONEKI), etiket::ONERI)
-                } else if etkin_baglam.is_some() {
-                    let e = etiket::kaynakli_cevap_etiketi(&metin, kaynaklar.len());
+                } else if let Some(b) = etkin_baglam.as_deref() {
+                    let e = etiket::kaynakli_cevap_etiketi(&metin, b, kaynaklar.len(), resmi_ctx.is_some());
                     (metin, e)
                 } else {
                     (metin, etiket::SOHBET)
@@ -1287,23 +1287,26 @@ async fn ask_ic(st: Arc<AppState>, req: AskReq) -> Json<AskResp> {
     let grounded = etkin_baglam.as_deref().map(|c| !c.trim().is_empty()).unwrap_or(false);
     // K-06 etiketi (deterministik): kaynaklı → atıf denetimi; kaynaksız → öneri ya da sohbet.
     let etiket_s = if grounded {
-        etiket::kaynakli_cevap_etiketi(&answer, kaynak_sayisi)
+        // Resmî kaynak (KARARLAR / AIDAG belgeleri) yalnız kullanıcı bağlam vermediyse; içerik desteğine bakılır.
+        etiket::kaynakli_cevap_etiketi(&answer, etkin_baglam.as_deref().unwrap_or(""), kaynak_sayisi, resmi_ctx.is_some() && !acik_baglam)
     } else if tur == etiket::SoruTuru::Oneri {
         etiket::ONERI
     } else {
         etiket::SOHBET
     };
     // Öneri türü soru + kaynaklı cevap "bilinmiyor" (ilgisiz kaynak) → kaynaksız ÖNERİ moduna düş.
-    let (answer, model, brain_name, etiket_s) = if grounded && etiket_s == etiket::BILINMIYOR && tur == etiket::SoruTuru::Oneri {
+    let (answer, model, brain_name, etiket_s, kaynakli) = if grounded && etiket_s == etiket::BILINMIYOR && tur == etiket::SoruTuru::Oneri {
         match beyin_uret(&st, &req, &etiket::oneri_user(&req.prompt)).await {
-            Ok((a2, m2, b2, _, _)) => (a2, m2, b2, etiket::ONERI),
-            Err(_) => (answer, model, brain_name, etiket_s),
+            Ok((a2, m2, b2, _, _)) => (a2, m2, b2, etiket::ONERI, false),
+            Err(_) => (answer, model, brain_name, etiket_s, grounded),
         }
     } else {
-        (answer, model, brain_name, etiket_s)
+        (answer, model, brain_name, etiket_s, grounded)
     };
-    let answer = if etiket_s == etiket::ONERI && !answer.starts_with(etiket::ONERI_ONEKI) {
-        format!("{}{answer}", etiket::ONERI_ONEKI)
+    // Öneri öneki: kaynaklı ama doğrulanmamış ↔ kaynaksız ayrı söylenir.
+    let onek = if kaynakli { etiket::KAYNAKLI_ONERI_ONEKI } else { etiket::ONERI_ONEKI };
+    let answer = if etiket_s == etiket::ONERI && !answer.starts_with(onek) {
+        format!("{onek}{answer}")
     } else {
         answer
     };

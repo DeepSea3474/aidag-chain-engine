@@ -1,6 +1,8 @@
 //! K-06: doğrulanamayan bilgi cevap olmaz. Her cevabın etiketi DETERMİNİSTİK belirlenir (model seçmez):
-//!   dogrulanmis : araç cevabı (zincir okuması, hesap, sabit resmî metin) ya da geçerli [n] atfı olan kaynaklı cevap
-//!   oneri       : kaynaksız yöntem/öneri cevabı ya da atfı doğrulanamayan kaynaklı cevap (başına etiket yazılır)
+//!   dogrulanmis : araç cevabı (zincir okuması, hesap, sabit resmî metin) ya da RESMÎ kaynaklı (KARARLAR,
+//!                 AIDAG belgeleri) ve içeriği kaynakla yeterince örtüşen cevap (destek oranı >= DESTEK_ESIGI)
+//!   oneri       : kaynaksız yöntem/öneri cevabı; kaynakla yeterince desteklenmeyen cevap; genel bilgi deposundan
+//!                 (Wikipedia vb.) kaynaklı cevap — içerik henüz otomatik doğrulanmadığı için (başına etiket yazılır)
 //!   bilinmiyor  : kaynağı olmayan kesin olgu sorusu (model ÇAĞRILMAZ) ya da modelin "doğrulanmış bilgim yok" demesi
 //!   reddedildi  : K-23 kapısı
 //!   sohbet      : selamlaşma ve hal-hatır (bilgi iddiası yok)
@@ -13,6 +15,12 @@ pub const BILINMIYOR: &str = "bilinmiyor";
 pub const SOHBET: &str = "sohbet";
 
 pub const ONERI_ONEKI: &str = "Öneri (doğrulanmış bir kaynağa dayanmıyor): ";
+pub const KAYNAKLI_ONERI_ONEKI: &str = "Kaynaklı öneri (kaynak içeriği otomatik doğrulanmadı): ";
+
+/// Resmî kaynaklı cevabın "doğrulanmış" sayılması için cevaptaki anlamlı kelimelerin kaynakta bulunma oranı.
+/// Ana set gerçek model ölçümü (26 Eylül 2026): desteklenen cevaplar 0,57–0,85; ilgisiz kaynaklı 0,05–0,21;
+/// gerekçesi kısmen kaynak dışı olan cevap 0,38. İleride anlamsal doğrulama (NLI) ile değiştirilecek.
+pub const DESTEK_ESIGI: f32 = 0.5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SoruTuru {
@@ -51,9 +59,9 @@ pub fn soru_turu(prompt: &str, sohbet: bool) -> SoruTuru {
     SoruTuru::KesinOlgu
 }
 
-/// Cevaptaki [n] atıfları: en az bir tane olmalı ve her biri 1..=kaynak_sayisi aralığında olmalı.
-pub fn atif_gecerli(cevap: &str, kaynak_sayisi: usize) -> bool {
-    let mut bulundu = false;
+/// Cevapta geçersiz [n] atfı var mı (0 ya da kaynak sayısından büyük)? Atıf etiket için şart DEĞİLDİR;
+/// ama geçersiz atıf varsa cevap "doğrulanmış" sayılmaz.
+pub fn atif_hatali(cevap: &str, kaynak_sayisi: usize) -> bool {
     let b = cevap.as_bytes();
     let mut i = 0;
     while i < b.len() {
@@ -65,15 +73,32 @@ pub fn atif_gecerli(cevap: &str, kaynak_sayisi: usize) -> bool {
             if j > i + 1 && j < b.len() && b[j] == b']' {
                 let n: usize = cevap[i + 1..j].parse().unwrap_or(0);
                 if n == 0 || n > kaynak_sayisi {
-                    return false;
+                    return true;
                 }
-                bulundu = true;
                 i = j;
             }
         }
         i += 1;
     }
-    bulundu
+    false
+}
+
+/// İçerik desteği: cevaptaki anlamlı kelimelerin (>= 4 harf, durak kelime değil) kaynak metninde bulunma oranı.
+/// Türkçe ekler için 5 harfli kök eşleşmesi kabul edilir ("kararlaştırıldı" ~ "karar...").
+pub fn destek_orani(cevap: &str, kaynak: &str) -> f32 {
+    let kaynak_k: std::collections::HashSet<String> =
+        retrieval::tokenle(kaynak).into_iter().filter(|w| w.chars().count() >= 4).collect();
+    let cevap_k: Vec<String> = retrieval::tokenle(cevap).into_iter().filter(|w| w.chars().count() >= 4).collect();
+    if cevap_k.is_empty() || kaynak_k.is_empty() {
+        return 0.0;
+    }
+    let kok = |w: &str| w.chars().take(5).collect::<String>();
+    let kaynak_kok: std::collections::HashSet<String> = kaynak_k.iter().map(|w| kok(w)).collect();
+    let destekli = cevap_k
+        .iter()
+        .filter(|w| kaynak_k.contains(*w) || (w.chars().count() >= 5 && kaynak_kok.contains(&kok(w))))
+        .count();
+    destekli as f32 / cevap_k.len() as f32
 }
 
 /// Model "doğrulanmış bilgim yok" dedi mi (resmî kaynak talimatındaki sabit metin dahil)?
@@ -91,10 +116,12 @@ pub fn bilgi_yok_dedi(cevap: &str) -> bool {
 }
 
 /// Kaynaklı model cevabının etiketi.
-pub fn kaynakli_cevap_etiketi(cevap: &str, kaynak_sayisi: usize) -> &'static str {
+/// Kaynaklı model cevabının etiketi. `resmi`: kaynaklar KARARLAR.md / AIDAG resmî belgeleri. Genel bilgi deposu
+/// (Wikipedia vb.) ve kullanıcının verdiği bağlam, anlamsal doğrulama gelene kadar "doğrulanmış" sayılmaz.
+pub fn kaynakli_cevap_etiketi(cevap: &str, kaynak_metni: &str, kaynak_sayisi: usize, resmi: bool) -> &'static str {
     if bilgi_yok_dedi(cevap) {
         BILINMIYOR
-    } else if kaynak_sayisi > 0 && atif_gecerli(cevap, kaynak_sayisi) {
+    } else if resmi && !atif_hatali(cevap, kaynak_sayisi) && destek_orani(cevap, kaynak_metni) >= DESTEK_ESIGI {
         DOGRULANMIS
     } else {
         ONERI
@@ -140,24 +167,37 @@ mod testler {
 
     #[test]
     fn atif_denetimi() {
-        assert!(atif_gecerli("Kaynağa göre X [1].", 1));
-        assert!(atif_gecerli("A [1], B [2].", 2));
-        assert!(!atif_gecerli("Atıf yok.", 3));
-        assert!(!atif_gecerli("Olmayan kaynak [4].", 3));
-        assert!(!atif_gecerli("Sıfır [0].", 3));
-        assert!(!atif_gecerli("[1]", 0));
-        assert!(atif_gecerli("Dizi [a] değil ama [2] var", 2));
+        assert!(!atif_hatali("Kaynağa göre X [1].", 1));
+        assert!(!atif_hatali("Atıf yok.", 3));
+        assert!(atif_hatali("Olmayan kaynak [4].", 3));
+        assert!(atif_hatali("Sıfır [0].", 3));
+        assert!(!atif_hatali("Dizi [a] değil ama [2] var", 2));
+    }
+
+    #[test]
+    fn destek_orani_icerige_bakar() {
+        let k = "Ön satış ödemeleri yalnızca BNB Smart Chain üzerindeki USDT ile alınır. İzleyici BNB ödemelerini tespit edemiyor; BNB fiyatı değişken.";
+        assert!(destek_orani("Ön satışta yalnızca USDT kabul ediliyor çünkü izleyici BNB ödemelerini tespit edemiyor ve BNB fiyatı değişken.", k) >= DESTEK_ESIGI);
+        assert!(destek_orani("Yağış miktarını bilmiyorum, meteoroloji raporlarına bakmanı öneririm.", k) < 0.25);
+        assert_eq!(destek_orani("", k), 0.0);
     }
 
     #[test]
     fn kaynakli_etiket() {
-        assert_eq!(kaynakli_cevap_etiketi("Bilgi şöyle [1].", 2), DOGRULANMIS);
-        assert_eq!(kaynakli_cevap_etiketi("Bilgi şöyle.", 2), ONERI);
-        assert_eq!(kaynakli_cevap_etiketi("Bu konuda doğrulanmış bilgim yok.", 2), BILINMIYOR);
-        // Gerçek model örnekleri (değerlendirme B03/B12/B15): ret + ilgisiz [1] -> bilinmiyor
-        assert_eq!(kaynakli_cevap_etiketi("Bilmiyorum, bu bilgiye ulaşamıyorum. [1]", 1), BILINMIYOR);
-        assert_eq!(kaynakli_cevap_etiketi("Verilen kaynaklarda doğrudan bilgi bulunmamaktadır. [1] [2]", 3), BILINMIYOR);
-        assert_eq!(kaynakli_cevap_etiketi("Şu anda bir cevap vermek mümkün değil. [1]", 1), BILINMIYOR);
+        let k = "Genesis vesting başlangıcı ön satış TGE tarihiyle aynı belirsiz tarihe bağlandı; ekip ile yatırımcı arasında simetri.";
+        let destekli = "Genesis vesting başlangıcı, ekip ile yatırımcı arasında simetri için ön satış TGE tarihiyle aynı belirsiz tarihe bağlandı.";
+        // Resmî kaynak + içerik desteği -> doğrulanmış; [n] şart değil (D03: doğru ama atıfsız cevap)
+        assert_eq!(kaynakli_cevap_etiketi(destekli, k, 1, true), DOGRULANMIS);
+        // Aynı cevap genel bilgi deposundan -> öneri (anlamsal doğrulama gelene kadar)
+        assert_eq!(kaynakli_cevap_etiketi(destekli, k, 1, false), ONERI);
+        // Resmî kaynak ama içerik desteklenmiyor (kaynak dışı gerekçe) -> öneri, [1] olsa bile
+        assert_eq!(kaynakli_cevap_etiketi("Saldırganlar tek anahtarı ele geçirebilir, güvenlik artar. [1]", k, 1, true), ONERI);
+        // Geçersiz atıf -> doğrulanmış olamaz
+        assert_eq!(kaynakli_cevap_etiketi(&format!("{destekli} [3]"), k, 1, true), ONERI);
+        assert_eq!(kaynakli_cevap_etiketi("Bu konuda doğrulanmış bilgim yok.", k, 2, true), BILINMIYOR);
+        // Gerçek model örnekleri (B03/B12/B15): ret + ilgisiz [1] -> bilinmiyor
+        assert_eq!(kaynakli_cevap_etiketi("Bilmiyorum, bu bilgiye ulaşamıyorum. [1]", k, 1, false), BILINMIYOR);
+        assert_eq!(kaynakli_cevap_etiketi("Verilen kaynaklarda doğrudan bilgi bulunmamaktadır. [1] [2]", k, 3, false), BILINMIYOR);
         assert_eq!(arac_etiketi("resmi-kaynak"), BILINMIYOR);
         assert_eq!(arac_etiketi("hesap-makinesi"), DOGRULANMIS);
     }
