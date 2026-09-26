@@ -26,6 +26,7 @@ mod guvenlik_kapisi; // K-23: tum uretim uclarinda zararli istek kapisi (fail-cl
 mod etiket;       // K-06: deterministik cevap etiketi (dogrulanmis/oneri/bilinmiyor)
 mod yonlendirici; // deterministik niyet yonlendirici (saf, agsiz)
 mod kayitlar;     // KARARLAR.md ve KAYNAKLAR.md (salt okunur)
+mod anlamsal_niyet; // P2: kural eşleşmezse gömme modeliyle niyet (yalnız salt okunur araçlar)
 
 use axum::{extract::State, routing::{get, post}, response::{IntoResponse, Sse, sse::Event}, http::{StatusCode, header}, body::Body, Json, Router};
 use ed25519_dalek::SigningKey;
@@ -129,6 +130,7 @@ struct AppState {
     kurallar: guvenlik_kapisi::Kurallar, // K-23 kapı kuralları
     kararlar: Vec<kayitlar::KararMadde>, // KARARLAR.md maddeleri
     kaynak_ozeti: String,                // KAYNAKLAR.md özeti
+    anlamsal: Option<anlamsal_niyet::AnlamsalNiyet>, // P2: kural eşleşmezse gömme modeliyle niyet
 }
 
 // ════════════════════════════ Kimlik / grounding ════════════════════════════
@@ -473,6 +475,27 @@ async fn arac_calistir(st: &AppState, prompt: &str) -> Option<(String, &'static 
     if let Some(x) = hesap::hesapla(prompt) {
         return Some((x, "hesap-makinesi"));
     }
+    // P2 · ANLAMSAL YEDEK: kurallar eşleşmedi; gerekçe ("neden") ve sohbet sorusu değilse gömme modeliyle
+    // yalnız SALT OKUNUR araç niyetleri (kimlik, ağ durumu, ön satış, kaynak listesi). Belirsizse None → model yolu.
+    if !kayitlar::neden_sorusu_mu(prompt) && kanit_gerektiren_mi(prompt) {
+        if let (Some(a), Some(e)) = (&st.anlamsal, &st.embedder) {
+            match a.sinifla(e, prompt) {
+                Some("kimlik") => return Some((resmi::ISIM_CEVABI.to_string(), "kimlik")),
+                Some("kaynak-listesi") if !st.kaynak_ozeti.is_empty() => return Some((st.kaynak_ozeti.clone(), "kaynak-listesi")),
+                Some("ag-durumu") => {
+                    if let Some(x) = zincir::ag_durumu_getir(&st.http, &st.cfg.chain_rpc).await {
+                        return Some((x, "ag-durumu"));
+                    }
+                }
+                Some("on-satis") => {
+                    if let Some(x) = zincir::on_satis_getir(&st.http, &st.cfg.chain_rpc).await {
+                        return Some((x, "on-satis-durumu"));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
     // AIDAG konusu ama resmi kaynak yok → uydurma YOK.
     if resmi::aidag_konusu_mu(prompt) && resmi::sec(&st.resmi, prompt, st.cfg.ground_k).is_empty() {
         return Some((resmi::DOGRULANMAMIS.to_string(), "resmi-kaynak"));
@@ -617,7 +640,11 @@ struct Iz {
 fn iz_yap(prompt: &str, arac: Option<&str>, kapi: &str, kaynaklar: Vec<Kaynak>, beyin: &str, model: &str, etiket: &str) -> Iz {
     Iz {
         surum: env!("SOULWARE_GIT_SHA").to_string(),
-        niyet: yonlendirici::niyet_bul(prompt).map(|n| n.ad()),
+        // Bu dört araca yalnız kural niyeti ya da P2 anlamsal eşleşmesiyle gidilir: kural yoksa yol "anlamsal"dır.
+        niyet: yonlendirici::niyet_bul(prompt).map(|n| n.ad()).or_else(|| match arac {
+            Some(a @ ("kimlik" | "ag-durumu" | "on-satis-durumu" | "kaynak-listesi")) => Some(format!("anlamsal:{a}")),
+            _ => None,
+        }),
         arac: arac.map(str::to_string),
         kapi: kapi.to_string(),
         zincir_okumalari: zincir::izi_al(),
@@ -1497,6 +1524,15 @@ async fn main() {
     }
     let resmi_belgeler = resmi::yukle(&cfg.resmi_path);
     let kararlar = kayitlar::kararlari_yukle(&cfg.kararlar_path);
+    // P2: anlamsal yedek niyet (gömme modeli varsa). Eşik: SOULWARE_NIYET_ESIK / SOULWARE_NIYET_FARK.
+    let anlamsal = embedder.as_ref().and_then(|e| {
+        let esik = std::env::var("SOULWARE_NIYET_ESIK").ok().and_then(|x| x.parse().ok()).unwrap_or(anlamsal_niyet::ESIK);
+        let fark = std::env::var("SOULWARE_NIYET_FARK").ok().and_then(|x| x.parse().ok()).unwrap_or(anlamsal_niyet::FARK);
+        match anlamsal_niyet::AnlamsalNiyet::yukle(e, esik, fark) {
+            Ok(a) => { println!("   anlamsal niyet: açık (eşik {esik}, fark {fark})"); Some(a) }
+            Err(err) => { eprintln!("⚠ anlamsal niyet yüklenemedi: {err} → yalnız kurallar"); None }
+        }
+    });
     let kaynak_ozeti = std::fs::read_to_string(&cfg.kaynaklar_path).map(|m| kayitlar::kaynak_ozeti(&m)).unwrap_or_default();
     println!("   kayıtlar    : {} karar maddesi, kaynak listesi {}", kararlar.len(), if kaynak_ozeti.is_empty() { "YOK" } else { "var" });
     // K-23: bozuk kural dosyası -> servis AÇILMAZ (fail-closed). Dosya yoksa yalnız yargıç çalışır.
@@ -1505,7 +1541,7 @@ async fn main() {
         Err(e) => { eprintln!("HATA: K-23 kapı kuralları yüklenemedi: {e}"); std::process::exit(1); }
     };
     println!("📘 AIDAG resmi kaynak: {} belge ({})", resmi_belgeler.len(), cfg.resmi_path);
-    let state = Arc::new(AppState { cfg, http, key, key_addr, local, local_name, depo: Mutex::new(depo), embedder, resmi: resmi_belgeler, kurallar, kararlar, kaynak_ozeti });
+    let state = Arc::new(AppState { cfg, http, key, key_addr, local, local_name, depo: Mutex::new(depo), embedder, resmi: resmi_belgeler, kurallar, kararlar, kaynak_ozeti, anlamsal });
 
     println!("──────────────────────────────────────────────");
     println!("🌀 SoulwareAI çekirdeği · yapay zeka: KUBRA (v0.1)");
