@@ -1524,8 +1524,11 @@ async fn main() {
     }
     let resmi_belgeler = resmi::yukle(&cfg.resmi_path);
     let kararlar = kayitlar::kararlari_yukle(&cfg.kararlar_path);
-    // P2: anlamsal yedek niyet (gömme modeli varsa). Eşik: SOULWARE_NIYET_ESIK / SOULWARE_NIYET_FARK.
-    let anlamsal = embedder.as_ref().and_then(|e| {
+    // P2: anlamsal yedek niyet. VARSAYILAN KAPALI (SOULWARE_NIYET_ANLAMSAL=1 ile açılır): 26 Eylül 2026 ölçümünde
+    // gizli sette kazanç getirmedi, ana sette "ne kadar" içeren para/miktar sorularını ön satış aracına yönlendirdi.
+    // Daha geniş karşıt örnek setiyle yeniden ayarlanana kadar kapalı. Eşik: SOULWARE_NIYET_ESIK / SOULWARE_NIYET_FARK.
+    let anlamsal_acik = std::env::var("SOULWARE_NIYET_ANLAMSAL").map(|v| v == "1").unwrap_or(false);
+    let anlamsal = embedder.as_ref().filter(|_| anlamsal_acik).and_then(|e| {
         let esik = std::env::var("SOULWARE_NIYET_ESIK").ok().and_then(|x| x.parse().ok()).unwrap_or(anlamsal_niyet::ESIK);
         let fark = std::env::var("SOULWARE_NIYET_FARK").ok().and_then(|x| x.parse().ok()).unwrap_or(anlamsal_niyet::FARK);
         match anlamsal_niyet::AnlamsalNiyet::yukle(e, esik, fark) {
