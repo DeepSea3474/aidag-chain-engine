@@ -123,7 +123,7 @@ fn kaynak_listesi_mi(s: &str) -> bool {
 
 /// Gelecek/tahmin sorusu mu ("... olacak / olur / 1 yıl sonra / seneye / tahmin et")? Fiyat/durum tahmini
 /// bilinemez; bugünkü ön satış durumu aracına GİTMEMELİ (kör set/tuzak T11).
-fn gelecek_tahmini_mi(s: &str) -> bool {
+pub fn gelecek_tahmini_mi(s: &str) -> bool {
     const IFADE: &[&str] = &["ne olur", "kac olur", "kac dolar olur", "ne kadar olur", "1 yil sonra", "bir yil sonra",
         "gelecek yil", "gelecekte", "ileride", "yil sonra", "ay sonra", "fiyat tahmin", "tahmin et", "ne olacak",
         "kac olacak", "ne kadar olacak", "kac dolar olacak"];

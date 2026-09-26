@@ -1034,7 +1034,8 @@ async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) ->
 
         // 1b) K-23 YARGICI: kesin araç değil; KARARLAR'da karşılığı olan gerekçe sorusu da değilse.
         let gerekce = gerekce_karari_var(&st, &req.prompt);
-        let guvenli = guvenlik_kapisi::guvenli_soru(&req.prompt, resmi::kubra_hakkinda_mi(&req.prompt), !kanit_gerektiren_mi(&req.prompt));
+        let benign = !kanit_gerektiren_mi(&req.prompt) || yonlendirici::gelecek_tahmini_mi(&retrieval::sade(&req.prompt));
+        let guvenli = guvenlik_kapisi::guvenli_soru(&req.prompt, resmi::kubra_hakkinda_mi(&req.prompt), benign);
         if !guvenlik_kapisi::yargic_atlanir(guvenlik_kapisi::Uc::Stream, false, gerekce, guvenli)
             && kapi(&st, guvenlik_kapisi::Uc::Stream, &req.prompt, true).await.reddedildi()
         {
@@ -1242,7 +1243,8 @@ async fn ask_ic(st: Arc<AppState>, req: AskReq) -> Json<AskResp> {
 
     // ── K-23 YARGICI (fail-closed): kesin araç değil ve KARARLAR'da karşılığı olan gerekçe sorusu değilse ──
     let gerekce = gerekce_karari_var(&st, &req.prompt);
-    let guvenli = guvenlik_kapisi::guvenli_soru(&req.prompt, resmi::kubra_hakkinda_mi(&req.prompt), !kanit_gerektiren_mi(&req.prompt));
+    let benign = !kanit_gerektiren_mi(&req.prompt) || yonlendirici::gelecek_tahmini_mi(&retrieval::sade(&req.prompt));
+    let guvenli = guvenlik_kapisi::guvenli_soru(&req.prompt, resmi::kubra_hakkinda_mi(&req.prompt), benign);
     if !guvenlik_kapisi::yargic_atlanir(guvenlik_kapisi::Uc::Ask, false, gerekce, guvenli)
         && kapi(&st, guvenlik_kapisi::Uc::Ask, &req.prompt, true).await.reddedildi()
     {
