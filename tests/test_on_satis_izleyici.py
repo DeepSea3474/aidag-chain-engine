@@ -556,16 +556,76 @@ class T6_TamAritmetik(Temel):
 
 # ================================================================== 7: asgari alim
 class T7_MinUsd(Temel):
-    def test_min_usd_alti_tahsis_yok_iade_listesi(self):
+    """KARARLAR K-20: minimum 10 USDT. Altina tahsis yazilmaz; ayri 'minimum_alti' kaydi
+    + gunluk satiri + (varsa) bildirim komutu; iade icin."""
+
+    def test_min_usd_alti_tahsis_yok_minimum_alti_kaydi(self):
         self.durum_baslat()
         self.ag.hepsine("usdt_odeme", txh(70), ALICI, 999 * E18 // 100, 1010)   # 9.99 USD
-        self.ag.hepsine("usdt_odeme", txh(71), ALICI2, 10 * E18, 1011)          # 10 USD
+        self.ag.hepsine("usdt_odeme", txh(71), ALICI2, 10 * E18, 1011)          # tam 10 USD
         self.calistir()
-        self.assertEqual(self.dugum.toplam_aidag(ALICI), 0)
-        self.assertEqual(self.dugum.toplam_aidag(ALICI2), 50)
+        self.assertEqual(self.dugum.toplam_aidag(ALICI), 0, "minimum alti: tahsis yok")
+        self.assertEqual(self.dugum.toplam_aidag(ALICI2), 50, "tam 10 USD: tahsis var")
         d = self.durum()
-        self.assertEqual([(i["tx"], i["usd"]) for i in d["iade_gerekli"]], [(txh(70), "999/100")])
-        self.assertIn(txh(70), d["islenmis"])
+        self.assertEqual([(k["tx"], k["adres"], k["usd"], k["tur"]) for k in d["minimum_alti"]],
+                         [(txh(70), ALICI, "999/100", "usdt")])
+        self.assertEqual(d["minimum_alti"][0]["blok"], 1010)
+        self.assertEqual(d["iade_gerekli"], [], "minimum alti ayri kayitta, genel iade listesinde degil")
+        self.assertIn(txh(70), d["islenmis"], "tekrar islenmez")
+        self.assertIn("MINIMUM ALTI ODEME (iade gerekli): tx=" + txh(70), self.son_cikti)
+        # Ikinci tur: ayni tx tekrar kaydedilmez / tahsis edilmez.
+        self.calistir()
+        self.assertEqual(len(self.durum()["minimum_alti"]), 1)
+        self.assertEqual(self.dugum.toplam_aidag(ALICI), 0)
+
+    def _bildirimli(self, komut):
+        self.m = self.yukle(BILDIRIM_KOMUTU=komut)
+        self.m.subprocess = types.SimpleNamespace(check_output=self.dugum.check_output,
+                                                  run=subprocess.run, DEVNULL=subprocess.DEVNULL)
+
+    def test_bildirim_komutu_kaydi_json_olarak_alir(self):
+        cikti = os.path.join(self.tmp, "bildirim.json")
+        self._bildirimli("cat > " + cikti)
+        self.durum_baslat()
+        self.ag.hepsine("usdt_odeme", txh(72), ALICI, 5 * E18, 1010)             # 5 USD
+        self.calistir()
+        k = json.load(open(cikti))
+        self.assertEqual((k["tx"], k["adres"], k["usd"], k["minimum_usd"]), (txh(72), ALICI, "5", "10"))
+
+    def test_bildirim_komutu_hata_verse_de_akis_bozulmaz(self):
+        self._bildirimli("exit 3")
+        self.durum_baslat()
+        self.ag.hepsine("usdt_odeme", txh(73), ALICI, 3 * E18, 1010)             # 3 USD
+        self.ag.hepsine("usdt_odeme", txh(74), ALICI2, 20 * E18, 1011)           # 20 USD
+        self.calistir()
+        self.assertEqual(self.dugum.toplam_aidag(ALICI2), 100, "gecerli odeme yine tahsis edilir")
+        self.assertEqual([k["tx"] for k in self.durum()["minimum_alti"]], [txh(73)])
+        self.assertIn("minimum alti bildirimi gonderilemedi", self.son_cikti)
+
+    def test_minimum_alti_alani_olmayan_eski_durum_okunur(self):
+        d = self.m.bos_durum(); d["son_blok"] = 1000; d.pop("minimum_alti")
+        json.dump(d, open(self.durum_yolu, "w"))
+        self.ag.hepsine("usdt_odeme", txh(75), ALICI, 2 * E18, 1010)
+        self.assertEqual(self.calistir(), 0)
+        self.assertEqual([k["tx"] for k in self.durum()["minimum_alti"]], [txh(75)])
+
+    def test_minimum_alti_listesi_salt_okunur(self):
+        self.durum_baslat(minimum_alti=[{"tx": txh(76), "adres": ALICI, "usd": "999/100",
+                                         "tur": "usdt", "blok": 1010, "zaman": 1}])
+        once = open(self.durum_yolu).read()
+        self.ag.hepsine("usdt_odeme", txh(77), ALICI2, 20 * E18, 1011)   # listeleme tahsis YAPMAMALI
+        import contextlib, io
+        eski_argv = sys.argv; sys.argv = ["on-satis-izleyici.py", "--minimum-alti"]
+        try:
+            with contextlib.redirect_stdout(io.StringIO()) as o:
+                kod = self.m.main()
+        finally:
+            sys.argv = eski_argv
+        self.assertEqual(kod, 0)
+        self.assertIn("tx=" + txh(76), o.getvalue())
+        self.assertIn("9.99 USD", o.getvalue())
+        self.assertEqual(open(self.durum_yolu).read(), once, "durum dosyasi degismedi")
+        self.assertEqual(self.dugum.toplam_aidag(), 0, "listeleme tahsis yapmaz")
 
 
 # ================================================================== 9: Etherscan yolu

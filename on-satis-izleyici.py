@@ -90,6 +90,9 @@ ETHERSCAN_SAYFA = 1000
 BASLANGIC = int(os.environ.get("BASLANGIC", "1785024000"))  # 2026-07-26
 # Asgari alim (USD) — site ile AYNI (on-satis sayfasi min 10 USDT).
 MIN_USD = Fraction(os.environ.get("MIN_USD", "10"))
+# Minimum alti odeme bildirimi (KARARLAR K-20): istege bagli komut. Kayit JSON olarak
+# stdin'den verilir (or. ileride Telegram bildirimcisi). Bos ise yalniz gunluk + durum.
+BILDIRIM_KOMUTU = os.environ.get("BILDIRIM_KOMUTU", "").strip()
 ISLEM_UST = 50000  # ON_SATIS_ISLEM_UST_SINIR (AIDAG): tek tahsis bunu ASAMAZ
 MAX_PARENTS = 8    # lsc-engine dag::vertex::MAX_PARENTS
 CAP_USDT_ADRES = Fraction(os.environ.get("ADRES_TAVAN_USD", "10000"))
@@ -165,7 +168,8 @@ def _json_siki_oku(yol):
 
 def bos_durum():
     return {"surum": 1, "son_blok": None, "bekleyen": {}, "islenmis": [],
-            "adres_usd": {}, "iade_gerekli": [], "reddedilen": {}, "tek_kaynakli": []}
+            "adres_usd": {}, "iade_gerekli": [], "reddedilen": {}, "tek_kaynakli": [],
+            "minimum_alti": []}
 
 def durum_yukle():
     d = _json_siki_oku(DURUM)
@@ -199,6 +203,10 @@ def durum_yukle():
                    ("iade_gerekli", list), ("reddedilen", dict)):
         if not isinstance(d.get(k), tip):
             raise DurumHatasi(f"{DURUM}: '{k}' alani eksik/bozuk")
+    # K-20: minimum alti kayitlari (eski durum dosyalarinda yok -> bos liste).
+    d.setdefault("minimum_alti", [])
+    if not isinstance(d["minimum_alti"], list):
+        raise DurumHatasi(f"{DURUM}: 'minimum_alti' alani bozuk")
     if d.get("son_blok") is not None and not isinstance(d["son_blok"], int):
         raise DurumHatasi(f"{DURUM}: son_blok bozuk")
     return d
@@ -595,6 +603,40 @@ def _iade(durum, h, addr, usd, sebep):
                                   "zaman": int(time.time())})
     print(f"IADE GEREKLI tx={h} {addr} {usd_goster(usd)} USD: {sebep}")
 
+def bildirim_gonder(kayit):
+    """Minimum alti odemeyi BILDIRIM_KOMUTU'na (varsa) JSON olarak iletir. Hata akisi
+    BOZMAZ: kayit durum dosyasinda ve gunlukte zaten vardir."""
+    if not BILDIRIM_KOMUTU:
+        return
+    try:
+        subprocess.run(BILDIRIM_KOMUTU, shell=True, input=json.dumps(kayit).encode(),
+                       timeout=20, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        print(f"UYARI: minimum alti bildirimi gonderilemedi ({type(e).__name__}); kayit durum dosyasinda")
+
+def _minimum_alti(durum, h, oz, tur, usd):
+    """K-20: minimum alti odeme -> tahsis YOK; ayri 'minimum_alti' kaydi + bildirim (iade icin)."""
+    kayit = {"tx": h, "adres": oz["from"], "usd": frac_str(usd), "tur": tur,
+             "blok": oz.get("blockNumber"), "blockHash": oz.get("blockHash"),
+             "minimum_usd": frac_str(MIN_USD), "zaman": int(time.time())}
+    if not any(k.get("tx") == h for k in durum["minimum_alti"]):
+        durum["minimum_alti"].append(kayit)
+    print(f"MINIMUM ALTI ODEME (iade gerekli): tx={h} gonderen={oz['from']} "
+          f"tutar={usd_goster(usd)} USD < minimum {usd_goster(MIN_USD)} USD -> tahsis YAZILMADI")
+    bildirim_gonder(kayit)
+
+def minimum_alti_listele():
+    """Salt okuma: minimum alti (iade bekleyen) odemeleri listeler. Kilit/yazim yok."""
+    d = _json_siki_oku(DURUM) or {}
+    kayitlar = d.get("minimum_alti", [])
+    if not kayitlar:
+        print("minimum alti odeme yok"); return 0
+    for k in kayitlar:
+        print(f"tx={k['tx']} gonderen={k['adres']} tutar={usd_goster(frac_oku(k['usd']))} USD "
+              f"tur={k.get('tur')} blok={k.get('blok')} zaman={k.get('zaman')}")
+    print(f"toplam {len(kayitlar)} kayit")
+    return 0
+
 def _islendi(durum, h):
     durum["bekleyen"].pop(h, None)
     if h not in durum["islenmis"]:
@@ -623,7 +665,8 @@ def plan_olustur(durum, h, oz, tur, satilan_zincir):
             return None
         usd = Fraction(oz["value"], ONDALIK) * Fraction(fiyat)
     if usd < MIN_USD:
-        _iade(durum, h, addr, usd, f"asgari alim {frac_str(MIN_USD)} USD alti")
+        # K-20: minimum (10 USDT) alti -> tahsis yok, ayri kayit + bildirim (iade icin).
+        _minimum_alti(durum, h, oz, tur, usd)
         _islendi(durum, h); return "bitti"
     onceki = frac_oku(durum["adres_usd"].get(addr, "0"))
     kalan_hak = CAP_USDT_ADRES - onceki
@@ -707,6 +750,8 @@ def bekleyenleri_isle(durum):
         plani_uygula(durum, h)
 
 def main():
+    if "--minimum-alti" in sys.argv[1:]:
+        return minimum_alti_listele()
     kilit = kilit_al()
     if kilit is None:
         print("baska bir izleyici ornegi calisiyor -> cikiliyor"); return 0
