@@ -543,15 +543,25 @@ async fn arac_kanit(st: &AppState, prompt: &str, sonuc: &str, arac_ad: &str, ts:
     (data_hash, chain, tuz)
 }
 
-// AIDAG konusu → resmi kaynaklar (genel korpustan ÖNCE, onun YERİNE). Değilse None.
+// RESMİ BAĞLAM (genel korpustan ÖNCE, onun YERİNE). Değilse None.
+//  1) Gerekçe ("neden") sorusu → ilgili KARARLAR.md maddeleri (kararın kendi gerekçesi).
+//  2) AIDAG konusu → resmi belgeler (kb.aidag.json).
 fn resmi_baglam(st: &AppState, prompt: &str) -> Option<(Vec<retrieval::Pasaj>, String)> {
-    if !resmi::aidag_konusu_mu(prompt) {
-        return None;
+    let mut pasajlar: Vec<retrieval::Pasaj> = Vec::new();
+    if kayitlar::neden_sorusu_mu(prompt) {
+        for k in kayitlar::ilgili_kararlar(&st.kararlar, prompt, 2) {
+            pasajlar.push(retrieval::Pasaj {
+                kaynak: "KARARLAR.md".into(), baslik: k.kunye(), metin: k.metin.clone(), url: None, skor: 0,
+            });
+        }
     }
-    let pasajlar = resmi::sec(&st.resmi, prompt, st.cfg.ground_k);
+    if resmi::aidag_konusu_mu(prompt) {
+        pasajlar.extend(resmi::sec(&st.resmi, prompt, st.cfg.ground_k));
+    }
     if pasajlar.is_empty() {
         return None;
     }
+    pasajlar.truncate(st.cfg.ground_k + 2);
     // Resmi belgeler kısa: kırpma yok (tam metin), yarım cümle modeli yanıltmasın.
     let baglam = retrieval::baglam_yap(&pasajlar, usize::MAX);
     Some((pasajlar, baglam))

@@ -105,6 +105,12 @@ kurucu onayı ve değerlendirme setinden geçtikten sonra eklenir (K-08).",
     )
 }
 
+/// Gerekçe sorusu mu ("neden", "niye", "niçin", "gerekçe", "sebebi", "why")?
+pub fn neden_sorusu_mu(soru: &str) -> bool {
+    let s = retrieval::sade(soru);
+    s.split(' ').any(|t| matches!(t, "neden" | "niye" | "nicin" | "why") || t.starts_with("gerekce") || t.starts_with("sebeb"))
+}
+
 /// "Neden" soruları için en ilgili karar maddeleri (kelime örtüşmesi; en iyinin yarısından zayıflar elenir).
 pub fn ilgili_kararlar<'a>(kararlar: &'a [KararMadde], soru: &str, k: usize) -> Vec<&'a KararMadde> {
     let q: std::collections::BTreeSet<String> = retrieval::tokenle(soru).into_iter().collect();
@@ -114,12 +120,14 @@ pub fn ilgili_kararlar<'a>(kararlar: &'a [KararMadde], soru: &str, k: usize) -> 
     let mut skor: Vec<(usize, &KararMadde)> = kararlar
         .iter()
         .map(|m| {
-            let t: std::collections::BTreeSet<String> =
-                retrieval::tokenle(&format!("{} {}", m.baslik, m.metin)).into_iter().collect();
-            let ortak = q.iter().filter(|w| t.iter().any(|x| x == *w || (w.len() >= 5 && x.starts_with(w.as_str())))).count();
-            (ortak, m)
+            // Başlık kararın konusudur: başlık eşleşmesi 2 puan, yalnız gövde eşleşmesi 1 puan.
+            let kume = |metin: &str| -> std::collections::BTreeSet<String> { retrieval::tokenle(metin).into_iter().collect() };
+            let (bas, gov) = (kume(&m.baslik), kume(&m.metin));
+            let var = |t: &std::collections::BTreeSet<String>, w: &String| t.iter().any(|x| x == w || (w.len() >= 5 && x.starts_with(w.as_str())));
+            let puan: usize = q.iter().map(|w| if var(&bas, w) { 2 } else if var(&gov, w) { 1 } else { 0 }).sum();
+            (puan, m)
         })
-        .filter(|(s, _)| *s >= 2)
+        .filter(|(s, _)| *s >= 3)
         .collect();
     skor.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.no.cmp(&b.1.no)));
     let en_iyi = skor.first().map(|x| x.0).unwrap_or(0);
@@ -158,6 +166,26 @@ mod testler {
         let r = ilgili_kararlar(&k, "Ön satışta neden yalnızca USDT kabul ediliyor?", 2);
         assert_eq!(r.first().map(|m| m.no), Some(20));
         assert!(ilgili_kararlar(&k, "Mars'a ne zaman gidilir?", 2).is_empty());
+    }
+
+    #[test]
+    fn depodaki_kararlar_neden_sorularini_karsilar() {
+        // Değerlendirme seti D kategorisi: soru -> beklenen karar maddesi (gerçek KARARLAR.md).
+        let yol = concat!(env!("CARGO_MANIFEST_DIR"), "/../KARARLAR.md");
+        let k = kararlari_yukle(yol);
+        assert!(k.len() >= 24, "KARARLAR.md okunamadı: {yol}");
+        for (soru, no) in [
+            ("Ön satışta neden yalnızca USDT kabul ediliyor?", 20), ("Ön satışta minimum alım neden 10 USDT?", 20),
+            ("Genesis vesting başlangıcı neden 2100'e alındı?", 16), ("KUBRA neden imza atamıyor?", 5),
+            ("AIDAG'da neden DAO yok?", 1), ("KUBRA cevap kanıtları neden tuzlu hash ile kaydediliyor?", 7),
+            ("Ana ağda neden hâlâ ed25519 kullanılıyor?", 22), ("Kritik yetkiler neden çoklu imzaya bağlı?", 2),
+            ("KUBRA neden kendi kendine güncellenmiyor?", 8), ("KUBRA neden istismar kodu yazmıyor?", 23),
+        ] {
+            assert!(neden_sorusu_mu(soru), "{soru}");
+            let r: Vec<u32> = ilgili_kararlar(&k, soru, 2).iter().map(|m| m.no).collect();
+            assert!(r.contains(&no), "{soru} -> {r:?} (beklenen K-{no})");
+        }
+        assert!(!neden_sorusu_mu("Ön satış ne durumda?"));
     }
 
     #[test]
