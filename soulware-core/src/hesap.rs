@@ -49,10 +49,23 @@ pub fn hesapla(sorgu: &str) -> Option<String> {
     }
 }
 
-/// Harf + '-' + rakam (boşluksuz) kalıbı var mı?
+/// Kod ya da tarih kalıbı var mı? Harf-tire-rakam ("K-20", "BEP-20") ya da tire/nokta/eğik çizgili tarih
+/// ("2026-09-26", "26-09-2026", "26/09/2026"): bunlar işlem değildir.
 fn kod_kalibi_var(s: &str) -> bool {
     let c: Vec<char> = s.chars().collect();
-    c.windows(3).any(|w| w[0].is_alphabetic() && matches!(w[1], '-' | '–') && w[2].is_ascii_digit())
+    if c.windows(3).any(|w| w[0].is_alphabetic() && matches!(w[1], '-' | '–') && w[2].is_ascii_digit()) {
+        return true;
+    }
+    // Tarih: rakam grupları aynı ayraçla (- / .) üç parça, biri 4 haneli.
+    s.split(|ch: char| ch.is_whitespace()).any(|kelime| {
+        let k = kelime.trim_matches(|ch: char| !ch.is_ascii_digit());
+        ['-', '/', '.'].iter().any(|ayrac| {
+            let p: Vec<&str> = k.split(*ayrac).collect();
+            p.len() == 3
+                && p.iter().all(|x| !x.is_empty() && x.chars().all(|ch| ch.is_ascii_digit()))
+                && p.iter().any(|x| x.len() == 4)
+        })
+    })
 }
 
 /// "12 ile 12'yi çarp(arsan)", "5 ile 3'ü topla", "45 ve 55'in toplamı", "10 ile 3'ün farkı" → "12 * 12" vb. (tam iki sayı).
@@ -220,6 +233,19 @@ mod tests {
         assert_eq!(hesapla("20 - 5").as_deref(), Some("15"));
         assert_eq!(hesapla("-3 artı 5").as_deref(), Some("2"));
     }
+    #[test]
+    fn hesap_ifade_cesitliligi() {
+        for (q, c) in [("15 artı 27 kaç?", "42"), ("8 kere 9", "72"), ("100 bölü 4 kaç eder?", "25"), ("(3+4)*2", "14"),
+                       ("250 eksi 75 nedir?", "175"), ("6 ile 7'yi çarp", "42"), ("20 ve 30'un toplamı", "50"),
+                       ("1,5 çarpı 4", "6"), ("9 ile 4'ün farkı nedir?", "5")] {
+            assert_eq!(hesapla(q).as_deref(), Some(c), "{q}");
+        }
+        for q in ["K-20 nedir?", "BEP-20 ağı hangisi?", "3 elma aldım", "2026 yılında ne oldu?", "2026-09-26 tarihinde ne oldu?",
+                  "26/09/2026 günü ne var?", "SHA-256 güvenli mi?", "Ali ile Ayşe 2 kitap okudu"] {
+            assert_eq!(hesapla(q), None, "{q}");
+        }
+    }
+
     #[test]
     fn ile_kalibi_calisir() {
         assert_eq!(hesapla("12 ile 12'yi çarparsan ne çıkar?").as_deref(), Some("144"));

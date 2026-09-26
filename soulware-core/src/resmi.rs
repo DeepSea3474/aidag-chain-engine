@@ -47,16 +47,45 @@ pub fn aidag_konusu_mu(prompt: &str) -> bool {
     .any(|a| anahtar_var(&s, a))
 }
 
-/// "Adın ne / ismini kim verdi" → sabit cevap (model yorumlamasın).
+/// Soru 2. tekil/çoğul şahsa (KUBRA'ya) mı yöneltilmiş? Zamir ya da dönüşlü zamir ("sen", "sana", "kendini"...).
+pub fn ikinci_sahis_mi(sade_metin: &str) -> bool {
+    const ZAMIR: &[&str] = &[
+        "sen", "sana", "seni", "senin", "sende", "senden", "siz", "size", "sizi", "sizin", "sizde",
+        "kendin", "kendini", "kendine", "kendinden", "kendiniz", "kendinizi", "you", "your", "yourself",
+    ];
+    sade_metin.split(' ').any(|t| ZAMIR.contains(&t))
+}
+
+/// "Adın ne / ismini kim verdi / sana nasıl hitap edeyim" → sabit cevap (model yorumlamasın).
+/// Kalıp: ad/isim/hitap kelimesi + (2. şahıs iyelik eki | 2. şahıs zamiri | "kubra");
+/// tamlama içindeki ad ("dosyanın adı", "şehrin ismi") kimlik sorusu değildir.
 pub fn isim_sorusu_mu(prompt: &str) -> bool {
     let s = sade(prompt);
-    [
-        "adin ne", "ismin ne", "adini kim", "ismini kim", "sana kim isim", "sana bu ismi",
-        "sana bu adi", "adini ne koy", "ismini ne koy", "adin nereden", "ismin nereden",
-        "senin adin", "senin ismin", "what is your name", "who named you",
-    ]
-    .iter()
-    .any(|a| anahtar_var(&s, a))
+    if ["what is your name", "who named you", "your name"].iter().any(|a| anahtar_var(&s, a)) {
+        return true;
+    }
+    const IYELIK2: &[&str] = &[
+        "adin", "adini", "adinla", "adinin", "adiniz", "adinizi", "ismin", "ismini", "isminle", "isminiz", "isminizi",
+    ];
+    let t: Vec<&str> = s.split(' ').collect();
+    let ikinci = ikinci_sahis_mi(&s) || t.contains(&"kubra");
+    t.iter().enumerate().any(|(i, w)| {
+        let ad_kelimesi = ["ad", "isim", "ism", "hitap"].iter().any(|k| *w == *k || crate::retrieval::ek_ile_eslesir(w, k));
+        if !ad_kelimesi {
+            return false;
+        }
+        let onceki = if i > 0 { t[i - 1] } else { "" };
+        let tamlama = !matches!(onceki, "" | "senin" | "sizin" | "kubra" | "kubranin")
+            && (onceki.ends_with("nin") || onceki.ends_with("nun") || onceki.ends_with("in") || onceki.ends_with("un"));
+        !tamlama && (IYELIK2.contains(w) || ikinci)
+    })
+}
+
+/// KUBRA'nın kendisi hakkında soru mu (2. şahsa yöneltilmiş)? Hiçbir niyete uymazsa resmî "KUBRA nedir"
+/// belgesine yönlendirilir (P3): "doğrulanmış bilgim yok" diye reddedilmez.
+pub fn kubra_hakkinda_mi(prompt: &str) -> bool {
+    let s = sade(prompt);
+    ikinci_sahis_mi(&s) || s.split(' ').any(|t| t == "kubra" || crate::retrieval::ek_ile_eslesir(t, "kubra"))
 }
 
 /// Soruya en uygun resmi belgeler (skor = eşleşen anahtar sayısı). En iyinin
@@ -105,6 +134,29 @@ mod tests {
 
     fn belgeler() -> Vec<ResmiBelge> {
         serde_json::from_str(include_str!("../../soulware-knowledge/kb.aidag.json")).unwrap()
+    }
+
+    #[test]
+    fn kimlik_sorusu_genel_kalip() {
+        // Olumlu: farklı ifadeler (değerlendirme setlerinden ALINMADI)
+        for q in ["Senin adın ne?", "Adın neydi?", "Adınızı öğrenebilir miyim?", "Sana nasıl hitap edeyim?",
+                  "Size hangi isimle seslenmeliyim?", "Kendine ne isim veriyorsun?", "İsmin nedir senin?",
+                  "KUBRA ismini kim koydu?", "What is your name?", "Adını kim koydu?"] {
+            assert!(isim_sorusu_mu(q), "{q}");
+        }
+        // Olumsuz: ad/isim geçen ama kimlik sorusu olmayanlar
+        for q in ["Dosyanın adını nasıl değiştiririm?", "Ad soyad alanı nasıl doldurulur?", "Bu şehrin adı nereden gelir?",
+                  "Türkçede isim nedir?", "Belgenin ismi zincirde görünür mü?", "Kurumun adı KARARLAR'da geçiyor mu?",
+                  "Şirketin adı ne olacak?", "Ön satış ne durumda?"] {
+            assert!(!isim_sorusu_mu(q), "{q}");
+        }
+    }
+
+    #[test]
+    fn kubra_hakkinda() {
+        assert!(kubra_hakkinda_mi("Sen neler yapabiliyorsun?"));
+        assert!(kubra_hakkinda_mi("KUBRA'nın görevleri neler?"));
+        assert!(!kubra_hakkinda_mi("Türkiye'nin başkenti neresi?"));
     }
 
     #[test]

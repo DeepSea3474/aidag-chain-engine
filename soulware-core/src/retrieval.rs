@@ -76,11 +76,15 @@ pub fn sade(s: &str) -> String {
 fn ek_kumesi() -> &'static std::collections::HashSet<String> {
     static K: std::sync::OnceLock<std::collections::HashSet<String>> = std::sync::OnceLock::new();
     K.get_or_init(|| {
-        const IYELIK: &[&str] = &["", "i", "u", "si", "su", "in", "un", "imiz", "umuz", "lar", "ler", "lari", "leri"];
+        const IYELIK: &[&str] = &[
+            "", "i", "u", "si", "su", "im", "um", "in", "un", "imiz", "umuz", "iniz", "unuz", "lar", "ler", "lari", "leri",
+        ];
         const HAL: &[&str] = &[
             "", "i", "u", "yi", "yu", "ni", "nu", "a", "e", "ya", "ye", "na", "ne", "da", "de", "ta", "te", "nda", "nde",
             "dan", "den", "tan", "ten", "ndan", "nden", "in", "un", "nin", "nun", "la", "le", "yla", "yle", "daki", "deki",
             "taki", "teki", "ndaki", "ndeki", "mi", "mu", "dir", "dur", "tir", "tur",
+            // kişi ekli bulunma ("bloktayız", "ağdayız")
+            "dayiz", "deyiz", "tayiz", "teyiz", "yiz", "yuz",
         ];
         let mut k = std::collections::HashSet::new();
         // "n" kaynaştırmalı hâl ekleri (nda, na, ni, ...) yalnız iyelikten sonra gelir: ağ-ı-nda; "rwa"+"nda" ≠ "rwanda".

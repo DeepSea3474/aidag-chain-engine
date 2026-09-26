@@ -87,13 +87,16 @@ pub fn karar_numaralari(metin: &str) -> Vec<u32> {
 }
 
 fn kaynak_listesi_mi(s: &str) -> bool {
+    // "kaynak" + (öğrenme/liste ipucu | KUBRA'ya yöneltilmiş: "kaynakların", "senin kaynakların")
+    let ikinci = crate::resmi::ikinci_sahis_mi(s)
+        || s.split(' ').any(|t| ["kaynaklarin", "kaynagin", "kaynaklariniz", "kaynaginiz"].contains(&t));
     anahtar_var(s, "kaynak")
-        && ["ogren", "liste", "beslen", "egitil", "kullaniyorsun", "dayaniyorsun"].iter().any(|k| anahtar_var(s, k))
+        && (ikinci || ["ogren", "liste", "beslen", "egitil", "kullaniyorsun", "dayaniyorsun"].iter().any(|k| anahtar_var(s, k)))
 }
 
 fn on_satis_mi(s: &str, ham: &str) -> bool {
     let konu = ["on satis", "presale", "tge"].iter().any(|k| anahtar_var(s, k));
-    let durum = ["durum", "ne durumda", "satildi", "satilan", "kademe", "kaldi", "fiyati ne", "belli oldu", "kac"]
+    let durum = ["durum", "ne durumda", "satildi", "satilan", "kademe", "kaldi", "kalan", "ne kadar", "fiyati ne", "belli oldu", "kac"]
         .iter()
         .any(|k| anahtar_var(s, k));
     (konu && durum) || zincir::on_satis_niyeti_mi(ham)
@@ -102,7 +105,7 @@ fn on_satis_mi(s: &str, ham: &str) -> bool {
 fn ag_durumu_mi(s: &str, ham: &str) -> bool {
     // Türkçe ekler genel olarak anahtar_var'da işlenir ("ağında", "zincirin"; "ağaç" değil).
     let konu = ["ag", "zincir", "mainnet", "network", "dugum", "node"].iter().any(|k| anahtar_var(s, k));
-    let durum = ["calisiyor mu", "ayakta", "durum", "saglik", "aktif mi", "canli mi", "sorun var", "ariza", "kesinti"]
+    let durum = ["calisiyor mu", "ayakta", "durum", "saglik", "aktif mi", "canli mi", "sorun var", "ariza", "kesinti", "nasil gidiyor"]
         .iter()
         .any(|k| anahtar_var(s, k));
     (konu && durum) || zincir::ag_niyeti_mi(ham)
@@ -166,6 +169,35 @@ mod testler {
         assert_eq!(t("Mainnet'te kesinti mi var?"), Some(AgDurumu));
         assert_eq!(t("AIDAG ağında bir sorun var mı?"), Some(AgDurumu));
         assert_eq!(t("Ağın durumu nedir?"), Some(AgDurumu));
+    }
+
+    #[test]
+    fn niyet_ifade_cesitliligi() {
+        use Niyet::*;
+        // Değerlendirme setlerinden ALINMADI. Her niyet için farklı ifadeler.
+        let olumlu: &[(&str, Niyet)] = &[
+            ("Zincir sağlıklı mı?", AgDurumu), ("Düğümler ayakta mı?", AgDurumu), ("Mainnet'te bir arıza var mı?", AgDurumu),
+            ("Ağın durumu hakkında bilgi verir misin?", AgDurumu), ("AIDAG ağı canlı mı?", AgDurumu),
+            ("Ağda şu an kesinti yaşanıyor mu?", AgDurumu), ("Network status nedir?", AgDurumu), ("Zincirin sağlık durumu", AgDurumu),
+            ("Ön satışta ne kadar AIDAG satıldı?", OnSatis), ("Ön satış durumunu göster", OnSatis),
+            ("Presale'de kalan miktar ne kadar?", OnSatis), ("Ön satışta şu an hangi kademedeyiz?", OnSatis),
+            ("TGE tarihi belli oldu mu?", OnSatis), ("Ön satışın son durumu nedir?", OnSatis),
+            ("Presale'e kaç kişi katıldı?", OnSatis), ("Aktif kademe hangisi?", OnSatis),
+            ("K 12 ne diyor?", Karar(vec![12])), ("k-5 kararını göster", Karar(vec![5])),
+            ("KARARLAR'daki K-12'yi oku", Karar(vec![12])), ("K-24 maddesi nedir?", Karar(vec![24])),
+            ("Hangi kaynakları kullanıyorsun?", KaynakListesi), ("Kaynak listen nedir?", KaynakListesi),
+            ("Bilgi kaynakların neler?", KaynakListesi), ("Hangi kaynaklardan besleniyorsun?", KaynakListesi),
+            ("İsmin nedir?", Kimlik), ("Sana nasıl hitap edeyim?", Kimlik),
+        ];
+        for (q, n) in olumlu {
+            assert_eq!(niyet_bul(q).as_ref(), Some(n), "{q}");
+        }
+        for q in ["Ağ nedir?", "Zincir nasıl çalışır?", "Düğüm nasıl kurulur?", "Ağaç dikmek için en iyi mevsim hangisi?",
+                  "Ağ güvenliği için önerin ne?", "Sosyal ağlarda nasıl paylaşım yaparım?", "Ön satış nasıl çalışır?",
+                  "Ön satışa nasıl katılırım?", "TGE nedir?", "Presale nedir?", "Ön satış güvenli mi?",
+                  "Kaynak kodu nerede?", "Bu bilginin kaynağı ne?", "Dosyanın adını nasıl değiştiririm?"] {
+            assert_eq!(niyet_bul(q), None, "{q}");
+        }
     }
 
     #[test]

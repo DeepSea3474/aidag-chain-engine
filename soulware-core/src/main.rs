@@ -560,6 +560,11 @@ fn resmi_baglam(st: &AppState, prompt: &str) -> Option<(Vec<retrieval::Pasaj>, S
     if resmi::aidag_konusu_mu(prompt) {
         pasajlar.extend(resmi::sec(&st.resmi, prompt, st.cfg.ground_k));
     }
+    // P3: KUBRA'nın kendisine yöneltilmiş, başka hiçbir kaynağa uymayan olgusal soru → resmî "KUBRA nedir" belgesi
+    // (kendisi hakkında "doğrulanmış bilgim yok" demesin). Sohbet (selam, hal-hatır) bu yola girmez.
+    if pasajlar.is_empty() && kanit_gerektiren_mi(prompt) && resmi::kubra_hakkinda_mi(prompt) {
+        pasajlar.extend(resmi::sec(&st.resmi, "KUBRA nedir ve neler yapabilir", 1));
+    }
     if pasajlar.is_empty() {
         return None;
     }

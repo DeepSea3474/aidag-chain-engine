@@ -1,5 +1,5 @@
 //! zincir - deterministik zincir sorgu araci
-use crate::retrieval::{anahtar_var, sade};
+use crate::retrieval::{anahtar_var, ek_ile_eslesir, sade};
 use serde_json::json;
 
 // ── İŞLEM İZİ: istek başına zincir okumaları (uç, yanıt özeti). Tokio task-local; kapsam dışında no-op. ──
@@ -43,14 +43,17 @@ pub async fn json_oku(r: reqwest::Response, uc: &str) -> Option<serde_json::Valu
 fn niyet_cikar(sorgu: &str) -> Option<(&'static str, serde_json::Value, String)> {
     // sade(): Türkçe harfler katlanır ("kaç" = "kac", "yüksekliği" = "yuksekligi").
     let s = sade(sorgu);
-    if s.contains("bakiye") || s.contains("balance") {
+    // Kelime düzeyinde (Türkçe ekler anahtar_var'da): "blokzincirde son gelişmeler" blok sorgusu DEĞİLDİR.
+    let var = |k: &str| anahtar_var(&s, k);
+    if var("bakiye") || var("balance") {
         if let Some(adr) = adres_bul(sorgu) {
             return Some(("eth_getBalance", json!([adr, "latest"]),
                 format!("{} adresinin bakiyesi", adr)));
         }
     }
-    if (s.contains("blok") || s.contains("block") || s.contains("yukseklik"))
-        && (s.contains("kac") || s.contains("son") || s.contains("number") || s.contains("numara")) {
+    let kac = s.split(' ').any(|t| t == "kac" || t.starts_with("kacinci") || ek_ile_eslesir(t, "kac"));
+    if (var("blok") || var("block") || var("yukseklik"))
+        && (kac || var("son") || var("number") || var("numara")) {
             return Some(("eth_blockNumber", json!([]), "guncel blok yuksekligi".to_string()));
         }
     None
@@ -98,7 +101,9 @@ pub fn ag_niyeti_mi(sorgu: &str) -> bool {
         "network durum", "network status", "status", "durum raporu",
         "zincir durum", "zincir calisiyor", "zincir ayakta", "ag calisiyor", "ag ayakta",
         "aidag calisiyor", "mainnet calisiyor", "mainnet durum",
-        "kac dugum", "kac node", "dugum sayisi", "tps", "ag nasil",
+        // "ag nasil" kaldırıldı: Türkçe ek işlemeyle "ağlarda nasıl paylaşım" gibi soruları da yakalıyordu;
+        // "ağ nasıl gidiyor" yönlendiricide konu+durum ("nasil gidiyor") ile tanınır.
+        "kac dugum", "kac node", "dugum sayisi", "tps",
         "kac vertex", "tip sayisi", "orphan",
     ];
     anahtarlar.iter().any(|a| anahtar_var(&s, a))
@@ -285,6 +290,26 @@ pub async fn belge_dogrula(http: &reqwest::Client, rpc_url: &str, sorgu: &str) -
         Some(format!(
             "Belge BULUNAMADI: bu hash ({hash}) AIDAG-Chain'de kayıtlı DEĞİL. Ya hiç kaydedilmemiş ya da belge değiştirilmiş (hash tutmuyor). Orijinal belgenin hash'iyle tekrar dene."
         ))
+    }
+}
+
+#[cfg(test)]
+mod niyet_cikar_testleri {
+    use super::niyet_cikar;
+
+    #[test]
+    fn bakiye_blok_ifade_cesitliligi() {
+        let a = "0x0ffe438e047dfb08c0c79aac9a63ea32d49a272c";
+        for q in [format!("{a} bakiyesi nedir?"), format!("{a} adresinin bakiyesini göster"), format!("Balance of {a}")] {
+            assert_eq!(niyet_cikar(&q).map(|x| x.0), Some("eth_getBalance"), "{q}");
+        }
+        for q in ["Blok yüksekliği kaç?", "Son blok numarası nedir?", "Kaçıncı bloktayız?", "Zincirin blok sayısı kaç?", "Block number?"] {
+            assert_eq!(niyet_cikar(q).map(|x| x.0), Some("eth_blockNumber"), "{q}");
+        }
+        for q in ["Blok nedir?", "Blok zinciri nasıl çalışır?", "Bakiye nasıl sorgulanır?", "Blokzincirde son gelişmeler neler?",
+                  "Kaç kişi çalışıyor?", "Son haberler neler?"] {
+            assert_eq!(niyet_cikar(q).map(|x| x.0), None, "{q}");
+        }
     }
 }
 
