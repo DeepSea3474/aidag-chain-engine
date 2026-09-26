@@ -47,12 +47,12 @@ Uygulanmamış kararlar **[Sonraki iş]** olarak işaretlenir.
 ### K-08 · KUBRA kendi kendine öğrenir, kendi kendine değişmez (Eylül 2026)
 - Karar: Yeni bilgi ve model sürümleri değerlendirme setinden ve insan onayından geçmeden yayına girmez. Kapalı kurumlara güncellemeler imzalı paket olarak verilir.
 
-### K-21 · KUBRA ajan calisma dongusu (Eylul 2026)
-- Karar: KUBRA her gorevi su donguyle yurutur: anla, analiz et, planla, onay al, guvenli ortamda uygula, dogrula, raporla, canliya al.
-- Izin katmanlari: serbest (okuma, analiz, test ortaminda calistirma, rapor), onayli (canli sisteme dokunan her islem; tanimli, sinirli, geri alinabilir), yasak (imza, para/token, rol, konsensus, silme, cihaz yonetimi). Her adim kayit altinda.
-- Guven: "onceden onayli" is listesi yalnizca olculmus basari gecmisine dayanarak coklu imzali yonetim karariyla genisletilir; KUBRA kendi yetkisini genisletemez.
-- Neden: KUBRA'nin bildigini guvenle uygulayabilmesi; insan onayi ve kanit ilkesinin korunmasi.
-- Ayrinti: CALISMA_VE_OGRENME_YONTEMI.md Bolum 9.
+### K-21 · KUBRA ajan çalışma döngüsü (Eylül 2026)
+- Karar: KUBRA her görevi şu döngüyle yürütür: anla, analiz et, planla, onay al, güvenli ortamda uygula, doğrula, raporla, canlıya al.
+- İzin katmanları: serbest (okuma, analiz, test ortamında çalıştırma, rapor), onaylı (canlı sisteme dokunan her işlem; tanımlı, sınırlı, geri alınabilir), yasak (imza, para/token, rol, konsensüs, silme, cihaz yönetimi). Her adım kayıt altında.
+- Güven: "önceden onaylı" iş listesi yalnızca ölçülmüş başarı geçmişine dayanarak çoklu imzalı yönetim kararıyla genişletilir; KUBRA kendi yetkisini genişletemez.
+- Neden: KUBRA'nın bildiğini güvenle uygulayabilmesi; insan onayı ve kanıt ilkesinin korunması.
+- Ayrıntı: CALISMA_VE_OGRENME_YONTEMI.md Bölüm 9.
 
 ---
 
