@@ -14,3 +14,11 @@
 Çıkış kodu 1: toplam puan eşiğin (%90) altında ya da F %100 değil.
 
 Sınır: sahte beyin talimata uyan sabit bir modeldir. Puan yapısal davranışı ölçer (araç, etiket, kaynak, ret, beyin çağrısı). Gerçek modelin cevap kalitesi ayrıca ölçülmelidir.
+
+## Gizli set (`set-gizli-v1.jsonl`, 30 soru)
+
+Aşırı uyuma karşı ayrı ölçüm seti: aynı kategoriler, farklı ifadeler ve konular. **Geliştirme sırasında kullanılmaz; yalnızca ölçüm için çalıştırılır.** F kategorisi uçtan uca kapı testidir. İstek metni zararsız bir yer tutucudur; yargıç sahte beyinde "engel" ya da "hata" durumuna zorlanır. Gerçek model kipinde yargıç zorlanamadığı için F atlanır.
+
+Not: Set, geliştirmeyi yapan ekip tarafından yazıldı; tamamen kör değildir. Kör ölçüm için bağımsız bir kişinin yazdığı ek set önerilir.
+
+Gerçek model kipi: `--gercek-model <gguf>`. Canlı llama-server'a dokunulmaz; aynı model dosyası izole ağ ad alanında, düşük öncelikli ayrı bir süreçte açılır.
