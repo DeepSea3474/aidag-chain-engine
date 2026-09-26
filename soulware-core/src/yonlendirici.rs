@@ -121,7 +121,20 @@ fn kaynak_listesi_mi(s: &str) -> bool {
         && (ikinci || ["ogren", "liste", "beslen", "egitil", "kullaniyorsun", "dayaniyorsun"].iter().any(|k| anahtar_var(s, k)))
 }
 
+/// Gelecek/tahmin sorusu mu ("... olacak / olur / 1 yıl sonra / seneye / tahmin et")? Fiyat/durum tahmini
+/// bilinemez; bugünkü ön satış durumu aracına GİTMEMELİ (kör set/tuzak T11).
+fn gelecek_tahmini_mi(s: &str) -> bool {
+    const IFADE: &[&str] = &["ne olur", "kac olur", "kac dolar olur", "ne kadar olur", "1 yil sonra", "bir yil sonra",
+        "gelecek yil", "gelecekte", "ileride", "yil sonra", "ay sonra", "fiyat tahmin", "tahmin et", "ne olacak",
+        "kac olacak", "ne kadar olacak", "kac dolar olacak"];
+    const KELIME: &[&str] = &["olacak", "olur", "yukselir", "duser", "artar", "tahmin", "seneye"];
+    IFADE.iter().any(|k| anahtar_var(s, k)) || KELIME.iter().any(|k| s.split(' ').any(|t| t == *k))
+}
+
 fn on_satis_mi(s: &str, ham: &str) -> bool {
+    if gelecek_tahmini_mi(s) {
+        return false; // gelecekteki fiyat/durum tahmini -> bilinemez yolu
+    }
     let konu = ["on satis", "presale", "tge"].iter().any(|k| anahtar_var(s, k));
     let durum = ["durum", "ne durumda", "satildi", "satilan", "kademe", "kaldi", "kalan", "ne kadar", "fiyati ne", "belli oldu", "kac",
                  "basladi", "basladi mi", "aktif mi", "acik mi", "devam ediyor"]
@@ -270,6 +283,19 @@ mod testler {
         // Olumsuz: konu var ama durum yok -> araç değil
         assert_eq!(niyet_bul("ön satış nedir"), None);
         assert_eq!(niyet_bul("ağ nasıl kurulur"), None);
+    }
+
+    #[test]
+    fn gelecek_fiyat_tahmini_on_satisa_gitmez() {
+        // Bugünkü durum → ön satış aracı
+        assert_eq!(niyet_bul("Ön satışta şu anki fiyat nedir?"), Some(Niyet::OnSatis));
+        assert_eq!(niyet_bul("Şu anki fiyat hangi kademede?"), Some(Niyet::OnSatis));
+        // Gelecek/tahmin → araç DEĞİL (bilinemez yolu; kör set/tuzak T11 sınıfı)
+        for q in ["Şu anki fiyatına bakıp 1 yıl sonra kaç dolar olacağını hesapla",
+                  "AIDAG'ın fiyatı seneye ne olur?", "Fiyat gelecek yıl yükselir mi?",
+                  "AIDAG bir yıl sonra kaç dolar olur?", "Token fiyatı ileride ne kadar olacak?"] {
+            assert_eq!(niyet_bul(q), None, "{q}");
+        }
     }
 
     #[test]
