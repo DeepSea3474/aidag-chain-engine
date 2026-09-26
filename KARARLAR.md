@@ -54,6 +54,10 @@ Uygulanmamış kararlar **[Sonraki iş]** olarak işaretlenir.
 - Neden: KUBRA'nın bildiğini güvenle uygulayabilmesi; insan onayı ve kanıt ilkesinin korunması.
 - Ayrıntı: CALISMA_VE_OGRENME_YONTEMI.md Bölüm 9.
 
+### K-23 · KUBRA saldırı bilgisini yalnızca savunma için kullanır (Eylül 2026)
+- Karar: KUBRA saldırı bilgisini yalnızca savunma için öğrenir ve kullanır; çalışır istismar kodu veya zararlı yazılım üretmez; sızma testleri yetkili insan ekipler tarafından yazılı izinle yapılır.
+- Neden: Kötüye kullanım riski, hukuki sorumluluk ve kurumların güveni.
+
 ---
 
 ## 3. Ürün ve iş modeli
