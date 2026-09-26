@@ -12,7 +12,7 @@ pub struct KararMadde {
 
 impl KararMadde {
     pub fn kunye(&self) -> String {
-        format!("K-{} · {}", self.no, self.baslik)
+        format!("K-{:02} · {}", self.no, self.baslik)
     }
 }
 
@@ -68,7 +68,7 @@ pub fn karar_cevabi(kararlar: &[KararMadde], nolar: &[u32]) -> (String, bool) {
             Some(k) => parcalar.push(format!("KARARLAR.md {}\n{}", k.kunye(), k.metin)),
             None => {
                 hepsi_bulundu = false;
-                parcalar.push(format!("KARARLAR.md'de K-{n} diye bir karar bulunamadı."))
+                parcalar.push(format!("KARARLAR.md'de K-{n:02} diye bir karar bulunamadı."))
             }
         }
     }
@@ -149,6 +149,7 @@ mod testler {
         assert!(k[1].baslik.starts_with("Ön satışta yalnızca USDT"));
         assert!(k[1].metin.contains("Minimum 10 USDT"));
         assert!(!k[0].metin.contains("K-20"));
+        assert_eq!(k[0].kunye(), "K-05 · KUBRA'nın imza yetkisi yoktur (Eylül 2026)"); // KARARLAR.md ile aynı biçim
     }
 
     #[test]

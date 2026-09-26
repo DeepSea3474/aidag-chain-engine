@@ -24,7 +24,7 @@ impl Niyet {
         match self {
             Niyet::Kimlik => "kimlik".into(),
             Niyet::YetkiDisi => "yetki-disi".into(),
-            Niyet::Karar(n) => format!("karar:{}", n.iter().map(|x| format!("K-{x}")).collect::<Vec<_>>().join(",")),
+            Niyet::Karar(n) => format!("karar:{}", n.iter().map(|x| format!("K-{x:02}")).collect::<Vec<_>>().join(",")),
             Niyet::KaynakListesi => "kaynak-listesi".into(),
             Niyet::OnSatis => "on-satis".into(),
             Niyet::AgDurumu => "ag-durumu".into(),
