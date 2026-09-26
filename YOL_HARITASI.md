@@ -146,6 +146,13 @@ Gizli/kritik belgelerin uzun vadeli, değişmez ve kuantuma dayanıklı sakland�
 - Token SATIŞI: ön satış CANLI (Faz 1 → Faz 2 otomatik; yalnız aidag-chain.com/on-satis). Karar bilinçli olarak denetimden önceye alındı; listeleme fiyatı garanti edilmez.
 - Değer, spekülasyondan değil GERÇEK KULLANIMDAN gelir.
 
+## Genel mimari ilkesi: zincir + depo eşli saklama (tüm iş kolları için ortak)
+- Zincire yalnızca hash, zaman ve işleyen kaydedilir (kanıt, değişmez).
+- Karşılık gelen gerçek veri/belge, hash ile bağlanmış bir depoda saklanır (detay, gerektiğinde geri dönmek için).
+- Depodaki veri zincirdeki hash'le doğrulanır; değiştirilmiş veri anında yakalanır.
+- KUBRA teşhis ve geri dönüşte zincirden kanıtı, depodan detayı alır; böylece hem hızlı hem güvenilir çalışır.
+- Bu ilke belge doğrulama, parça takibi, fabrika verisi ve gizli arşiv dahil tüm senaryolarda geçerlidir.
+
 ## Kritik prensip
 Her adım bir öncekine bağlı. Sıra atlanırsa (örn. köprüyü AVM'siz, audit'siz yapmak) =
 güvenlik felaketi + boşa emek. Doğru sıra = akıcılık + zaman + güvenlik.
