@@ -343,7 +343,7 @@ async fn uclari_cek(http: &reqwest::Client, rpc: &str) -> Vec<[u8; 32]> {
     let url = format!("{rpc}/tips");
     let mut out: Vec<[u8; 32]> = Vec::new();
     if let Ok(resp) = http.get(&url).send().await {
-        if let Ok(v) = resp.json::<Value>().await {
+        if let Some(v) = zincir::json_oku(resp, "/tips").await {
             if let Some(arr) = v.get("tips").and_then(|t| t.as_array()) {
                 for t in arr {
                     if let Some(s) = t.as_str() {
@@ -483,7 +483,7 @@ async fn arac_calistir(st: &AppState, prompt: &str) -> Option<(String, &'static 
 async fn rpc_json(st: &AppState, yol: &str) -> Result<Value, String> {
     let url = format!("{}{}", st.cfg.chain_rpc.trim_end_matches('/'), yol);
     let r = st.http.get(&url).send().await.map_err(|e| format!("zincire ulaşılamıyor: {e}"))?;
-    r.json::<Value>().await.map_err(|e| format!("zincir yanıtı çözülemedi: {e}"))
+    zincir::json_oku(r, yol).await.ok_or_else(|| "zincir yanıtı çözülemedi".to_string())
 }
 
 async fn belge_talebi(st: &AppState, hash: [u8; 32], imzalayan_pk: Option<[u8; 32]>) -> Result<Value, String> {
@@ -572,12 +572,56 @@ struct AskReq {
 }
 
 /// Yanıtta gösterilen kaynak künyesi (şeffaflık: KUBRA neye dayandı — sahte YOK).
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct Kaynak {
     kaynak: String,
     baslik: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     url: Option<String>,
+}
+
+/// İşlem izi: bu cevabı hangi sürüm, hangi niyet/araç, hangi zincir okumaları ve kaynaklarla üretti.
+#[derive(Serialize, Clone)]
+struct Iz {
+    surum: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    niyet: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    arac: Option<String>,
+    /// K-23 kapısı: gecti | reddetti
+    kapi: String,
+    zincir_okumalari: Vec<zincir::Okuma>,
+    kaynaklar: Vec<Kaynak>,
+    beyin: String,
+    model: String,
+    etiket: String,
+}
+
+fn iz_yap(prompt: &str, arac: Option<&str>, kapi: &str, kaynaklar: Vec<Kaynak>, beyin: &str, model: &str, etiket: &str) -> Iz {
+    Iz {
+        surum: env!("SOULWARE_GIT_SHA").to_string(),
+        niyet: yonlendirici::niyet_bul(prompt).map(|n| n.ad()),
+        arac: arac.map(str::to_string),
+        kapi: kapi.to_string(),
+        zincir_okumalari: zincir::izi_al(),
+        kaynaklar,
+        beyin: beyin.to_string(),
+        model: model.to_string(),
+        etiket: etiket.to_string(),
+    }
+}
+
+/// Araç cevabının dayandığı kayıt (karar maddesi, kaynak listesi).
+fn arac_kaynaklari(st: &AppState, prompt: &str, arac_ad: &str) -> Vec<Kaynak> {
+    match arac_ad {
+        "karar-kaydi" => yonlendirici::karar_numaralari(prompt)
+            .iter()
+            .filter_map(|n| st.kararlar.iter().find(|k| k.no == *n))
+            .map(|k| Kaynak { kaynak: "KARARLAR.md".into(), baslik: k.kunye(), url: None })
+            .collect(),
+        "kaynak-listesi" => vec![Kaynak { kaynak: "KAYNAKLAR.md".into(), baslik: "Onaylı kaynak listesi".into(), url: None }],
+        _ => vec![],
+    }
 }
 
 #[derive(Serialize)]
@@ -602,9 +646,11 @@ struct AskResp {
     chain: ChainProof,
     #[serde(skip_serializing_if = "Option::is_none")]
     hata: Option<String>,
-    /// dogrulanmis | oneri | bilinmiyor | reddedildi (deterministik; model seçmez)
+    /// dogrulanmis | oneri | bilinmiyor | reddedildi | sohbet (deterministik; model seçmez)
     #[serde(skip_serializing_if = "Option::is_none")]
     etiket: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    iz: Option<Iz>,
 }
 
 fn now_secs() -> u64 {
@@ -903,7 +949,7 @@ async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) ->
     let (tx, rx) = mpsc::channel::<Result<Event, std::convert::Infallible>>(64);
     let ts = now_secs();
 
-    tokio::spawn(async move {
+    tokio::spawn(zincir::IZ.scope(std::cell::RefCell::new(Vec::new()), async move {
         if req.prompt.trim().is_empty() {
             let _ = tx.send(Ok(Event::default().event("error").data("prompt bos"))).await;
             return;
@@ -913,8 +959,9 @@ async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) ->
         if kapi(&st, guvenlik_kapisi::Uc::Stream, &req.prompt).await.reddedildi() {
             let sonuc = guvenlik_kapisi::RET_METNI;
             let _ = tx.send(Ok(Event::default().event("token").data(sonuc))).await;
+            let iz = iz_yap(&req.prompt, Some("guvenlik-reddi"), "reddetti", vec![], "arac", "guvenlik-reddi", "reddedildi");
             let (data_hash, chain, tuz) = arac_kanit(&st, &req.prompt, sonuc, "guvenlik-reddi", ts).await;
-            let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "prompt": req.prompt, "answer": sonuc, "model": "guvenlik-reddi", "brain": "arac", "etiket": "reddedildi", "chain": chain});
+            let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "prompt": req.prompt, "answer": sonuc, "model": "guvenlik-reddi", "brain": "arac", "etiket": "reddedildi", "iz": iz, "chain": chain});
             let _ = tx.send(Ok(Event::default().event("done").data(proof.to_string()))).await;
             return;
         }
@@ -927,10 +974,11 @@ async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) ->
                 tokio::time::sleep(std::time::Duration::from_millis(15)).await;
             }
             // Zincire yaz + proof
+            let iz = iz_yap(&req.prompt, Some(arac_ad), "gecti", arac_kaynaklari(&st, &req.prompt, arac_ad), "arac", arac_ad, etiket::arac_etiketi(arac_ad));
             let (data_hash, chain, tuz) = arac_kanit(&st, &req.prompt, &sonuc, arac_ad, ts).await;
             // prompt/answer: hash'e giren metnin BIREBIR kopyasi (SSE parcalarindan yeniden kurmak
             // satir sonlarini kaybedebilir; kanit dosyasi bunu kullanir).
-            let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "prompt": req.prompt, "answer": sonuc, "model": arac_ad, "brain": "arac", "etiket": etiket::arac_etiketi(arac_ad), "chain": chain});
+            let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "prompt": req.prompt, "answer": sonuc, "model": arac_ad, "brain": "arac", "etiket": etiket::arac_etiketi(arac_ad), "iz": iz, "chain": chain});
             let _ = tx.send(Ok(Event::default().event("done").data(proof.to_string()))).await;
             return;
         }
@@ -963,8 +1011,9 @@ async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) ->
         if etkin_baglam.is_none() && tur == etiket::SoruTuru::KesinOlgu {
             let sonuc = resmi::DOGRULANMAMIS;
             let _ = tx.send(Ok(Event::default().event("token").data(sonuc))).await;
+            let iz = iz_yap(&req.prompt, None, "gecti", vec![], "kural", "dogrulanmamis-bilgi", etiket::BILINMIYOR);
             let (data_hash, chain, tuz) = arac_kanit(&st, &req.prompt, sonuc, "dogrulanmamis-bilgi", ts).await;
-            let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "prompt": req.prompt, "answer": sonuc, "model": "dogrulanmamis-bilgi", "brain": "kural", "etiket": etiket::BILINMIYOR, "chain": chain});
+            let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "prompt": req.prompt, "answer": sonuc, "model": "dogrulanmamis-bilgi", "brain": "kural", "etiket": etiket::BILINMIYOR, "iz": iz, "chain": chain});
             let _ = tx.send(Ok(Event::default().event("done").data(proof.to_string()))).await;
             return;
         }
@@ -999,17 +1048,18 @@ async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) ->
                 } else {
                     (metin, etiket::SOHBET)
                 };
+                let iz = iz_yap(&req.prompt, None, "gecti", kaynaklar.clone(), "kubra-gpu", &st.cfg.remote_model, etiket_s);
                 // Zincire yaz + proof (tuzlu: prompt|metin|model; tuz zincire yazılmaz)
                 let tuz = kanit::yeni_tuz();
                 let data_hash = kanit::kanit_hash(st.cfg.net_id, ts,
                     &[req.prompt.as_bytes(), metin.as_bytes(), st.cfg.remote_model.as_bytes()], Some(&tuz));
                 let chain = zincire_yaz(&st, data_hash, ts).await;
-                let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "prompt": req.prompt, "answer": metin, "model": st.cfg.remote_model, "brain": "kubra-gpu", "grounded": !kaynaklar.is_empty(), "etiket": etiket_s, "chain": chain});
+                let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "prompt": req.prompt, "answer": metin, "model": st.cfg.remote_model, "brain": "kubra-gpu", "grounded": !kaynaklar.is_empty(), "etiket": etiket_s, "iz": iz, "chain": chain});
                 let _ = tx.send(Ok(Event::default().event("done").data(proof.to_string()))).await;
             }
             Err(e) => { let _ = tx.send(Ok(Event::default().event("error").data(e))).await; }
         }
-    });
+    }));
 
     let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
     Sse::new(stream)
@@ -1072,6 +1122,11 @@ async fn beyin_uret(st: &Arc<AppState>, req: &AskReq, uc_arg: &str) -> Result<Be
 }
 
 async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<AskResp> {
+    // İşlem izi: bu isteğin zincir okumaları task-local kayda toplanır.
+    zincir::IZ.scope(std::cell::RefCell::new(Vec::new()), ask_ic(st, req)).await
+}
+
+async fn ask_ic(st: Arc<AppState>, req: AskReq) -> Json<AskResp> {
     let t0 = std::time::Instant::now();
     let ts = now_secs();
     if req.prompt.trim().is_empty() {
@@ -1081,26 +1136,28 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
     // ── K-23 GÜVENLİK KAPISI: modelden ve araçlardan ÖNCE; hata → ret (fail-closed) ──
     if kapi(&st, guvenlik_kapisi::Uc::Ask, &req.prompt).await.reddedildi() {
         let sonuc = guvenlik_kapisi::RET_METNI.to_string();
+        let iz = iz_yap(&req.prompt, Some("guvenlik-reddi"), "reddetti", vec![], "arac", "guvenlik-reddi", "reddedildi");
         let (data_hash, chain, tuz) = arac_kanit(&st, &req.prompt, &sonuc, "guvenlik-reddi", ts).await;
         return Json(AskResp {
             ok: true, answer: sonuc, brain: "arac".into(), model: "guvenlik-reddi".into(),
             grounded: false, abstained: false, sources: vec![],
             latency_ms: t0.elapsed().as_millis(), input_tokens: None, output_tokens: None,
             proof_hash: hex::encode(data_hash), ts, salt: Some(hex::encode(tuz)), chain, hata: None,
-            etiket: Some("reddedildi".into()),
+            etiket: Some("reddedildi".into()), iz: Some(iz),
         });
     }
 
     // ── ARAÇ-KULLANIMI: kesin cevap gereken niyetler ZAYIF MODELE bırakılmaz ──
     // (isim, belge hash doğrulama/kayıt, ağ durumu, zincir sorgusu, hesap). Bkz. arac_calistir.
     if let Some((sonuc, arac_ad)) = arac_calistir(&st, &req.prompt).await {
+        let iz = iz_yap(&req.prompt, Some(arac_ad), "gecti", arac_kaynaklari(&st, &req.prompt, arac_ad), "arac", arac_ad, etiket::arac_etiketi(arac_ad));
         let (data_hash, chain, tuz) = arac_kanit(&st, &req.prompt, &sonuc, arac_ad, ts).await;
         return Json(AskResp {
             ok: true, answer: sonuc, brain: "arac".into(), model: arac_ad.into(),
             grounded: false, abstained: arac_ad == "resmi-kaynak", sources: vec![],
             latency_ms: t0.elapsed().as_millis(), input_tokens: None, output_tokens: None,
             proof_hash: hex::encode(data_hash), ts, salt: Some(hex::encode(tuz)), chain, hata: None,
-            etiket: Some(etiket::arac_etiketi(arac_ad).into()),
+            etiket: Some(etiket::arac_etiketi(arac_ad).into()), iz: Some(iz),
         });
     }
 
@@ -1153,13 +1210,14 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
     let tur = etiket::soru_turu(&req.prompt, !kanit_gerektiren_mi(&req.prompt));
     if etkin_baglam.is_none() && tur == etiket::SoruTuru::KesinOlgu {
         let sonuc = resmi::DOGRULANMAMIS.to_string();
+        let iz = iz_yap(&req.prompt, None, "gecti", vec![], "kural", "dogrulanmamis-bilgi", etiket::BILINMIYOR);
         let (data_hash, chain, tuz) = arac_kanit(&st, &req.prompt, &sonuc, "dogrulanmamis-bilgi", ts).await;
         return Json(AskResp {
             ok: true, answer: sonuc, brain: "kural".into(), model: "dogrulanmamis-bilgi".into(),
             grounded: false, abstained: true, sources: vec![],
             latency_ms: t0.elapsed().as_millis(), input_tokens: None, output_tokens: None,
             proof_hash: hex::encode(data_hash), ts, salt: Some(hex::encode(tuz)), chain, hata: None,
-            etiket: Some(etiket::BILINMIYOR.into()),
+            etiket: Some(etiket::BILINMIYOR.into()), iz: Some(iz),
         });
     }
     let user_content = match (&resmi_ctx, &etkin_baglam) {
@@ -1199,6 +1257,7 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
     };
     let is_abstained = etiket_s == etiket::BILINMIYOR;
 
+    let iz = iz_yap(&req.prompt, None, "gecti", kaynaklar.clone(), &brain_name, &model, etiket_s);
     // ZİNCİR: tuzlu etkileşim hash'i imzalı Record olarak GERÇEK zincire (tuz zincire yazılmaz).
     let tuz = kanit::yeni_tuz();
     let data_hash = kanit::kanit_hash(st.cfg.net_id, ts,
@@ -1223,6 +1282,7 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
         chain,
         hata: None,
         etiket: Some(etiket_s.into()),
+        iz: Some(iz),
     })
 }
 
@@ -1239,6 +1299,7 @@ fn bos_hata(mesaj: &str) -> AskResp {
         },
         hata: Some(mesaj.to_string()),
         etiket: None,
+        iz: None,
     }
 }
 

@@ -2,6 +2,44 @@
 use crate::retrieval::{anahtar_var, sade};
 use serde_json::json;
 
+// ── İŞLEM İZİ: istek başına zincir okumaları (uç, yanıt özeti). Tokio task-local; kapsam dışında no-op. ──
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Okuma {
+    pub uc: String,
+    /// Ham yanıt gövdesinin blake3 özeti (64 hex).
+    pub yanit_ozeti: String,
+    pub boyut: usize,
+    /// Küçük (<= 512 bayt) JSON yanıtlar olduğu gibi (zincir verisi herkese açıktır).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub yanit: Option<serde_json::Value>,
+}
+
+tokio::task_local! {
+    pub static IZ: std::cell::RefCell<Vec<Okuma>>;
+}
+
+pub fn kaydet(uc: &str, govde: &[u8]) {
+    let _ = IZ.try_with(|v| {
+        v.borrow_mut().push(Okuma {
+            uc: uc.to_string(),
+            yanit_ozeti: hex::encode(blake3::hash(govde).as_bytes()),
+            boyut: govde.len(),
+            yanit: if govde.len() <= 512 { serde_json::from_slice(govde).ok() } else { None },
+        })
+    });
+}
+
+pub fn izi_al() -> Vec<Okuma> {
+    IZ.try_with(|v| v.borrow().clone()).unwrap_or_default()
+}
+
+/// Yanıtı oku, işlem izine kaydet, JSON olarak çöz.
+pub async fn json_oku(r: reqwest::Response, uc: &str) -> Option<serde_json::Value> {
+    let b = r.bytes().await.ok()?;
+    kaydet(uc, &b);
+    serde_json::from_slice(&b).ok()
+}
+
 fn niyet_cikar(sorgu: &str) -> Option<(&'static str, serde_json::Value, String)> {
     let s = sorgu.to_lowercase();
     if s.contains("bakiye") || s.contains("balance") {
@@ -39,7 +77,7 @@ pub async fn sorgula(http: &reqwest::Client, rpc_url: &str, sorgu: &str) -> Opti
     let (method, params, aciklama) = niyet_cikar(sorgu)?;
     let istek = json!({"jsonrpc":"2.0","method":method,"params":params,"id":1});
     let resp = http.post(rpc_url).json(&istek).send().await.ok()?;
-    let v: serde_json::Value = resp.json().await.ok()?;
+    let v = json_oku(resp, &format!("json-rpc:{method}")).await?;
     let sonuc = v.get("result")?.as_str()?;
     let okunur = if sonuc.starts_with("0x") { hex_to_dec_str(sonuc) } else { sonuc.to_string() };
     Some(format!("{}: {}", aciklama, okunur))
@@ -73,7 +111,7 @@ pub async fn ag_durumu_getir(http: &reqwest::Client, rpc_url: &str) -> Option<St
     // rpc_url ornegi: http://127.0.0.1:8645  (JSON-RPC ayni portta /status sunar)
     let status_url = format!("{}/status", rpc_url.trim_end_matches('/'));
     let resp = http.get(&status_url).send().await.ok()?;
-    let v: serde_json::Value = resp.json().await.ok()?;
+    let v = json_oku(resp, "/status").await?;
 
     let vertex = v.get("vertex_count").and_then(|x| x.as_u64()).unwrap_or(0);
     let tip = v.get("tip_count").and_then(|x| x.as_u64()).unwrap_or(0);
@@ -220,7 +258,7 @@ pub async fn belge_dogrula(http: &reqwest::Client, rpc_url: &str, sorgu: &str) -
     let url = format!("{}/belge/{}", rpc_url.trim_end_matches('/'), hash);
     // Hash verildiyse modele DÜŞME: zincire ulaşılamazsa bunu dürüstçe söyle.
     let v: serde_json::Value = match http.get(&url).send().await {
-        Ok(r) => match r.json().await {
+        Ok(r) => match json_oku(r, &format!("/belge/{hash}")).await.ok_or(()) {
             Ok(v) => v,
             Err(_) => return Some("Belge doğrulama şu an yapılamadı: zincir yanıtı çözülemedi. Lütfen biraz sonra tekrar dene.".to_string()),
         },
@@ -337,14 +375,14 @@ fn binlik(n: u64) -> String {
 pub async fn on_satis_getir(http: &reqwest::Client, rpc_url: &str) -> Option<String> {
     let base = rpc_url.trim_end_matches('/');
     let oz: serde_json::Value = match http.get(format!("{base}/on-satis-ozet")).send().await {
-        Ok(r) => r.json().await.ok()?,
+        Ok(r) => json_oku(r, "/on-satis-ozet").await?,
         Err(_) => return Some("Ön satış durumunu şu an zincirden okuyamadım; lütfen biraz sonra tekrar dene.".to_string()),
     };
     let satilan = oz.get("toplam_satilan_aidag").and_then(|x| x.as_str())
         .and_then(|x| x.parse::<u128>().ok()).map(|w| (w / 1_000_000_000_000_000_000) as u64)?;
     let alim = oz.get("alim_sayisi").and_then(|x| x.as_u64()).unwrap_or(0);
-    let tge = http.get(format!("{base}/on-satis-tahsis/0000000000000000000000000000000000000000")).send().await.ok()?
-        .json::<serde_json::Value>().await.ok()?
+    let tge_r = http.get(format!("{base}/on-satis-tahsis/0000000000000000000000000000000000000000")).send().await.ok()?;
+    let tge = json_oku(tge_r, "/on-satis-tahsis/0000000000000000000000000000000000000000").await?
         .get("tge").and_then(|x| x.as_u64())?;
     let kademe = match aktif_kademe(satilan) {
         Some((faz, no, fiyat, kalan)) => format!(

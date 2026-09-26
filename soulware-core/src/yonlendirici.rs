@@ -18,6 +18,20 @@ pub enum Niyet {
     AgDurumu,
 }
 
+impl Niyet {
+    /// İşlem izinde gösterilen kısa ad.
+    pub fn ad(&self) -> String {
+        match self {
+            Niyet::Kimlik => "kimlik".into(),
+            Niyet::YetkiDisi => "yetki-disi".into(),
+            Niyet::Karar(n) => format!("karar:{}", n.iter().map(|x| format!("K-{x}")).collect::<Vec<_>>().join(",")),
+            Niyet::KaynakListesi => "kaynak-listesi".into(),
+            Niyet::OnSatis => "on-satis".into(),
+            Niyet::AgDurumu => "ag-durumu".into(),
+        }
+    }
+}
+
 pub const YETKI_REDDI: &str = "Bunu yapamam: KUBRA imza atmaz, para veya token göndermez, rol ya da yetki vermez, \
 kayıt silmez ve cihazlara komut göndermez (K-05, K-21). Bu işlemi yetkili kişi kendi cüzdanı ve anahtarıyla yapmalıdır. \
 İstersen işlemin adımlarını ya da nasıl doğrulanacağını anlatabilirim.";
