@@ -23,6 +23,7 @@ mod kanit;       // zincir kaniti: etkilesim hash'i (tuzlu v1 + eski tuzsuz dogr
 mod belge_arac;  // belge kayit TALEBI hazirlama (KUBRA imzalamaz)
 mod imza_dosyasi; // zincir imza anahtari: FAIL-CLOSED yukleme (sessiz uretim YOK)
 mod guvenlik_kapisi; // K-23: tum uretim uclarinda zararli istek kapisi (fail-closed)
+mod etiket;       // K-06: deterministik cevap etiketi (dogrulanmis/oneri/bilinmiyor)
 
 use axum::{extract::State, routing::{get, post}, response::{IntoResponse, Sse, sse::Event}, http::{StatusCode, header}, body::Body, Json, Router};
 use ed25519_dalek::SigningKey;
@@ -222,14 +223,6 @@ ASLA uydurma bir kaynak/rakam/isim verme. Emin değilsen bunu da söyle. Kısa v
             "Bu bir sohbet/selamlaşma. Doğal, samimi ve kısa cevap ver. Kaynak gerekmez.\n\nSORU:\n{prompt}"
         ),
     }
-}
-
-// ABSTENTION tespiti: model "bilmiyorum" dediyse işaretle (halüsilasyon yerine dürüst boşluk).
-fn abstained(answer: &str) -> bool {
-    let a = answer.to_lowercase();
-    ["bilmiyorum", "i don't know", "i do not know", "emin değil", "yeterli bilgi yok", "bilgim yok"]
-        .iter()
-        .any(|p| a.contains(p))
 }
 
 // ════════════════════════════ Beyin: Claude (opsiyonel hibrit) ════════════════════════════
@@ -909,7 +902,7 @@ async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) ->
             let (data_hash, chain, tuz) = arac_kanit(&st, &req.prompt, &sonuc, arac_ad, ts).await;
             // prompt/answer: hash'e giren metnin BIREBIR kopyasi (SSE parcalarindan yeniden kurmak
             // satir sonlarini kaybedebilir; kanit dosyasi bunu kullanir).
-            let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "prompt": req.prompt, "answer": sonuc, "model": arac_ad, "brain": "arac", "chain": chain});
+            let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "prompt": req.prompt, "answer": sonuc, "model": arac_ad, "brain": "arac", "etiket": etiket::arac_etiketi(arac_ad), "chain": chain});
             let _ = tx.send(Ok(Event::default().event("done").data(proof.to_string()))).await;
             return;
         }
@@ -937,10 +930,26 @@ async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) ->
             let _ = tx.send(Ok(Event::default().event("sources").data(ks))).await;
         }
 
+        // K-06: kaynaksız kesin olgu → model ÇAĞRILMAZ; kaynaksız öneri → önek + "öneri" etiketi.
+        let tur = etiket::soru_turu(&req.prompt, !kanit_gerektiren_mi(&req.prompt));
+        if etkin_baglam.is_none() && tur == etiket::SoruTuru::KesinOlgu {
+            let sonuc = resmi::DOGRULANMAMIS;
+            let _ = tx.send(Ok(Event::default().event("token").data(sonuc))).await;
+            let (data_hash, chain, tuz) = arac_kanit(&st, &req.prompt, sonuc, "dogrulanmamis-bilgi", ts).await;
+            let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "prompt": req.prompt, "answer": sonuc, "model": "dogrulanmamis-bilgi", "brain": "kural", "etiket": etiket::BILINMIYOR, "chain": chain});
+            let _ = tx.send(Ok(Event::default().event("done").data(proof.to_string()))).await;
+            return;
+        }
+        let oneri = etkin_baglam.is_none() && tur == etiket::SoruTuru::Oneri;
         let user_content = match (&resmi_ctx, &etkin_baglam) {
             (Some(_), Some(b)) => resmi::resmi_user(&req.prompt, b),
-            _ => grounded_user(&req.prompt, etkin_baglam.as_deref()),
+            (_, Some(b)) => grounded_user(&req.prompt, Some(b)),
+            _ if oneri => etiket::oneri_user(&req.prompt),
+            _ => grounded_user(&req.prompt, None), // sohbet
         };
+        if oneri {
+            let _ = tx.send(Ok(Event::default().event("token").data(etiket::ONERI_ONEKI))).await;
+        }
         let temp = if req.deterministic.unwrap_or(false) { 0.0 } else { 0.3 };
 
         // 3) BEYIN STREAM: token token akit
@@ -954,12 +963,20 @@ async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) ->
 
         match tam {
             Ok(metin) => {
+                let (metin, etiket_s) = if oneri {
+                    (format!("{}{metin}", etiket::ONERI_ONEKI), etiket::ONERI)
+                } else if etkin_baglam.is_some() {
+                    let e = etiket::kaynakli_cevap_etiketi(&metin, kaynaklar.len());
+                    (metin, e)
+                } else {
+                    (metin, etiket::SOHBET)
+                };
                 // Zincire yaz + proof (tuzlu: prompt|metin|model; tuz zincire yazılmaz)
                 let tuz = kanit::yeni_tuz();
                 let data_hash = kanit::kanit_hash(st.cfg.net_id, ts,
                     &[req.prompt.as_bytes(), metin.as_bytes(), st.cfg.remote_model.as_bytes()], Some(&tuz));
                 let chain = zincire_yaz(&st, data_hash, ts).await;
-                let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "prompt": req.prompt, "answer": metin, "model": st.cfg.remote_model, "brain": "kubra-gpu", "grounded": !kaynaklar.is_empty(), "chain": chain});
+                let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "prompt": req.prompt, "answer": metin, "model": st.cfg.remote_model, "brain": "kubra-gpu", "grounded": !kaynaklar.is_empty(), "etiket": etiket_s, "chain": chain});
                 let _ = tx.send(Ok(Event::default().event("done").data(proof.to_string()))).await;
             }
             Err(e) => { let _ = tx.send(Ok(Event::default().event("error").data(e))).await; }
@@ -968,6 +985,62 @@ async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) ->
 
     let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
     Sse::new(stream)
+}
+
+// Beyin çağrısı (ask): Uzak GPU > yerel > Claude. Hata → hazır hata yanıtı.
+type BeyinSonucu = (String, String, String, Option<u64>, Option<u64>);
+async fn beyin_uret(st: &Arc<AppState>, req: &AskReq, uc_arg: &str) -> Result<BeyinSonucu, AskResp> {
+    let uc_arg = uc_arg.to_string();
+    // BEYİN SEÇİMİ: Uzak GPU (varsa) > Egemen yerel (KUBRA) > Claude.
+    let istek = req.brain.as_deref().unwrap_or(&st.cfg.brain_pref);
+    // Doğrulanabilirlik için: deterministic → greedy (temp 0), yoksa hafif örnekleme.
+    let temp = if req.deterministic.unwrap_or(false) { 0.0 } else { 0.3 };
+    let yerel_kullan = st.local.is_some() && istek != "claude";
+
+    // UZAK GPU: tercih "remote"/"auto" + URL varsa ÖNCE dene. Hata → yerele düş (dayanıklı;
+    // GPU kapanırsa KUBRA yavaş ama çalışmaya devam eder).
+    let uzak = if (istek == "remote" || istek == "auto") && st.cfg.remote_url.is_some() {
+        match beyin_remote(&st, &uc_arg, temp).await {
+            Ok(b) => Some((b.text, b.model, "kubra-gpu".to_string(), b.input_tokens, b.output_tokens)),
+            Err(e) => { eprintln!("uzak GPU beyni başarısız → yerele düşülüyor: {e}"); None }
+        }
+    } else { None };
+
+    let sonuc = if let Some(r) = uzak {
+        r
+    } else if yerel_kullan {
+        // Yerel model CPU'da bloklar → spawn_blocking (async runtime'ı tıkamaz).
+        let st2 = st.clone();
+        let uc = uc_arg.clone();
+        let max_tok = st.cfg.max_tokens;
+        let temp2 = temp;
+        let gen = tokio::task::spawn_blocking(move || {
+            // Kilit zehirlenmişse (önceki panik) kurtar — servis çökmez.
+            let mut lb = match st2.local.as_ref().unwrap().lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            lb.generate(SYSTEM_PROMPT, &uc, max_tok, temp2)
+        })
+        .await;
+        match gen {
+            Ok(Ok((text, n))) => (
+                text,
+                st.local_name.clone().unwrap_or_else(|| "yerel".into()),
+                "kubra-local".to_string(),
+                None,
+                Some(n as u64),
+            ),
+            Ok(Err(e)) => return Err(bos_hata(&format!("yerel beyin (KUBRA): {e}"))),
+            Err(e) => return Err(bos_hata(&format!("yerel beyin görevi: {e}"))),
+        }
+    } else {
+        match beyin_claude(&st, &uc_arg).await {
+            Ok(b) => (b.text, b.model, "claude".to_string(), b.input_tokens, b.output_tokens),
+            Err(e) => return Err(bos_hata(&e)),
+        }
+    };
+    Ok(sonuc)
 }
 
 async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<AskResp> {
@@ -998,7 +1071,8 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
             ok: true, answer: sonuc, brain: "arac".into(), model: arac_ad.into(),
             grounded: false, abstained: arac_ad == "resmi-kaynak", sources: vec![],
             latency_ms: t0.elapsed().as_millis(), input_tokens: None, output_tokens: None,
-            proof_hash: hex::encode(data_hash), ts, salt: Some(hex::encode(tuz)), chain, hata: None, etiket: None,
+            proof_hash: hex::encode(data_hash), ts, salt: Some(hex::encode(tuz)), chain, hata: None,
+            etiket: Some(etiket::arac_etiketi(arac_ad).into()),
         });
     }
 
@@ -1046,63 +1120,56 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
         None
     };
 
+    // ── K-06: kaynak yoksa soru türüne göre: kesin olgu → model ÇAĞRILMAZ; öneri → "öneri" etiketi ──
+    let kaynak_sayisi = if acik_baglam { 1 } else { kaynaklar.len() };
+    let tur = etiket::soru_turu(&req.prompt, !kanit_gerektiren_mi(&req.prompt));
+    if etkin_baglam.is_none() && tur == etiket::SoruTuru::KesinOlgu {
+        let sonuc = resmi::DOGRULANMAMIS.to_string();
+        let (data_hash, chain, tuz) = arac_kanit(&st, &req.prompt, &sonuc, "dogrulanmamis-bilgi", ts).await;
+        return Json(AskResp {
+            ok: true, answer: sonuc, brain: "kural".into(), model: "dogrulanmamis-bilgi".into(),
+            grounded: false, abstained: true, sources: vec![],
+            latency_ms: t0.elapsed().as_millis(), input_tokens: None, output_tokens: None,
+            proof_hash: hex::encode(data_hash), ts, salt: Some(hex::encode(tuz)), chain, hata: None,
+            etiket: Some(etiket::BILINMIYOR.into()),
+        });
+    }
     let user_content = match (&resmi_ctx, &etkin_baglam) {
         (Some(_), Some(b)) => resmi::resmi_user(&req.prompt, b),
-        _ => grounded_user(&req.prompt, etkin_baglam.as_deref()),
+        (_, Some(b)) => grounded_user(&req.prompt, Some(b)),
+        (_, None) if tur == etiket::SoruTuru::Oneri => etiket::oneri_user(&req.prompt),
+        _ => grounded_user(&req.prompt, None), // sohbet
     };
 
-    // BEYİN SEÇİMİ: Uzak GPU (varsa) > Egemen yerel (KUBRA) > Claude.
-    let istek = req.brain.as_deref().unwrap_or(&st.cfg.brain_pref);
-    // Doğrulanabilirlik için: deterministic → greedy (temp 0), yoksa hafif örnekleme.
-    let temp = if req.deterministic.unwrap_or(false) { 0.0 } else { 0.3 };
-    let yerel_kullan = st.local.is_some() && istek != "claude";
-
-    // UZAK GPU: tercih "remote"/"auto" + URL varsa ÖNCE dene. Hata → yerele düş (dayanıklı;
-    // GPU kapanırsa KUBRA yavaş ama çalışmaya devam eder).
-    let uzak = if (istek == "remote" || istek == "auto") && st.cfg.remote_url.is_some() {
-        match beyin_remote(&st, &user_content, temp).await {
-            Ok(b) => Some((b.text, b.model, "kubra-gpu".to_string(), b.input_tokens, b.output_tokens)),
-            Err(e) => { eprintln!("uzak GPU beyni başarısız → yerele düşülüyor: {e}"); None }
-        }
-    } else { None };
-
-    let (answer, model, brain_name, in_tok, out_tok) = if let Some(r) = uzak {
-        r
-    } else if yerel_kullan {
-        // Yerel model CPU'da bloklar → spawn_blocking (async runtime'ı tıkamaz).
-        let st2 = st.clone();
-        let uc = user_content.clone();
-        let max_tok = st.cfg.max_tokens;
-        let temp2 = temp;
-        let gen = tokio::task::spawn_blocking(move || {
-            // Kilit zehirlenmişse (önceki panik) kurtar — servis çökmez.
-            let mut lb = match st2.local.as_ref().unwrap().lock() {
-                Ok(g) => g,
-                Err(p) => p.into_inner(),
-            };
-            lb.generate(SYSTEM_PROMPT, &uc, max_tok, temp2)
-        })
-        .await;
-        match gen {
-            Ok(Ok((text, n))) => (
-                text,
-                st.local_name.clone().unwrap_or_else(|| "yerel".into()),
-                "kubra-local".to_string(),
-                None,
-                Some(n as u64),
-            ),
-            Ok(Err(e)) => return Json(bos_hata(&format!("yerel beyin (KUBRA): {e}"))),
-            Err(e) => return Json(bos_hata(&format!("yerel beyin görevi: {e}"))),
-        }
-    } else {
-        match beyin_claude(&st, &user_content).await {
-            Ok(b) => (b.text, b.model, "claude".to_string(), b.input_tokens, b.output_tokens),
-            Err(e) => return Json(bos_hata(&e)),
-        }
+    let (answer, model, brain_name, in_tok, out_tok) = match beyin_uret(&st, &req, &user_content).await {
+        Ok(r) => r,
+        Err(h) => return Json(h),
     };
 
     let grounded = etkin_baglam.as_deref().map(|c| !c.trim().is_empty()).unwrap_or(false);
-    let is_abstained = abstained(&answer);
+    // K-06 etiketi (deterministik): kaynaklı → atıf denetimi; kaynaksız → öneri ya da sohbet.
+    let etiket_s = if grounded {
+        etiket::kaynakli_cevap_etiketi(&answer, kaynak_sayisi)
+    } else if tur == etiket::SoruTuru::Oneri {
+        etiket::ONERI
+    } else {
+        etiket::SOHBET
+    };
+    // Öneri türü soru + kaynaklı cevap "bilinmiyor" (ilgisiz kaynak) → kaynaksız ÖNERİ moduna düş.
+    let (answer, model, brain_name, etiket_s) = if grounded && etiket_s == etiket::BILINMIYOR && tur == etiket::SoruTuru::Oneri {
+        match beyin_uret(&st, &req, &etiket::oneri_user(&req.prompt)).await {
+            Ok((a2, m2, b2, _, _)) => (a2, m2, b2, etiket::ONERI),
+            Err(_) => (answer, model, brain_name, etiket_s),
+        }
+    } else {
+        (answer, model, brain_name, etiket_s)
+    };
+    let answer = if etiket_s == etiket::ONERI && !answer.starts_with(etiket::ONERI_ONEKI) {
+        format!("{}{answer}", etiket::ONERI_ONEKI)
+    } else {
+        answer
+    };
+    let is_abstained = etiket_s == etiket::BILINMIYOR;
 
     // ZİNCİR: tuzlu etkileşim hash'i imzalı Record olarak GERÇEK zincire (tuz zincire yazılmaz).
     let tuz = kanit::yeni_tuz();
@@ -1127,7 +1194,7 @@ async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<A
         salt: Some(hex::encode(tuz)),
         chain,
         hata: None,
-        etiket: None,
+        etiket: Some(etiket_s.into()),
     })
 }
 

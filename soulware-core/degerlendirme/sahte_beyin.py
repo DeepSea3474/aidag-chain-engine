@@ -11,11 +11,27 @@ sayac = {"uretim": 0, "yargic": 0, "gorsel": 0, "video": 0}
 mod = {"yargic": "izin"}
 
 
+import re
+
+DURAK = set("için veya daha gibi olan olarak kadar nasıl neden nedir hangi bir bu şu ile ama çok sonra önce".split())
+
+
+def _kelimeler(t):
+    return {w for w in re.findall(r"\w{4,}", t.lower()) if w not in DURAK}
+
+
 def cevap_uret(sistem, kullanici):
+    """Kaynaga sadik model benzetimi (v2): soru ile kaynak arasinda en az 2 ortak anlamli kelime
+    yoksa 'dogrulanmis bilgim yok' der; varsa kaynaga [1] atfiyla cevap verir."""
     if "prompt engineer" in sistem:
         return kullanici  # gorsel istem gelistirme: aynen don
-    if "RESMİ KAYNAKLAR:" in kullanici or "KAYNAKLAR:" in kullanici:
-        return "Kaynaklara göre bu konudaki bilgi şöyledir [1]."
+    if "ÖNERİ MODU" in kullanici:
+        return "Genel öneri: adım adım ilerlemeni, resmî kılavuzlara bakmanı ve bir uzmana danışmanı öneririm."
+    if "KAYNAKLAR:" in kullanici:
+        kaynak, _, soru = kullanici.partition("SORU:")
+        if len(_kelimeler(soru) & _kelimeler(kaynak)) >= 2:
+            return "Kaynaklara göre bu konudaki bilgi şöyledir [1]."
+        return "Bu konuda doğrulanmış bilgim yok."
     if "DOĞRULANMIŞ bir kaynak YOK" in kullanici:
         return ("Bu bilginin elimde doğrulanmış bir kaynağı yok, kendi bilgimle söylüyorum — doğrulaman iyi olur. "
                 "Yanıt: örnek bilgi.")

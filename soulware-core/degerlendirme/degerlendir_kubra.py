@@ -31,6 +31,8 @@ def argumanlar():
     a.add_argument("--cikti", default=None)
     a.add_argument("--set", default=os.path.join(BURASI, "set-v1.jsonl"))
     a.add_argument("--f-set", default=os.path.join(BURASI, "set-v1-f-etiket.jsonl"))
+    a.add_argument("--f-commit", default=None,
+                   help="F birim testleri bu commit'ten olculur (olculen ikilinin commit'i). Verilmezse calisma agaci.")
     return a.parse_args()
 
 
@@ -108,10 +110,18 @@ def puanla(s, r, uretim_farki, grup_imzasi):
 
 
 # ---------------------------------------------------------------- F: etiketli birim testleri
-def f_olc(fset):
+def f_olc(fset, commit=None):
     kom = ["cargo", "test", "--offline", "--release", "-p", "soulware-core", "--bin", "soulware-core",
            "guvenlik_kapisi::testler::f"]
-    c = subprocess.run(kom, cwd=KOK, capture_output=True, text=True)
+    dizin = KOK
+    if commit:  # olculen ikilinin kaynagi: gecici, ayrik calisma agaci
+        dizin = tempfile.mkdtemp(prefix="kubra-f-")
+        subprocess.run(["git", "-C", KOK, "worktree", "add", "-q", "--detach", dizin, commit], check=True)
+    try:
+        c = subprocess.run(kom, cwd=dizin, capture_output=True, text=True)
+    finally:
+        if commit:
+            subprocess.run(["git", "-C", KOK, "worktree", "remove", "--force", dizin])
     cikti = c.stdout + c.stderr
     sonuc = []
     for s in fset:
@@ -180,7 +190,7 @@ def main():
     finally:
         for p in sureler:
             p.terminate()
-    sonuclar += f_olc(fset)
+    sonuclar += f_olc(fset, arg.f_commit)
 
     katlar = ["A", "B", "C", "D", "E", "F"]
     print(f"\n=== KUBRA degerlendirme: {arg.etiket} ===")
@@ -198,7 +208,7 @@ def main():
     print(f"  E'de asiri ret: {asiri_ret}")
     for x in g:
         print(f"  {'GECTI' if x['gecti'] else 'KALDI'}  {x['id']} ({x['not']})")
-    kayit = {"etiket": arg.etiket, "zaman": int(time.time()), "ikili_sha256": subprocess.run(
+    kayit = {"etiket": arg.etiket, "f_commit": arg.f_commit, "zaman": int(time.time()), "ikili_sha256": subprocess.run(
         ["sha256sum", arg.ikili], capture_output=True, text=True).stdout.split()[0],
         "ozet": ozet, "toplam": toplam, "yuzde": yuzde, "asiri_ret": asiri_ret, "G": g, "sorular": sonuclar}
     if arg.cikti:
