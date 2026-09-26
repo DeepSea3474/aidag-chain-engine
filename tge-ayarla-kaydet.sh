@@ -73,7 +73,7 @@ else
   echo "Islem: ERTELEME (TGE ileri aliniyor) — politika kosulu gerekmez."
 fi
 
-TIPS=$(curl -s -m5 "$RPC/tips" | python3 -c "import sys,json;print(','.join(json.load(sys.stdin).get('tips',[])) or '-')")
+TIPS=$(curl -s -m5 "$RPC/tips" | python3 -c "import sys,json;print(','.join(json.load(sys.stdin).get('tips',[])[:8]) or '-')")  # MAX_PARENTS=8
 HEX=$("$BIN" "$KEY" "$NET" "$TGE" "$SIMDI" "$TIPS")
 RESP=$(curl -s -m10 -X POST "$RPC/submit" -H 'Content-Type: application/json' -d "{\"hex\":\"$HEX\"}")
 echo "Gonderim yaniti: $RESP"
