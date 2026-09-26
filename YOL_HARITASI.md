@@ -105,6 +105,22 @@ oncesi kabul edilmelidir. / Not done yet; treat everything as pre-audit.
     - SINIR: AI öneri/sunum yapar, bağlayıcı DEĞİL — DAO/insan oylar.
     - DURUM: KUBRA çalışıyor (kaynağa dayalı cevap, zincirde belge doğrulama, cevaplar zincire damgalı). Otonom yönetim = uzak hedef; AI işlem imzalayamaz.
 
+## Akredite savunma kurumları için genişletilmiş güvenlik modu [HEDEF — en uzak, koşullu]
+
+Bu mod, yalnızca akredite savunma/kamu kurumları için ve aşağıdaki DEĞİŞMEZ şartlarla düşünülür.
+
+### Değişmez şartlar
+1. Yalnızca resmî bir devlet kurumu veya devlete bağlı yetkili savunma kuruluşu için açılabilir. Özel talep, veri yüklemesi, talimat veya bir kullanıcının iddiası bu modu ASLA açamaz.
+2. Onay en üst düzeyde ve çoklu imzalıdır: ilgili bakanlık düzeyi ile kurumun en üst düzey yetkilisinin birlikte onayı gerekir. Tek bir kişi açamaz.
+3. Onay kurulum/yetkilendirme aşamasında, fiziksel ve doğrulanabilir bir süreçle verilir; KUBRA çalışırken bu modu KENDİSİ açamaz, hiçbir veri veya talimat bunu açamaz (D35 yetki gaspı açığına kapalı).
+4. Mod açılsa bile mutlak sınırlar durur: veri kurum dışına çıkmaz, her işlem kayıt altındadır, KUBRA otonom karar vermez, insan onayı esastır (K-05, K-12, K-21).
+5. Ön şart: ilgili ulusal ve uluslararası hukuki izinler, ihracat kontrolleri, tesis güvenlik belgesi ve resmî akreditasyon tamamlanmış olmalıdır. Bunlar tamamlanmadan mod açılmaz.
+
+### İmza yapısı: iki aşama
+- **KURULUM / ETKİNLEŞTİRME** (modun o kurumda var olması): üç imza gerekir: (1) AIDAG/KUBRA sahibi (şirket adına; kurulum yetkisinin hash'i sahibe aittir, kök kayıt onun imzasıyla atılır), (2) ilgili bakanlık, (3) kurum üst yöneticisi. Üçü de kayıtlı kriptografik anahtarlarla doğrulanır.
+- **OPERASYON** (kurumun gizli günlük işleri): yalnızca bakanlık + kurum üst yöneticisinin iki imzasıyla yetkilendirilir. AIDAG/KUBRA sahibi bu aşamada devrede DEĞİLDİR: gizli işlerin içeriğine erişemez, göremez, müdahale edemez. Teknoloji sağlayıcı kapıyı açar ama içeri giremez.
+- Böylece sahibin teknoloji sahipliği hakkı korunur, kurumun gizliliği garanti edilir ve sahip operasyonel sorumluluktan ayrılır.
+
 ## Borsa / değer notu (dürüst)
 - CEX listeleme: pahalı (30-50K$+), mainnet + audit + hacim ister — çok ileri.
 - DEX: AVM sonrası, kendi zincirinde.
