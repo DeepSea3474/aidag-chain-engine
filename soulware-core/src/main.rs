@@ -24,6 +24,8 @@ mod belge_arac;  // belge kayit TALEBI hazirlama (KUBRA imzalamaz)
 mod imza_dosyasi; // zincir imza anahtari: FAIL-CLOSED yukleme (sessiz uretim YOK)
 mod guvenlik_kapisi; // K-23: tum uretim uclarinda zararli istek kapisi (fail-closed)
 mod etiket;       // K-06: deterministik cevap etiketi (dogrulanmis/oneri/bilinmiyor)
+mod yonlendirici; // deterministik niyet yonlendirici (saf, agsiz)
+mod kayitlar;     // KARARLAR.md ve KAYNAKLAR.md (salt okunur)
 
 use axum::{extract::State, routing::{get, post}, response::{IntoResponse, Sse, sse::Event}, http::{StatusCode, header}, body::Body, Json, Router};
 use ed25519_dalek::SigningKey;
@@ -69,6 +71,8 @@ struct Config {
     video_url: Option<String>,  // SOULWARE_VIDEO_URL → uzak GPU video servisi (POST {prompt} → MP4)
     kapi_kurallari: String,     // SOULWARE_KAPI_KURALLARI → K-23 kural dosyası (güvenlik ekibi sağlar)
     kapi_yargic_zorunlu: bool,  // SOULWARE_KAPI_YARGIC_ZORUNLU=1 (varsayılan) → yargıç yoksa da reddet
+    kararlar_path: String,      // SOULWARE_KARARLAR_PATH → KARARLAR.md (karar aracı)
+    kaynaklar_path: String,     // SOULWARE_KAYNAKLAR_PATH → KAYNAKLAR.md (kaynak listesi aracı)
 }
 
 impl Config {
@@ -104,6 +108,8 @@ impl Config {
             video_url: std::env::var("SOULWARE_VIDEO_URL").ok().filter(|s| !s.is_empty()),
             kapi_kurallari: ev("SOULWARE_KAPI_KURALLARI", "/root/aidag-lsc/soulware-knowledge/kapi-kurallari.json"),
             kapi_yargic_zorunlu: ev("SOULWARE_KAPI_YARGIC_ZORUNLU", "1") != "0",
+            kararlar_path: ev("SOULWARE_KARARLAR_PATH", "/root/aidag-lsc/KARARLAR.md"),
+            kaynaklar_path: ev("SOULWARE_KAYNAKLAR_PATH", "/root/aidag-lsc/KAYNAKLAR.md"),
         }
     }
 }
@@ -119,6 +125,8 @@ struct AppState {
     embedder: Option<embed::Embedder>, // semantik retrieval (yoksa keyword'e düşer)
     resmi: Vec<resmi::ResmiBelge>, // AIDAG/KUBRA resmi kaynakları
     kurallar: guvenlik_kapisi::Kurallar, // K-23 kapı kuralları
+    kararlar: Vec<kayitlar::KararMadde>, // KARARLAR.md maddeleri
+    kaynak_ozeti: String,                // KAYNAKLAR.md özeti
 }
 
 // ════════════════════════════ Kimlik / grounding ════════════════════════════
@@ -412,9 +420,14 @@ async fn zincire_yaz(st: &AppState, data_hash: [u8; 32], ts: u64) -> ChainProof 
 // Kesin cevap gereken niyetler MODELE BIRAKILMAZ; deterministik araç cevaplar.
 // Sıra önemli (spesifik → genel). /v1/ask ve /v1/ask-stream aynı yönlendirmeyi kullanır.
 async fn arac_calistir(st: &AppState, prompt: &str) -> Option<(String, &'static str)> {
-    // İSİM: sabit cevap (model yorumlamasın).
-    if resmi::isim_sorusu_mu(prompt) {
-        return Some((resmi::ISIM_CEVABI.to_string(), "kimlik"));
+    use yonlendirici::Niyet;
+    let niyet = yonlendirici::niyet_bul(prompt);
+    match &niyet {
+        // İSİM: sabit cevap (model yorumlamasın).
+        Some(Niyet::Kimlik) => return Some((resmi::ISIM_CEVABI.to_string(), "kimlik")),
+        // YETKİ DIŞI (K-05, K-21 yasak katmanı): imza, para/token, rol, silme, cihaz → sabit ret.
+        Some(Niyet::YetkiDisi) => return Some((yonlendirici::YETKI_REDDI.to_string(), "yetki-reddi")),
+        _ => {}
     }
     // BELGE KAYIT TALEBİ: kayıt niyeti + tam hash → imzasız talep (KUBRA İMZALAMAZ).
     if zincir::belge_kayit_niyeti_mi(prompt) {
@@ -427,13 +440,28 @@ async fn arac_calistir(st: &AppState, prompt: &str) -> Option<(String, &'static 
     if let Some(x) = zincir::belge_dogrula(&st.http, &st.cfg.chain_rpc, prompt).await {
         return Some((x, "belge-dogrula"));
     }
-    // ÖN SATIŞ / TGE: satılan, aktif kademe, TGE durumu zincirden CANLI (belge eskir, bu eskimez).
-    if let Some(x) = zincir::on_satis_durumu(&st.http, &st.cfg.chain_rpc, prompt).await {
-        return Some((x, "on-satis-durumu"));
-    }
-    // AĞ DURUMU: /status'tan canlı özet (zincir sorgusundan ÖNCE: daha spesifik niyet).
-    if let Some(x) = zincir::ag_durumu(&st.http, &st.cfg.chain_rpc, prompt).await {
-        return Some((x, "ag-durumu"));
+    match niyet {
+        // KARAR: KARARLAR.md'den birebir (hesap makinesinden ÖNCE: "K-20" bir işlem değildir).
+        Some(Niyet::Karar(nolar)) => {
+            let (metin, bulundu) = kayitlar::karar_cevabi(&st.kararlar, &nolar);
+            return Some((metin, if bulundu { "karar-kaydi" } else { "karar-bulunamadi" }));
+        }
+        Some(Niyet::KaynakListesi) if !st.kaynak_ozeti.is_empty() => {
+            return Some((st.kaynak_ozeti.clone(), "kaynak-listesi"));
+        }
+        // ÖN SATIŞ / TGE: zincirden CANLI (belge eskir, bu eskimez).
+        Some(Niyet::OnSatis) => {
+            if let Some(x) = zincir::on_satis_getir(&st.http, &st.cfg.chain_rpc).await {
+                return Some((x, "on-satis-durumu"));
+            }
+        }
+        // AĞ DURUMU: /status'tan canlı özet.
+        Some(Niyet::AgDurumu) => {
+            if let Some(x) = zincir::ag_durumu_getir(&st.http, &st.cfg.chain_rpc).await {
+                return Some((x, "ag-durumu"));
+            }
+        }
+        _ => {}
     }
     // ZİNCİR: bakiye/blok sorgusu → doğrudan zincirden kesin cevap.
     if let Some(x) = zincir::sorgula(&st.http, &st.cfg.chain_rpc, prompt).await {
@@ -1347,13 +1375,16 @@ async fn main() {
         }
     }
     let resmi_belgeler = resmi::yukle(&cfg.resmi_path);
+    let kararlar = kayitlar::kararlari_yukle(&cfg.kararlar_path);
+    let kaynak_ozeti = std::fs::read_to_string(&cfg.kaynaklar_path).map(|m| kayitlar::kaynak_ozeti(&m)).unwrap_or_default();
+    println!("   kayıtlar    : {} karar maddesi, kaynak listesi {}", kararlar.len(), if kaynak_ozeti.is_empty() { "YOK" } else { "var" });
     // K-23: bozuk kural dosyası -> servis AÇILMAZ (fail-closed). Dosya yoksa yalnız yargıç çalışır.
     let kurallar = match guvenlik_kapisi::Kurallar::yukle(&cfg.kapi_kurallari) {
         Ok(k) => { println!("   K-23 kapısı : {} kural ifadesi, yargıç zorunlu: {}", k.ifade_sayisi(), cfg.kapi_yargic_zorunlu); k }
         Err(e) => { eprintln!("HATA: K-23 kapı kuralları yüklenemedi: {e}"); std::process::exit(1); }
     };
     println!("📘 AIDAG resmi kaynak: {} belge ({})", resmi_belgeler.len(), cfg.resmi_path);
-    let state = Arc::new(AppState { cfg, http, key, key_addr, local, local_name, depo: Mutex::new(depo), embedder, resmi: resmi_belgeler, kurallar });
+    let state = Arc::new(AppState { cfg, http, key, key_addr, local, local_name, depo: Mutex::new(depo), embedder, resmi: resmi_belgeler, kurallar, kararlar, kaynak_ozeti });
 
     println!("──────────────────────────────────────────────");
     println!("🌀 SoulwareAI çekirdeği · yapay zeka: KUBRA (v0.1)");

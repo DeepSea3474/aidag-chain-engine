@@ -96,7 +96,8 @@ pub fn kaynakli_cevap_etiketi(cevap: &str, kaynak_sayisi: usize) -> &'static str
 /// Araç cevabının etiketi.
 pub fn arac_etiketi(arac_ad: &str) -> &'static str {
     match arac_ad {
-        "resmi-kaynak" => BILINMIYOR,
+        "resmi-kaynak" | "karar-bulunamadi" => BILINMIYOR,
+        "yetki-reddi" | "guvenlik-reddi" => "reddedildi",
         _ => DOGRULANMIS,
     }
 }

@@ -51,7 +51,7 @@ pub async fn sorgula(http: &reqwest::Client, rpc_url: &str, sorgu: &str) -> Opti
 // okunur ozet. Kurumsal entegrasyonlar (stok, IK, dokuman sistemi) ayni
 // kalipla eklenir: url degistir, alanlari esle, formatla.
 
-fn ag_niyeti_mi(sorgu: &str) -> bool {
+pub fn ag_niyeti_mi(sorgu: &str) -> bool {
     // sade(): Türkçe harfler katlanır → "ağ sağlık" ile "ag saglik" aynı eşleşir.
     let s = sade(sorgu);
     let anahtarlar = [
@@ -67,10 +67,8 @@ fn ag_niyeti_mi(sorgu: &str) -> bool {
 
 /// /status'tan ag durumu ceker, insan-okunur ozet doner. RPC yaninda status
 /// ucu (8645) ayni sunucuda; buradaki base_url RPC ile ayni ana makinedir.
-pub async fn ag_durumu(http: &reqwest::Client, rpc_url: &str, sorgu: &str) -> Option<String> {
-    if !ag_niyeti_mi(sorgu) {
-        return None;
-    }
+/// Niyet yönlendiricide (yonlendirici.rs) belirlenir; bu fonksiyon yalnız zincirden okur.
+pub async fn ag_durumu_getir(http: &reqwest::Client, rpc_url: &str) -> Option<String> {
     // RPC url'inden status url tureti: .../  -> ayni host, /status yolu.
     // rpc_url ornegi: http://127.0.0.1:8645  (JSON-RPC ayni portta /status sunar)
     let status_url = format!("{}/status", rpc_url.trim_end_matches('/'));
@@ -307,7 +305,7 @@ const KADEMELER: [(u64, f64); 8] = [
 ];
 const TGE_BELIRSIZ: u64 = 4_102_444_800; // lsc_engine::mainnet::TGE_BELIRSIZ
 
-fn on_satis_niyeti_mi(sorgu: &str) -> bool {
+pub fn on_satis_niyeti_mi(sorgu: &str) -> bool {
     let s = sade(sorgu);
     let canli = [
         "ne kadar satildi", "kac aidag satildi", "kac satildi", "satilan", "satis durumu",
@@ -335,10 +333,8 @@ fn binlik(n: u64) -> String {
     out
 }
 
-pub async fn on_satis_durumu(http: &reqwest::Client, rpc_url: &str, sorgu: &str) -> Option<String> {
-    if !on_satis_niyeti_mi(sorgu) {
-        return None;
-    }
+/// Niyet yönlendiricide (yonlendirici.rs) belirlenir; bu fonksiyon yalnız zincirden okur.
+pub async fn on_satis_getir(http: &reqwest::Client, rpc_url: &str) -> Option<String> {
     let base = rpc_url.trim_end_matches('/');
     let oz: serde_json::Value = match http.get(format!("{base}/on-satis-ozet")).send().await {
         Ok(r) => r.json().await.ok()?,

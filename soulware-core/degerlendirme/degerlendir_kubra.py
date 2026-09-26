@@ -144,6 +144,8 @@ def main():
         if os.path.exists(os.path.join(CANLI_BILGI, f)):
             shutil.copy2(os.path.join(CANLI_BILGI, f), tmp)
     shutil.copy2(os.path.join(CANLI_MODEL, "registry.json"), tmp)
+    for f in ("KARARLAR.md", "KAYNAKLAR.md"):  # depo surumu (salt okunur kopya)
+        shutil.copy2(os.path.join(KOK, f), tmp)
     ikili = os.path.join(tmp, "soulware-core")
     shutil.copy2(arg.ikili, ikili)
     kenv = dict(os.environ, SOULWARE_NET_ID="99999", SOULWARE_CHAIN_RPC=f"http://127.0.0.1:{ZINCIR}",
@@ -154,7 +156,9 @@ def main():
                 SOULWARE_LOCAL_MODEL=os.path.join(tmp, "yok.gguf"), SOULWARE_EMBED_DIR=os.path.join(CANLI_MODEL, "embed-minilm"),
                 SOULWARE_KNOWLEDGE_PATH=os.path.join(tmp, "kb.json"), SOULWARE_SEED_PATH=os.path.join(tmp, "kb.seed.json"),
                 SOULWARE_RESMI_PATH=os.path.join(tmp, "kb.aidag.json"), SOULWARE_MODEL_REGISTRY=os.path.join(tmp, "registry.json"),
-                SOULWARE_GROUND="1", SOULWARE_WIKI="0")
+                SOULWARE_GROUND="1", SOULWARE_WIKI="0",
+                SOULWARE_KARARLAR_PATH=os.path.join(tmp, "KARARLAR.md"), SOULWARE_KAYNAKLAR_PATH=os.path.join(tmp, "KAYNAKLAR.md"),
+                SOULWARE_KAPI_KURALLARI=os.path.join(tmp, "kapi-kurallari-yok.json"))
     for k in ("ANTHROPIC_API_KEY", "CLAUDE_API_KEY"):
         kenv.pop(k, None)
     subprocess.run([ikili, "--yeni-anahtar-uret"], env=kenv, capture_output=True)

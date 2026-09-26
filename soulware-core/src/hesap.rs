@@ -20,10 +20,17 @@ enum Tok {
 
 /// Sorgudan aritmetik varsa KESIN sonucu döndür; yoksa None (model yolu).
 pub fn hesapla(sorgu: &str) -> Option<String> {
-    let ifade = ifade_cikar(sorgu)?;
+    // Kod/kimlik kalıbı (harf-tire-rakam: "K-20", "BEP-20", "SHA-256") işlem değildir.
+    if kod_kalibi_var(sorgu) {
+        return None;
+    }
+    let ifade = ile_kalibi(sorgu).or_else(|| ifade_cikar(sorgu))?;
     let tokens = tokenle(&ifade)?;
-    // En az bir operatör olmalı (tek sayı "hesap" değildir).
-    if !tokens.iter().any(|t| matches!(t, Tok::Add | Tok::Sub | Tok::Mul | Tok::Div)) {
+    // En az bir İKİLİ operatör olmalı (iki değer arasında): "-20" tek başına hesap değildir.
+    let ikili = tokens.windows(2).any(|w| {
+        matches!(w[0], Tok::Num(_) | Tok::RP) && matches!(w[1], Tok::Add | Tok::Sub | Tok::Mul | Tok::Div)
+    });
+    if !ikili {
         return None;
     }
     let mut p = Coz { t: tokens, i: 0 };
@@ -40,6 +47,35 @@ pub fn hesapla(sorgu: &str) -> Option<String> {
     } else {
         Some(format!("{}", (v * 1e6).round() / 1e6))
     }
+}
+
+/// Harf + '-' + rakam (boşluksuz) kalıbı var mı?
+fn kod_kalibi_var(s: &str) -> bool {
+    let c: Vec<char> = s.chars().collect();
+    c.windows(3).any(|w| w[0].is_alphabetic() && matches!(w[1], '-' | '–') && w[2].is_ascii_digit())
+}
+
+/// "12 ile 12'yi çarp(arsan)", "5 ile 3'ü topla", "10 ile 4'ü böl" → "12 * 12" vb. (tam iki sayı).
+fn ile_kalibi(s: &str) -> Option<String> {
+    let sade = crate::retrieval::sade(s);
+    let t: Vec<&str> = sade.split(' ').collect();
+    if !t.contains(&"ile") {
+        return None;
+    }
+    let op = if t.iter().any(|w| w.starts_with("carp") && *w != "carpi") {
+        "*"
+    } else if t.iter().any(|w| w.starts_with("topla")) {
+        "+"
+    } else if t.iter().any(|w| (w.starts_with("bol") && *w != "bolu") || w.starts_with("bolers")) {
+        "/"
+    } else {
+        return None;
+    };
+    let sayilar: Vec<&str> = t.iter().copied().filter(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_digit())).collect();
+    if sayilar.len() != 2 {
+        return None;
+    }
+    Some(format!("{} {op} {}", sayilar[0], sayilar[1]))
 }
 
 /// Türkçe operatör kelimelerini sembole çevir + yalnız matematik karakterlerini tut.
@@ -173,5 +209,20 @@ mod tests {
         assert_eq!(hesapla("Türkiye'nin başkenti neresidir"), None);
         assert_eq!(hesapla("AIDAG-Chain network_id kactir"), None); // tek sayı, operatör yok
         assert_eq!(hesapla("Ali'nin 2 elması vardı 3 daha aldı"), None); // operatör yok
+    }
+    #[test]
+    fn kod_kalibi_hesap_degildir() {
+        for q in ["K-20 kararı nedir?", "KARARLAR'da K-21 ne diyor?", "BEP-20 USDT nedir", "SHA-256 nedir", "-20"] {
+            assert_eq!(hesapla(q), None, "{q}");
+        }
+        assert_eq!(hesapla("20 - 5").as_deref(), Some("15"));
+        assert_eq!(hesapla("-3 artı 5").as_deref(), Some("2"));
+    }
+    #[test]
+    fn ile_kalibi_calisir() {
+        assert_eq!(hesapla("12 ile 12'yi çarparsan ne çıkar?").as_deref(), Some("144"));
+        assert_eq!(hesapla("5 ile 3'ü topla").as_deref(), Some("8"));
+        assert_eq!(hesapla("10 ile 4'ü bölersen?").as_deref(), Some("2.5"));
+        assert_eq!(hesapla("Ali ile Veli 2 elma aldı"), None);
     }
 }
