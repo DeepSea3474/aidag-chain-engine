@@ -4,6 +4,10 @@ class H(http.server.BaseHTTPRequestHandler):
     def log_message(self,*a): pass
     def do_POST(self):
         b=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+        sistem=next((m.get("content","") for m in b.get("messages",[]) if m.get("role")=="system"),"")
+        if "YARGIC" in sistem:  # K-23 yargici: gercek model dilbilgisiyle yalniz etiket uretir
+            out=json.dumps({"model":"mock-7b","choices":[{"message":{"content":"GUVENLI"}}]}).encode()
+            self.send_response(200); self.send_header("content-type","application/json"); self.send_header("content-length",str(len(out))); self.end_headers(); self.wfile.write(out); return
         if b.get("stream"):
             self.send_response(200); self.send_header("content-type","text/event-stream"); self.end_headers()
             for p in ["Bu sahte"," beyin\ncevabidir:\n\n"," AIDAG testi."]:
