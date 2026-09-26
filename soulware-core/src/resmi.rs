@@ -75,7 +75,13 @@ pub fn isim_sorusu_mu(prompt: &str) -> bool {
             return false;
         }
         let onceki = if i > 0 { t[i - 1] } else { "" };
-        let tamlama = !matches!(onceki, "" | "senin" | "sizin" | "kubra" | "kubranin")
+        // Tamlayan (ilgi hâli) yalnız bir İSİMDİR: soru eki ("mısın", "musun"...) ve "için" tamlayan değildir.
+        const SORU_EKI: &[&str] = &[
+            "mi", "mu", "misin", "musun", "miyim", "muyum", "miyiz", "muyuz", "misiniz", "musunuz", "midir", "mudur",
+            "miydi", "muydu", "misiniz",
+        ];
+        let tamlama = !matches!(onceki, "" | "senin" | "sizin" | "kubra" | "kubranin" | "icin")
+            && !SORU_EKI.contains(&onceki)
             && (onceki.ends_with("nin") || onceki.ends_with("nun") || onceki.ends_with("in") || onceki.ends_with("un"));
         !tamlama && (IYELIK2.contains(w) || ikinci)
     })
@@ -141,7 +147,8 @@ mod tests {
         // Olumlu: farklı ifadeler (değerlendirme setlerinden ALINMADI)
         for q in ["Senin adın ne?", "Adın neydi?", "Adınızı öğrenebilir miyim?", "Sana nasıl hitap edeyim?",
                   "Size hangi isimle seslenmeliyim?", "Kendine ne isim veriyorsun?", "İsmin nedir senin?",
-                  "KUBRA ismini kim koydu?", "What is your name?", "Adını kim koydu?"] {
+                  "KUBRA ismini kim koydu?", "What is your name?", "Adını kim koydu?",
+                  "Söyler misin, adın ne?", "Anlatır mısın ismin neydi?", "Bilir misiniz, adınız nedir?"] {
             assert!(isim_sorusu_mu(q), "{q}");
         }
         // Olumsuz: ad/isim geçen ama kimlik sorusu olmayanlar

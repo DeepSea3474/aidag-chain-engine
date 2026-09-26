@@ -45,13 +45,18 @@ fn niyet_cikar(sorgu: &str) -> Option<(&'static str, serde_json::Value, String)>
     let s = sade(sorgu);
     // Kelime düzeyinde (Türkçe ekler anahtar_var'da): "blokzincirde son gelişmeler" blok sorgusu DEĞİLDİR.
     let var = |k: &str| anahtar_var(&s, k);
-    if var("bakiye") || var("balance") {
+    let kac = s.split(' ').any(|t| t == "kac" || t.starts_with("kacinci") || ek_ile_eslesir(t, "kac"));
+    // Bakiye: açık "bakiye" kelimesi YA DA adres + miktar sorusu + varlık ("0x... içinde kaç AIDAG var?").
+    // İşlem/transfer sayısı soruları bakiye değildir.
+    let miktar_sorusu = (kac || var("ne kadar") || var("miktar"))
+        && ["aidag", "lsc", "token", "coin", "para", "varlik"].iter().any(|k| var(k))
+        && !["islem", "transfer", "tx", "transaction"].iter().any(|k| var(k));
+    if var("bakiye") || var("balance") || miktar_sorusu {
         if let Some(adr) = adres_bul(sorgu) {
             return Some(("eth_getBalance", json!([adr, "latest"]),
                 format!("{} adresinin bakiyesi", adr)));
         }
     }
-    let kac = s.split(' ').any(|t| t == "kac" || t.starts_with("kacinci") || ek_ile_eslesir(t, "kac"));
     if (var("blok") || var("block") || var("yukseklik"))
         && (kac || var("son") || var("number") || var("numara")) {
             return Some(("eth_blockNumber", json!([]), "guncel blok yuksekligi".to_string()));
@@ -300,15 +305,20 @@ mod niyet_cikar_testleri {
     #[test]
     fn bakiye_blok_ifade_cesitliligi() {
         let a = "0x0ffe438e047dfb08c0c79aac9a63ea32d49a272c";
-        for q in [format!("{a} bakiyesi nedir?"), format!("{a} adresinin bakiyesini göster"), format!("Balance of {a}")] {
+        for q in [format!("{a} bakiyesi nedir?"), format!("{a} adresinin bakiyesini göster"), format!("Balance of {a}"),
+                  format!("{a} cüzdanında ne kadar token var?"), format!("{a} adresinde kaç LSC bulunuyor?"),
+                  format!("{a} hesabındaki AIDAG miktarı nedir?")] {
             assert_eq!(niyet_cikar(&q).map(|x| x.0), Some("eth_getBalance"), "{q}");
         }
         for q in ["Blok yüksekliği kaç?", "Son blok numarası nedir?", "Kaçıncı bloktayız?", "Zincirin blok sayısı kaç?", "Block number?"] {
             assert_eq!(niyet_cikar(q).map(|x| x.0), Some("eth_blockNumber"), "{q}");
         }
         for q in ["Blok nedir?", "Blok zinciri nasıl çalışır?", "Bakiye nasıl sorgulanır?", "Blokzincirde son gelişmeler neler?",
-                  "Kaç kişi çalışıyor?", "Son haberler neler?"] {
+                  "Kaç kişi çalışıyor?", "Son haberler neler?", "Kaç AIDAG satıldı?"] {
             assert_eq!(niyet_cikar(q).map(|x| x.0), None, "{q}");
+        }
+        for q in [format!("{a} adresine kaç işlem yapıldı?"), format!("{a} adresi geçerli mi?")] {
+            assert_eq!(niyet_cikar(&q).map(|x| x.0), None, "{q}");
         }
     }
 }

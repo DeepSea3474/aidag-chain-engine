@@ -24,7 +24,7 @@ pub fn hesapla(sorgu: &str) -> Option<String> {
     if kod_kalibi_var(sorgu) {
         return None;
     }
-    let ifade = ile_kalibi(sorgu).or_else(|| ifade_cikar(sorgu))?;
+    let ifade = ile_kalibi(sorgu).or_else(|| kelime_islemi(sorgu)).or_else(|| ifade_cikar(sorgu))?;
     let tokens = tokenle(&ifade)?;
     // En az bir İKİLİ operatör olmalı (iki değer arasında): "-20" tek başına hesap değildir.
     let ikili = tokens.windows(2).any(|w| {
@@ -91,6 +91,50 @@ fn ile_kalibi(s: &str) -> Option<String> {
         return None;
     }
     Some(format!("{} {op} {}", sayilar[0], sayilar[1]))
+}
+
+/// Sayı sözcükleri (kat çarpanı için).
+fn sayi_sozcugu(t: &str) -> Option<f64> {
+    Some(match t {
+        "bir" => 1.0, "iki" => 2.0, "uc" => 3.0, "dort" => 4.0, "bes" => 5.0, "alti" => 6.0, "yedi" => 7.0,
+        "sekiz" => 8.0, "dokuz" => 9.0, "on" => 10.0, "yuz" => 100.0,
+        _ => t.parse::<f64>().ok()?,
+    })
+}
+
+/// Kelimeyle ifade edilen işlemler: "N'in yarısı", "N'in çeyreği", "N'in karesi/küpü", "N'in X katı",
+/// "N'in yüzde X'i" / "yüzde X'i N". Sayı sayısı tam olmalı; aksi hâlde None.
+fn kelime_islemi(s: &str) -> Option<String> {
+    let sade = crate::retrieval::sade(s);
+    let t: Vec<&str> = sade.split(' ').collect();
+    let sayi = |w: &str| w.parse::<f64>().ok();
+    let sayilar: Vec<f64> = t.iter().filter_map(|w| sayi(w)).collect();
+    let var = |adaylar: &[&str]| t.iter().position(|w| adaylar.contains(w));
+    if let Some(i) = var(&["yuzde"]) {
+        let x = t.get(i + 1).and_then(|w| sayi(w))?;
+        let n: Vec<f64> = t.iter().enumerate().filter(|(j, _)| *j != i + 1).filter_map(|(_, w)| sayi(w)).collect();
+        return (n.len() == 1).then(|| format!("{} * {x} / 100", n[0]));
+    }
+    if let Some(i) = var(&["kati", "katini", "katidir", "katina"]) {
+        let carpan = t.get(i.checked_sub(1)?).and_then(|w| sayi_sozcugu(w))?;
+        let n: Vec<f64> = t.iter().enumerate().filter(|(j, _)| *j + 1 != i).filter_map(|(_, w)| sayi(w)).collect();
+        return (n.len() == 1).then(|| format!("{} * {carpan}", n[0]));
+    }
+    if sayilar.len() != 1 {
+        return None;
+    }
+    let n = sayilar[0];
+    if var(&["yarisi", "yarisini", "yarisidir", "yarisina"]).is_some() {
+        Some(format!("{n} / 2"))
+    } else if var(&["ceyregi", "ceyregini", "ceyregidir"]).is_some() {
+        Some(format!("{n} / 4"))
+    } else if var(&["karesi", "karesini", "karesidir"]).is_some() {
+        Some(format!("{n} * {n}"))
+    } else if var(&["kupu", "kupunu", "kupudur"]).is_some() {
+        Some(format!("{n} * {n} * {n}"))
+    } else {
+        None
+    }
 }
 
 /// Türkçe operatör kelimelerini sembole çevir + yalnız matematik karakterlerini tut.
@@ -242,6 +286,19 @@ mod tests {
         }
         for q in ["K-20 nedir?", "BEP-20 ağı hangisi?", "3 elma aldım", "2026 yılında ne oldu?", "2026-09-26 tarihinde ne oldu?",
                   "26/09/2026 günü ne var?", "SHA-256 güvenli mi?", "Ali ile Ayşe 2 kitap okudu"] {
+            assert_eq!(hesapla(q), None, "{q}");
+        }
+    }
+
+    #[test]
+    fn kelime_islemleri() {
+        for (q, c) in [("50'nin yarısı nedir?", "25"), ("80'in çeyreği kaç?", "20"), ("12'nin karesi", "144"),
+                       ("3'ün küpü kaç eder?", "27"), ("15'in üç katı kaç?", "45"), ("7'nin 4 katı", "28"),
+                       ("200'ün yüzde 15'i kaç?", "30"), ("yüzde 10'u 90 kaç eder?", "9")] {
+            assert_eq!(hesapla(q).as_deref(), Some(c), "{q}");
+        }
+        for q in ["Yarın saat kaçta buluşuyoruz?", "Ürünün yarısı bozuk çıktı", "Yüzde kaç indirim var?",
+                  "2 katlı ev fiyatları", "İki katı daha hızlı mı?", "3 ile 5'in yarısı"] {
             assert_eq!(hesapla(q), None, "{q}");
         }
     }
