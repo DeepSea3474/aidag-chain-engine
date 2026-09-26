@@ -121,6 +121,10 @@ Bu mod, yalnızca akredite savunma/kamu kurumları için ve aşağıdaki DEĞİ�
 - **OPERASYON** (kurumun gizli günlük işleri): yalnızca bakanlık + kurum üst yöneticisinin iki imzasıyla yetkilendirilir. AIDAG/KUBRA sahibi bu aşamada devrede DEĞİLDİR: gizli işlerin içeriğine erişemez, göremez, müdahale edemez. Teknoloji sağlayıcı kapıyı açar ama içeri giremez.
 - Böylece sahibin teknoloji sahipliği hakkı korunur, kurumun gizliliği garanti edilir ve sahip operasyonel sorumluluktan ayrılır.
 
+### Erişim sınırı: yalnızca devletin hassas birimleri
+- Bu mod yalnızca devletin hassas birimleri (savunma sanayii, istihbarat ve benzeri resmî kuruluşlar) için geçerlidir; sıradan kurumlar (otomotiv, enerji, banka, üniversite vb.) için geçerli DEĞİLDİR ve onlar standart güvenli sürümü (K-23a) kullanır.
+- İlgili birim özel bir şirket olsa bile (ör. özel savunma sanayi firması), mod kendi başına açılamaz; her durumda ilgili devlet birimi (bakanlık) yetkilendirmek zorundadır. Karar mercii her zaman devlettir.
+
 ## Borsa / değer notu (dürüst)
 - CEX listeleme: pahalı (30-50K$+), mainnet + audit + hacim ister — çok ileri.
 - DEX: AVM sonrası, kendi zincirinde.
