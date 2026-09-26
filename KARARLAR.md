@@ -109,6 +109,14 @@ Uygulanmamış kararlar **[Sonraki iş]** olarak işaretlenir.
   - Ödeme izleyicisi: canlı (26 Eylül 2026). Minimum altı ödemeler ayrı `minimum_alti` kaydına yazılır, günlüğe "MINIMUM ALTI ODEME (iade gerekli)" satırı düşer; iade bekleyenler `on-satis-izleyici.py --minimum-alti` ile listelenir. Motor deposu dal `izleyici-minimum-alti` (`7af969b`), `/opt/aidag/izleyici` üzerinde çalışıyor.
 - **[Sonraki iş]** Ödeme izleyicisinde BNB yolunu kod düzeyinde kapatmak (bugün yalnızca Etherscan anahtarı ya da `BNB_TARA=1` ile açılıyor; ikisi de kapalı). Yanlış token veya ağ ile gelen ödemeler için iade sürecinin yazılması.
 
+### K-22 · Kuantum sonrası güvenliğe geçiş hazırlığı (Eylül 2026)
+- Karar: AIDAG, kuantum bilgisayarların ileride bugünkü imza algoritmalarını (ed25519, secp256k1) kırabilme riskine karşı kuantuma dayanıklı kriptografiye geçişe hazır bir mimariye taşınacaktır.
+- Ön çalışma: NIST standardı ML-DSA imza algoritması izole bir ortamda denendi; çalıştığı doğrulandı ve vertex boyutunu yaklaşık 16-22 kat büyüttüğü ölçüldü. Bu nedenle ana ağda şimdilik ed25519 kullanılmaya devam ediyor.
+- Yol: (1) imza türünü sürümlenebilir yapmak (kripto çeviklik), (2) kritik işlemler ve kurumsal ağlar için hibrit imza (klasik + kuantuma dayanıklı), (3) boyut ve performans etkisinin ölçülmesi, (4) kademeli geçiş planı.
+- Kapsam dışı: "Kuantum yapay zekâ" hedeflenmemektedir; bugün pratik bir avantajı kanıtlanmış değildir.
+- Neden: Kurumsal ve kamu kayıtlarının uzun yıllar geçerli kalması gerekir; bugün kaydedilen verinin gelecekte de güvende olması.
+- Kaynaklar: KAYNAKLAR.md, Kriptografi başlığı (NIST FIPS 203/204/205).
+
 ---
 
 ## 5. Çalışma yöntemi
