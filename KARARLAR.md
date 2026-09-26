@@ -58,6 +58,14 @@ Uygulanmamış kararlar **[Sonraki iş]** olarak işaretlenir.
 - Karar: KUBRA saldırı bilgisini yalnızca savunma için öğrenir ve kullanır; çalışır istismar kodu veya zararlı yazılım üretmez; sızma testleri yetkili insan ekipler tarafından yazılı izinle yapılır.
 - Neden: Kötüye kullanım riski, hukuki sorumluluk ve kurumların güveni.
 
+### K-24 · KUBRA güncelleme hattı: kuralları insan koyar, KUBRA uygular (Eylül 2026)
+- Karar: KUBRA kendi bağımlılıklarının, işletim sistemi yamalarının, modellerinin ve araçlarının güncellemelerini izler, inceler ve zararlı ya da sorunlu bir sürüm tespit ederse güvenli alternatif arar (önceki güvenli sürüm, düzeltilmiş yama veya eşdeğer paket).
+- Otomatik uygulama yalnızca yetkililerin çoklu imzayla belirlediği kural seti içinde yapılır: izinli paketler ve kaynaklar, otomatik olabilecek güncelleme türleri ve tamamı geçmesi gereken kontroller (imza ve parmak izi, lisans, derleme, tüm testler, değerlendirme setinde puan düşüşü olmaması, izole ortamda çalıştırma).
+- Akış: izleme → inceleme → otomatik kontroller → test ortamına otomatik yükleme → belirli süre sorunsuz çalışma → canlıya geçiş; sorun çıkarsa otomatik geri alma. Kural dışındaki her güncelleme insan onayına gider. Kritik güvenlik yamaları için hat hızlandırılır, ancak onaysız canlıya çıkmaz.
+- Sınır: KUBRA kural setini değiştiremez, kendi yetkisini genişletemez, kendi güvenlik katmanlarını (zararlı istek kapısı, yetki sınırları) etkileyen güncellemeleri kural içinde bile otomatik uygulayamaz; bunlar her zaman insan onayı gerektirir.
+- Neden: Yazılım tedarik zinciri saldırılarına karşı korunma; hiçbir değerlendirmenin bir yazılımın zararsızlığını tek başına garanti edememesi; otomasyonun faydasını güvenlikten ödün vermeden sağlamak.
+- Ilgili: K-05, K-08, K-21.
+
 ---
 
 ## 3. Ürün ve iş modeli
