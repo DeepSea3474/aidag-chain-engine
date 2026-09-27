@@ -66,6 +66,15 @@ Uygulanmamış kararlar **[Sonraki iş]** olarak işaretlenir.
 - Neden: Yazılım tedarik zinciri saldırılarına karşı korunma; hiçbir değerlendirmenin bir yazılımın zararsızlığını tek başına garanti edememesi; otomasyonun faydasını güvenlikten ödün vermeden sağlamak.
 - Ilgili: K-05, K-08, K-21.
 
+### K-25 · KUBRA çekirdeğinin ana ağa yayını (27 Eylül 2026)
+- Karar: KUBRA çekirdeği (soulware-core), K-06/K-21/K-23 ilkelerini uygulayan yeni sürümle ana ağda yayına alındı. Kod: `aidag-chain-engine` deposu `main`, commit `e216fa2`; canlı ikili sha256 `d983c6e2…`.
+- Kapsam: (1) deterministik niyet yönlendirici — kesin cevap gereken sorular zayıf modele bırakılmaz; (2) K-23 iki katmanlı zararlı istek kapısı — eylem fiili + kullanılabilir zarar aracı = kesin ret, bilgi/açıklama/savunma ve kimlik soruları geçer; yetki gaspı + aciliyet baskısı ayrı ve öncelikli redde bağlı (K-05, K-21); (3) K-06 deterministik cevap etiketi (doğrulanmış/öneri/bilinmiyor/reddedildi), içerik desteğine dayalı; (4) her cevapta işlem izi (sürüm, niyet, araç, kapı, zincir okumaları, kaynaklar, etiket).
+- Kanıt: bağımsız kör setler ve tuzak seti gerçek modelle %100; bilgi↔araç çiftleri %100; ana değerlendirme seti %97,8; gereksiz ret 0; uçtan uca (izole devnet) 42/42; birim testleri 88/88; canlıya alma öncesi izole devnet duman testleri 6/6. Ölçümler ana ağa yazmadan izole ortamda yapıldı.
+- Yapılandırma: K-23 kural dosyası `/etc/aidag/kapi-kurallari.json` (600, depo dışı); servis env'i `SOULWARE_KAPI_KURALLARI`, `SOULWARE_KARARLAR_PATH`, `SOULWARE_KAYNAKLAR_PATH`. Karar ve kaynak araçları KARARLAR.md ve KAYNAKLAR.md'yi okur.
+- Geri dönüş: önceki ikili yedeği (sha256 `1550bec3…`) saklanır; sorun halinde servis durdurulup yedek ikili geri kopyalanır. Yayın kararı ve doğrulama insan onayıyla verildi.
+- Bilinen sınır: kaynak içeriğinin cevabı gerçekten desteklediğinin anlamsal doğrulaması (NLI) ileri iş olarak planlandı (bkz. YOL_HARITASI.md); şu an atıf ve içerik-örtüşme oranıyla ölçülüyor.
+- Ilgili: K-06, K-21, K-23, K-24.
+
 ---
 
 ## 3. Ürün ve iş modeli
