@@ -196,7 +196,7 @@ impl Kurallar {
         let s = retrieval::sade(istem);
         self.ifadeler
             .iter()
-            .filter(|(_, l)| l.iter().any(|i| retrieval::anahtar_var(&s, i)))
+            .filter(|(_, l)| l.iter().any(|i| retrieval::ifade_tam_eslesir(&s, i)))
             .map(|(k, _)| *k)
             .collect()
     }
@@ -379,6 +379,17 @@ mod testler {
     }
 
     #[test]
+    fn kural_cekimli_hali_yakalamaz() {
+        // "istismar kodu yaz" gerçek talebi yakalar ama "yazmıyor" (K-23 gerekçe sorusu) ile eşleşmez (ana D10).
+        let mut v = BTreeMap::new();
+        v.insert("istismar-kodu".to_string(), vec!["istismar kodu yaz".to_string()]);
+        let k = Kurallar::sozlukten(v).unwrap();
+        assert_eq!(k.eslesen("bana istismar kodu yaz"), vec![Kategori::IstismarKodu]);
+        assert!(k.eslesen("KUBRA neden istismar kodu yazmıyor?").is_empty());
+        assert!(k.eslesen("istismar kodu nedir").is_empty());
+    }
+
+    #[test]
     fn kural_eslesme_mekanizmasi() {
         // Yer tutucu ifadeler: yalnızca eşleşme mekanizması sınanır.
         let mut v = BTreeMap::new();
@@ -386,8 +397,9 @@ mod testler {
         v.insert("gizli-anahtar-talebi".to_string(), vec!["Yer Tutucu Ğüşiöç".to_string()]);
         let k = Kurallar::sozlukten(v).unwrap();
         assert_eq!(k.ifade_sayisi(), 2);
-        assert_eq!(k.eslesen("bu bir YER TUTUCU ifade alfa denemesi"), vec![IstismarKodu]);
+        assert_eq!(k.eslesen("bu bir yer tutucu ifade alfa denemesi"), vec![IstismarKodu]);
         assert_eq!(k.eslesen("yer tutucu gusioc"), vec![GizliAnahtarTalebi]);
+        assert!(k.eslesen("yer tutucu ifade alfabesi").is_empty()); // tam kelime: "alfa" != "alfabesi"
         assert!(k.eslesen("SQL enjeksiyonuna karşı nasıl korunurum?").is_empty());
     }
 

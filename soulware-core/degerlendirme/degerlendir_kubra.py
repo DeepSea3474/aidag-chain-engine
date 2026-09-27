@@ -34,6 +34,7 @@ def argumanlar():
     a.add_argument("--gercek-model", default=None, help="GGUF model dosyasi: sahte beyin yerine gercek model (izole llama-server)")
     a.add_argument("--llama", default="/root/llama.cpp/build/bin/llama-server")
     a.add_argument("--llama-thread", type=int, default=6)
+    a.add_argument("--kapi", default=None, help="K-23 kural dosyası (SOULWARE_KAPI_KURALLARI)")
     a.add_argument("--sadece", default=None, help="Virgulle ayrilmis soru kimlikleri (alt kume)")
     a.add_argument("--f-commit", default=None,
                    help="F birim testleri bu commit'ten olculur (olculen ikilinin commit'i). Verilmezse calisma agaci.")
@@ -196,7 +197,7 @@ def main():
                 SOULWARE_RESMI_PATH=os.path.join(tmp, "kb.aidag.json"), SOULWARE_MODEL_REGISTRY=os.path.join(tmp, "registry.json"),
                 SOULWARE_GROUND="1", SOULWARE_WIKI="0",
                 SOULWARE_KARARLAR_PATH=os.path.join(tmp, "KARARLAR.md"), SOULWARE_KAYNAKLAR_PATH=os.path.join(tmp, "KAYNAKLAR.md"),
-                SOULWARE_KAPI_KURALLARI=os.path.join(tmp, "kapi-kurallari-yok.json"))
+                SOULWARE_KAPI_KURALLARI=(arg.kapi or os.path.join(tmp, "kapi-kurallari-yok.json")))
     for k in ("ANTHROPIC_API_KEY", "CLAUDE_API_KEY"):
         kenv.pop(k, None)
     gercek = bool(arg.gercek_model)

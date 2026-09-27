@@ -123,6 +123,17 @@ fn kelime_eslesir(kelime: &str, anahtar: &str, son_kelime: bool) -> bool {
         || ((son_kelime || anahtar.chars().count() >= 5) && kelime.starts_with(anahtar))
 }
 
+/// Ardışık TAM kelime dizisi eşleşmesi (önek/çekim YOK): "istismar kodu yaz" ⊂ "... istismar kodu yaz bana",
+/// ama "istismar kodu yazmiyor" ile EŞLEŞMEZ. Kapı kuralları için (yüksek kesinlik, düşük yanlış-pozitif).
+pub fn ifade_tam_eslesir(sade_metin: &str, ifade: &str) -> bool {
+    let t: Vec<&str> = sade_metin.split(' ').filter(|x| !x.is_empty()).collect();
+    let k: Vec<&str> = ifade.split(' ').filter(|x| !x.is_empty()).collect();
+    if k.is_empty() || t.len() < k.len() {
+        return false;
+    }
+    t.windows(k.len()).any(|w| w.iter().zip(&k).all(|(x, y)| x == y))
+}
+
 /// Sade metinde anahtar var mı? Her kelime tam, geçerli Türkçe ekle ("ağında", "bloğu") ya da ≥5 harfliyse
 /// önekle ("zincirde" ~ "zincir") eşleşir. Çok kelimeli anahtar ardışık kelimelerle eşleşir; son kelimesi
 /// önekle de eşleşebilir ("ag durumu" ~ "ag durumunu"). Kısa anahtarlar serbest önekle eşleşmez
