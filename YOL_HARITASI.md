@@ -154,6 +154,21 @@ Gizli/kritik belgelerin uzun vadeli, değişmez ve kuantuma dayanıklı sakland�
 - KUBRA teşhis ve geri dönüşte zincirden kanıtı, depodan detayı alır; böylece hem hızlı hem güvenilir çalışır.
 - Bu ilke belge doğrulama, parça takibi, fabrika verisi ve gizli arşiv dahil tüm senaryolarda geçerlidir.
 
+## KUBRA bilgi erişim seviyeleri
+- Her bilgi/belge bir erişim etiketi taşır: **AÇIK** (herkese verilebilir), **KURUMSAL/GİZLİ** (sadece o kurumda, yetkiliye), **KİŞİSEL** (sadece ilgili kişiye).
+- KUBRA bir bilgiyi vermeden önce erişim seviyesini ve soranın yetkisini kontrol eder; ona göre verir ya da "yetki dışı" der.
+- Kurumsal/gizli bilgi KUBRA'nın kendi tabanında kalır, başka kuruma/kişiye TAŞINMAZ (K-12 ile uyumlu).
+- Açık/genel teknik bilgi serbestçe paylaşılır.
+- KUBRA öğrendiğini uygular, test eder, kanıtlar; sonra erişim seviyesine göre saklar veya paylaşır.
+
+## KUBRA'nın eksikten öğrenme yeteneği (kendi kendine gelişim)
+- KUBRA bir soruya "doğrulanmış bilgim yok" dediğinde, o konuyu bir ÖĞRENME KUYRUĞUNA ekler.
+- Arka planda, o konuyu onaylı/doğru kaynaklardan araştırıp öğrenir (mevcut öğrenme motoru: karantina + sınav).
+- Bir dahaki sefere aynı konu gelince artık cevaplayabilir.
+- SÜZGEÇ (kritik): sadece MEŞRU, öğrenilebilir, alanla ilgili eksikler kuyruğa girer. Zararlı istekler (virüs kodu), bilinemez sorular (gelecek fiyat), kişisel veri, alan-dışı konular kuyruğa EKLENMEZ.
+- Böylece KUBRA gerçek kullanıcı ihtiyacına göre, kendi eksiklerinden, kontrollü şekilde büyür.
+- Önceliği çok sorulan ama bilinmeyen konular alır.
+
 ## Kritik prensip
 Her adım bir öncekine bağlı. Sıra atlanırsa (örn. köprüyü AVM'siz, audit'siz yapmak) =
 güvenlik felaketi + boşa emek. Doğru sıra = akıcılık + zaman + güvenlik.
