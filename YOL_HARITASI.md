@@ -169,6 +169,13 @@ Gizli/kritik belgelerin uzun vadeli, değişmez ve kuantuma dayanıklı sakland�
 - Böylece KUBRA gerçek kullanıcı ihtiyacına göre, kendi eksiklerinden, kontrollü şekilde büyür.
 - Önceliği çok sorulan ama bilinmeyen konular alır.
 
+## KUBRA çalışma formülü: genel bilgi + kurum verisi = kuruma özel çözüm
+KUBRA'nın genel mühendislik bilgisi (blokzincir, güvenlik, kriptografi, kod, analiz) + kurulacağı kurumun kendi verisi = o kuruma özel mühendislik çözümü.
+- KUBRA genel bilgisini kurumun özel verisine uygular; kuruma özel analiz, çözüm ve kod üretir.
+- Kurumun verisi kurumda kalır (K-12); KUBRA başka kuruma taşımaz.
+- Her kurumun KUBRA'sı, o kurumun verisiyle o kuruma özel çalışır.
+- Çözüm kanıtlı, test edilmiş ve kurumun yetki yapısına uygundur; karar insanda kalır.
+
 ## Kritik prensip
 Her adım bir öncekine bağlı. Sıra atlanırsa (örn. köprüyü AVM'siz, audit'siz yapmak) =
 güvenlik felaketi + boşa emek. Doğru sıra = akıcılık + zaman + güvenlik.
