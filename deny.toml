@@ -1,0 +1,33 @@
+# cargo-deny: güvenlik açığı (advisories) + lisans + kaynak denetimi. CI'da `cargo deny check`.
+[advisories]
+version = 2
+yanked = "deny"
+# ignore = []  # gerekçeli istisna eklenirse buraya (RUSTSEC-xxxx-xxxx) + açıklama
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+# İzin verilen lisanslar (izin verici / uyumlu). Listede olmayan lisans → CI RED.
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-DFS-2016",
+  "Unicode-3.0",
+  "Zlib",
+  "CC0-1.0",
+  "MPL-2.0",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "warn"
+
+[sources]
+# Yalnız resmî crates.io; bilinmeyen registry/git kaynağı → RED (tedarik zinciri).
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

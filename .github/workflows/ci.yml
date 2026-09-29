@@ -1,12 +1,13 @@
 # AIDAG-Chain / LSC — Surekli Entegrasyon (CI)
 #
-# Her push ve pull request'te calisir. Uc kapi (hepsi gecmek ZORUNDA):
-#   1) Bicim   — cargo fmt --check  (tutarli kod bicimi)
-#   2) Lint    — cargo clippy -D warnings  (sifir uyari; uyari=hata)
-#   3) Test    — cargo test  (tum birim + entegrasyon testleri)
+# Her push ve pull request'te calisir. Kapilar (hepsi gecmek ZORUNDA):
+#   1) Bicim   — cargo fmt --check
+#   2) Lint    — cargo clippy -D warnings
+#   3) Test    — cargo test (tum birim + entegrasyon)
+#   4) Audit   — cargo audit (RUSTSEC guvenlik acigi DB'si)
+#   5) Deny    — cargo deny check (lisans + kaynak + advisories)
 #
 # Herhangi biri kirmizi yanarsa PR birlesemez (branch protection ile birlikte).
-# Bu, "her elini sallayanin main'i bozmasini" engelleyen ilk savunma hattidir.
 
 name: CI
 
@@ -16,7 +17,9 @@ on:
   pull_request:
     branches: [ main ]
 
-# Ayni dal/PR'a yeni push gelirse onceki kosmayi iptal et (kaynak tasarrufu).
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -47,4 +50,25 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: 3) Testler (cargo test)
+        # Birim + izole. Model/GPU gerektiren kor/eval CI'da KOSMAZ (deploy kilidi test-kaydet.sh'te olculur).
         run: cargo test --all --verbose
+
+  audit:
+    name: 4) cargo audit (RUSTSEC)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: RUSTSEC guvenlik acigi taramasi
+        uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  deny:
+    name: 5) cargo deny (lisans + kaynak + advisories)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lisans + kaynak + advisory denetimi
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
