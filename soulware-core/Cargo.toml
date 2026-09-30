@@ -16,7 +16,7 @@ lsc-engine = { path = "../lsc-engine" }
 ed25519-dalek = { version = "=2.1.1", default-features = false, features = ["std"] }
 blake3 = "=1.5.5"
 hex = "=0.4.3"
-rand = "=0.8.5"
+rand = "=0.10.2"
 # HTTP sunucu (bu servisin API'si) + istemci (Claude API + zincir /submit)
 axum = "=0.7.9"
 tokio = { version = "=1.43.1", features = ["rt-multi-thread", "macros", "signal", "net", "time"] }

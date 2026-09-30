@@ -21,7 +21,7 @@ alloy-eips = "2.1.0"
 
 [dev-dependencies]
 rayon = "=1.10.0"
-rand = "=0.8.5"
+rand = "=0.10.2"
 hex = "=0.4.3"
 # Sadece small-order guard izolasyon testi icin (identity pk + R=[s]B forgery).
 # ed25519-dalek 2.1.1 ile ayni curve25519-dalek 4.1.x surumunu kullanir.
