@@ -8,6 +8,7 @@
 //! kurumsal hizmetler, kapali sistem, on satis/TGE, site sayfalari. Her belge
 //! "bugun calisan" ile "plan/tasarim"i ayirir. Yatirim tavsiyesi YOK.
 
+#![allow(clippy::unnecessary_sort_by)]
 use crate::retrieval::{anahtar_var, sade, Pasaj};
 use serde::Deserialize;
 

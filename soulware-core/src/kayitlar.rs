@@ -28,7 +28,7 @@ pub fn kararlari_ayristir(md: &str) -> Vec<KararMadde> {
             }
             let rakam: String = b.chars().take_while(|c| c.is_ascii_digit()).collect();
             let baslik = b[rakam.len()..]
-                .trim_start_matches(|c: char| c == ' ' || c == '·')
+                .trim_start_matches([' ', '·'])
                 .trim()
                 .to_string();
             if let Ok(no) = rakam.parse() {

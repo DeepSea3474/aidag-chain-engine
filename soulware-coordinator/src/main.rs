@@ -18,6 +18,7 @@
 //!   POST /worker/submit     {"wallet","job_id","answer"}        → doğrulama/ödül
 //!   GET  /status                                                → özet
 
+#![allow(clippy::unnecessary_sort_by)]
 use axum::{
     extract::{Path, State},
     routing::{get, post},

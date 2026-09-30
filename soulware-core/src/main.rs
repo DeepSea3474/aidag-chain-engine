@@ -1641,7 +1641,7 @@ async fn beyin_uret(
     // UZAK GPU: tercih "remote"/"auto" + URL varsa ÖNCE dene. Hata → yerele düş (dayanıklı;
     // GPU kapanırsa KUBRA yavaş ama çalışmaya devam eder).
     let uzak = if (istek == "remote" || istek == "auto") && st.cfg.remote_url.is_some() {
-        match beyin_remote(&st, &uc_arg, temp).await {
+        match beyin_remote(st, &uc_arg, temp).await {
             Ok(b) => Some((
                 b.text,
                 b.model,
@@ -1687,7 +1687,7 @@ async fn beyin_uret(
             Err(e) => return Err(bos_hata(&format!("yerel beyin görevi: {e}"))),
         }
     } else {
-        match beyin_claude(&st, &uc_arg).await {
+        match beyin_claude(st, &uc_arg).await {
             Ok(b) => (
                 b.text,
                 b.model,

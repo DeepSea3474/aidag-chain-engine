@@ -3478,14 +3478,13 @@ mod tests {
     // YETERSIZ. AIDAG dagitilir; ama kayit GERCEKTEN gonderilen hediyeyi (0) saklar,
     // istenen (buyuk) tutari DEGIL. "Gonderildi" yalani zincire yazilmaz.
     #[test]
-    #[test]
     fn gunluk_cap_asilinca_reddedilir() {
         use crate::registry::public_key_to_adres;
         use crate::tx::OnSatisDagitim;
         let satis = crate::mainnet::ON_SATIS_BASLANGIC;
         let gun = 86400u64;
         let od = crate::genesis::ONDALIK;
-        let cap = crate::mainnet::ON_SATIS_GUNLUK_CAP; // 100_000 * od
+        let _cap = crate::mainnet::ON_SATIS_GUNLUK_CAP; // 100_000 * od
         let islem = crate::mainnet::ON_SATIS_ISLEM_UST_SINIR; // 50_000 * od
 
         let mut node = NodeState::new_devnet(NET);
@@ -3779,7 +3778,6 @@ mod tests {
 
     // FAZ2 KANIT (on-satis vesting): dagitilan AIDAG %20 TGE hemen + kalan %80 12 ay
     // kilitli; birden cok dagitim BIRIKIR; 12 ay sonra tam acik.
-    #[test]
     #[test]
     fn on_satis_replay_ile_kalici() {
         use crate::registry::public_key_to_adres;

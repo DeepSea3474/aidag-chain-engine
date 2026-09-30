@@ -33,6 +33,7 @@ pub struct LocalBrain {
     device: Device,
     eos: Vec<u32>,
     sablon: Sablon,
+    #[allow(dead_code)]
     pub model_name: String,
 }
 

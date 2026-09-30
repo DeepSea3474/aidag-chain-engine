@@ -7,6 +7,7 @@
 //!   2. Model yargıcı: yalnızca bir kategori ETİKETİ döndürür (bkz. YARGIC_SISTEM).
 //! FAIL-CLOSED: yargıç hata verirse, erişilemezse ya da tanınmayan bir yanıt dönerse istek reddedilir.
 
+#![allow(clippy::doc_lazy_continuation)]
 use crate::retrieval;
 use std::collections::BTreeMap;
 

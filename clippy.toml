@@ -1,0 +1,3 @@
+# Bazı fonksiyonlar (zincir/ödül akışları) doğal olarak çok argüman/karmaşık tip alır — eşik yükseltildi.
+too-many-arguments-threshold = 12
+type-complexity-threshold = 500

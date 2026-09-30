@@ -12,6 +12,7 @@
 //! DÜRÜSTLÜK: uydurma kaynak YOK. Bulunan pasajlar gerçek belgelerden; hiçbir
 //! kaynak bulunamazsa boş döner → model "Bilmiyorum" der (abstention).
 
+#![allow(clippy::unnecessary_sort_by)]
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -132,7 +133,7 @@ pub fn ek_ile_eslesir(kelime: &str, kok: &str) -> bool {
     kokler.iter().any(|k| {
         kelime
             .strip_prefix(k.as_str())
-            .map_or(false, |kalan| ek_kumesi().contains(kalan))
+            .is_some_and(|kalan| ek_kumesi().contains(kalan))
     })
 }
 
@@ -407,6 +408,7 @@ impl Depo {
     }
 
     /// Belge ekle (ingest) + kaydet. Aynı başlık varsa metni günceller.
+    #[allow(dead_code)]
     pub fn ekle(&mut self, b: Belge) {
         if let Some(mevcut) = self
             .belgeler
