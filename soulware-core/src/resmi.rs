@@ -8,6 +8,7 @@
 //! kurumsal hizmetler, kapali sistem, on satis/TGE, site sayfalari. Her belge
 //! "bugun calisan" ile "plan/tasarim"i ayirir. Yatirim tavsiyesi YOK.
 
+#![allow(clippy::unnecessary_sort_by)]
 use crate::retrieval::{anahtar_var, sade, Pasaj};
 use serde::Deserialize;
 
@@ -38,10 +39,31 @@ pub fn yukle(yol: &str) -> Vec<ResmiBelge> {
 pub fn aidag_konusu_mu(prompt: &str) -> bool {
     let s = sade(prompt);
     [
-        "aidag", "kubra", "soulware", "soulwareai", "rwa", "dijital ikiz", "digital twin",
-        "belge dogrulama", "belge kayd", "on satis", "presale", "tge", "tahsis", "claim",
-        "kurumsal", "kurumlar icin", "sirketler icin", "kapali sistem", "ozel ag",
-        "kuruma ozel", "metamask", "chain id", "lsc", "whitepaper", "aidag chain com",
+        "aidag",
+        "kubra",
+        "soulware",
+        "soulwareai",
+        "rwa",
+        "dijital ikiz",
+        "digital twin",
+        "belge dogrulama",
+        "belge kayd",
+        "on satis",
+        "presale",
+        "tge",
+        "tahsis",
+        "claim",
+        "kurumsal",
+        "kurumlar icin",
+        "sirketler icin",
+        "kapali sistem",
+        "ozel ag",
+        "kuruma ozel",
+        "metamask",
+        "chain id",
+        "lsc",
+        "whitepaper",
+        "aidag chain com",
     ]
     .iter()
     .any(|a| anahtar_var(&s, a))
@@ -50,8 +72,26 @@ pub fn aidag_konusu_mu(prompt: &str) -> bool {
 /// Soru 2. tekil/çoğul şahsa (KUBRA'ya) mı yöneltilmiş? Zamir ya da dönüşlü zamir ("sen", "sana", "kendini"...).
 pub fn ikinci_sahis_mi(sade_metin: &str) -> bool {
     const ZAMIR: &[&str] = &[
-        "sen", "sana", "seni", "senin", "sende", "senden", "siz", "size", "sizi", "sizin", "sizde",
-        "kendin", "kendini", "kendine", "kendinden", "kendiniz", "kendinizi", "you", "your", "yourself",
+        "sen",
+        "sana",
+        "seni",
+        "senin",
+        "sende",
+        "senden",
+        "siz",
+        "size",
+        "sizi",
+        "sizin",
+        "sizde",
+        "kendin",
+        "kendini",
+        "kendine",
+        "kendinden",
+        "kendiniz",
+        "kendinizi",
+        "you",
+        "your",
+        "yourself",
     ];
     sade_metin.split(' ').any(|t| ZAMIR.contains(&t))
 }
@@ -61,28 +101,39 @@ pub fn ikinci_sahis_mi(sade_metin: &str) -> bool {
 /// tamlama içindeki ad ("dosyanın adı", "şehrin ismi") kimlik sorusu değildir.
 pub fn isim_sorusu_mu(prompt: &str) -> bool {
     let s = sade(prompt);
-    if ["what is your name", "who named you", "your name"].iter().any(|a| anahtar_var(&s, a)) {
+    if ["what is your name", "who named you", "your name"]
+        .iter()
+        .any(|a| anahtar_var(&s, a))
+    {
         return true;
     }
     const IYELIK2: &[&str] = &[
-        "adin", "adini", "adinla", "adinin", "adiniz", "adinizi", "ismin", "ismini", "isminle", "isminiz", "isminizi",
+        "adin", "adini", "adinla", "adinin", "adiniz", "adinizi", "ismin", "ismini", "isminle",
+        "isminiz", "isminizi",
     ];
     let t: Vec<&str> = s.split(' ').collect();
     let ikinci = ikinci_sahis_mi(&s) || t.contains(&"kubra");
     t.iter().enumerate().any(|(i, w)| {
-        let ad_kelimesi = ["ad", "isim", "ism", "hitap"].iter().any(|k| *w == *k || crate::retrieval::ek_ile_eslesir(w, k));
+        let ad_kelimesi = ["ad", "isim", "ism", "hitap"]
+            .iter()
+            .any(|k| *w == *k || crate::retrieval::ek_ile_eslesir(w, k));
         if !ad_kelimesi {
             return false;
         }
         let onceki = if i > 0 { t[i - 1] } else { "" };
         // Tamlayan (ilgi hâli) yalnız bir İSİMDİR: soru eki ("mısın", "musun"...) ve "için" tamlayan değildir.
         const SORU_EKI: &[&str] = &[
-            "mi", "mu", "misin", "musun", "miyim", "muyum", "miyiz", "muyuz", "misiniz", "musunuz", "midir", "mudur",
-            "miydi", "muydu", "misiniz",
+            "mi", "mu", "misin", "musun", "miyim", "muyum", "miyiz", "muyuz", "misiniz", "musunuz",
+            "midir", "mudur", "miydi", "muydu", "misiniz",
         ];
-        let tamlama = !matches!(onceki, "" | "senin" | "sizin" | "kubra" | "kubranin" | "icin")
-            && !SORU_EKI.contains(&onceki)
-            && (onceki.ends_with("nin") || onceki.ends_with("nun") || onceki.ends_with("in") || onceki.ends_with("un"));
+        let tamlama = !matches!(
+            onceki,
+            "" | "senin" | "sizin" | "kubra" | "kubranin" | "icin"
+        ) && !SORU_EKI.contains(&onceki)
+            && (onceki.ends_with("nin")
+                || onceki.ends_with("nun")
+                || onceki.ends_with("in")
+                || onceki.ends_with("un"));
         !tamlama && (IYELIK2.contains(w) || ikinci)
     })
 }
@@ -91,7 +142,9 @@ pub fn isim_sorusu_mu(prompt: &str) -> bool {
 /// belgesine yönlendirilir (P3): "doğrulanmış bilgim yok" diye reddedilmez.
 pub fn kubra_hakkinda_mi(prompt: &str) -> bool {
     let s = sade(prompt);
-    ikinci_sahis_mi(&s) || s.split(' ').any(|t| t == "kubra" || crate::retrieval::ek_ile_eslesir(t, "kubra"))
+    ikinci_sahis_mi(&s)
+        || s.split(' ')
+            .any(|t| t == "kubra" || crate::retrieval::ek_ile_eslesir(t, "kubra"))
 }
 
 /// Soruya en uygun resmi belgeler (skor = eşleşen anahtar sayısı). En iyinin
@@ -100,7 +153,12 @@ pub fn sec(belgeler: &[ResmiBelge], prompt: &str, k: usize) -> Vec<Pasaj> {
     let s = sade(prompt);
     let mut skorlu: Vec<(i64, &ResmiBelge)> = belgeler
         .iter()
-        .map(|b| (b.anahtarlar.iter().filter(|a| anahtar_var(&s, a)).count() as i64, b))
+        .map(|b| {
+            (
+                b.anahtarlar.iter().filter(|a| anahtar_var(&s, a)).count() as i64,
+                b,
+            )
+        })
         .filter(|(skor, _)| *skor > 0)
         .collect();
     skorlu.sort_by(|a, b| b.0.cmp(&a.0));
@@ -145,16 +203,34 @@ mod tests {
     #[test]
     fn kimlik_sorusu_genel_kalip() {
         // Olumlu: farklı ifadeler (değerlendirme setlerinden ALINMADI)
-        for q in ["Senin adın ne?", "Adın neydi?", "Adınızı öğrenebilir miyim?", "Sana nasıl hitap edeyim?",
-                  "Size hangi isimle seslenmeliyim?", "Kendine ne isim veriyorsun?", "İsmin nedir senin?",
-                  "KUBRA ismini kim koydu?", "What is your name?", "Adını kim koydu?",
-                  "Söyler misin, adın ne?", "Anlatır mısın ismin neydi?", "Bilir misiniz, adınız nedir?"] {
+        for q in [
+            "Senin adın ne?",
+            "Adın neydi?",
+            "Adınızı öğrenebilir miyim?",
+            "Sana nasıl hitap edeyim?",
+            "Size hangi isimle seslenmeliyim?",
+            "Kendine ne isim veriyorsun?",
+            "İsmin nedir senin?",
+            "KUBRA ismini kim koydu?",
+            "What is your name?",
+            "Adını kim koydu?",
+            "Söyler misin, adın ne?",
+            "Anlatır mısın ismin neydi?",
+            "Bilir misiniz, adınız nedir?",
+        ] {
             assert!(isim_sorusu_mu(q), "{q}");
         }
         // Olumsuz: ad/isim geçen ama kimlik sorusu olmayanlar
-        for q in ["Dosyanın adını nasıl değiştiririm?", "Ad soyad alanı nasıl doldurulur?", "Bu şehrin adı nereden gelir?",
-                  "Türkçede isim nedir?", "Belgenin ismi zincirde görünür mü?", "Kurumun adı KARARLAR'da geçiyor mu?",
-                  "Şirketin adı ne olacak?", "Ön satış ne durumda?"] {
+        for q in [
+            "Dosyanın adını nasıl değiştiririm?",
+            "Ad soyad alanı nasıl doldurulur?",
+            "Bu şehrin adı nereden gelir?",
+            "Türkçede isim nedir?",
+            "Belgenin ismi zincirde görünür mü?",
+            "Kurumun adı KARARLAR'da geçiyor mu?",
+            "Şirketin adı ne olacak?",
+            "Ön satış ne durumda?",
+        ] {
             assert!(!isim_sorusu_mu(q), "{q}");
         }
     }
@@ -168,8 +244,15 @@ mod tests {
 
     #[test]
     fn konu_tespiti() {
-        for q in ["Aidag chain nedir", "KUBRA nedir", "Rwa icin cozumu nedir", "Kübra'nın görevi ne",
-                  "Ön satış ne zaman bitiyor", "Kapalı sistem kurabilir miyiz", "MetaMask'e nasıl eklerim"] {
+        for q in [
+            "Aidag chain nedir",
+            "KUBRA nedir",
+            "Rwa icin cozumu nedir",
+            "Kübra'nın görevi ne",
+            "Ön satış ne zaman bitiyor",
+            "Kapalı sistem kurabilir miyiz",
+            "MetaMask'e nasıl eklerim",
+        ] {
             assert!(aidag_konusu_mu(q), "{q}");
         }
         assert!(!aidag_konusu_mu("Türkiye'nin başkenti neresi"));
@@ -179,18 +262,47 @@ mod tests {
     #[test]
     fn dogru_belge_secilir() {
         let b = belgeler();
-        assert_eq!(sec(&b, "Aidag chain nedir", 2)[0].baslik, "AIDAG-Chain nedir");
-        assert_eq!(sec(&b, "KUBRA nedir", 2)[0].baslik, "KUBRA nedir ve neler yapabilir");
-        assert_eq!(sec(&b, "Rwa icin cozumu nedir", 2)[0].baslik, "Dijital ikiz ve RWA yaklaşımı");
-        assert_eq!(sec(&b, "Belge doğrulama nasıl çalışır", 2)[0].baslik, "Belge doğrulama nasıl çalışır");
-        assert_eq!(sec(&b, "Kurumlar için hangi hizmetleri veriyorsunuz", 2)[0].baslik, "Kurumlar ve şirketler için AIDAG-Chain hizmetleri");
-        assert_eq!(sec(&b, "KUBRA ve AIDAG-Chain birlikte neler yapabilir?", 2)[0].baslik, "KUBRA ve AIDAG-Chain birlikte neler yapabilir");
-        assert_eq!(sec(&b, "Kapalı sistem nasıl çalışır", 2)[0].baslik, "Kapalı (kuruma özel) sistem nasıl çalışır");
-        assert_eq!(sec(&b, "Ön satış nasıl işliyor, TGE ne zaman", 2)[0].baslik, "AIDAG ön satış ve TGE");
+        assert_eq!(
+            sec(&b, "Aidag chain nedir", 2)[0].baslik,
+            "AIDAG-Chain nedir"
+        );
+        assert_eq!(
+            sec(&b, "KUBRA nedir", 2)[0].baslik,
+            "KUBRA nedir ve neler yapabilir"
+        );
+        assert_eq!(
+            sec(&b, "Rwa icin cozumu nedir", 2)[0].baslik,
+            "Dijital ikiz ve RWA yaklaşımı"
+        );
+        assert_eq!(
+            sec(&b, "Belge doğrulama nasıl çalışır", 2)[0].baslik,
+            "Belge doğrulama nasıl çalışır"
+        );
+        assert_eq!(
+            sec(&b, "Kurumlar için hangi hizmetleri veriyorsunuz", 2)[0].baslik,
+            "Kurumlar ve şirketler için AIDAG-Chain hizmetleri"
+        );
+        assert_eq!(
+            sec(&b, "KUBRA ve AIDAG-Chain birlikte neler yapabilir?", 2)[0].baslik,
+            "KUBRA ve AIDAG-Chain birlikte neler yapabilir"
+        );
+        assert_eq!(
+            sec(&b, "Kapalı sistem nasıl çalışır", 2)[0].baslik,
+            "Kapalı (kuruma özel) sistem nasıl çalışır"
+        );
+        assert_eq!(
+            sec(&b, "Ön satış nasıl işliyor, TGE ne zaman", 2)[0].baslik,
+            "AIDAG ön satış ve TGE"
+        );
         // Resmi belgeler getiri/fiyat VAADİ içermez (bilgi var, vaat yok).
         for x in &b {
             let m = sade(&x.metin);
-            for yasak in ["garanti kazanc", "kesin kazanc", "fiyat artacak", "yuzde getiri"] {
+            for yasak in [
+                "garanti kazanc",
+                "kesin kazanc",
+                "fiyat artacak",
+                "yuzde getiri",
+            ] {
                 assert!(!anahtar_var(&m, yasak), "{} içinde '{yasak}'", x.baslik);
             }
         }
@@ -198,7 +310,11 @@ mod tests {
 
     #[test]
     fn isim_sorulari() {
-        for q in ["Adın ne?", "senin ismini kim verdi", "Sana bu ismi kim verdi"] {
+        for q in [
+            "Adın ne?",
+            "senin ismini kim verdi",
+            "Sana bu ismi kim verdi",
+        ] {
             assert!(isim_sorusu_mu(q), "{q}");
         }
         assert!(!isim_sorusu_mu("Ankara'nın adı nereden gelir"));

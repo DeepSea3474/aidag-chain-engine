@@ -33,13 +33,19 @@ pub struct LocalBrain {
     device: Device,
     eos: Vec<u32>,
     sablon: Sablon,
+    #[allow(dead_code)]
     pub model_name: String,
 }
 
 impl LocalBrain {
     /// GGUF ağırlık + tokenizer.json'dan yükle. Dosyalar yoksa Err döner (servis
     /// yine ayakta kalır — beyin "yapılandırılmadı" olur, sahte cevap YOK).
-    pub fn load(gguf_path: &str, tokenizer_path: &str, model_name: &str, sablon: Sablon) -> anyhow::Result<Self> {
+    pub fn load(
+        gguf_path: &str,
+        tokenizer_path: &str,
+        model_name: &str,
+        sablon: Sablon,
+    ) -> anyhow::Result<Self> {
         // GPU varsa (cuda feature ile derlendiyse) otomatik kullan; yoksa CPU. Aynı kod
         // hem CPU sunucuda hem GPU sunucuda çalışır → büyük model GPU'da hızlı koşar.
         let device = Device::cuda_if_available(0).unwrap_or(Device::Cpu);
@@ -54,7 +60,14 @@ impl LocalBrain {
         // Qwen2.5 + DeepSeek-R1-Distill-Qwen durdurma token'ları (endoftext/end▁of▁sentence
         // = 151643, im_end = 151645). Distill Qwen tabanlı olduğu için aynı id'ler geçerli.
         let eos = vec![151645u32, 151643u32];
-        Ok(Self { model, tokenizer, device, eos, sablon, model_name: model_name.to_string() })
+        Ok(Self {
+            model,
+            tokenizer,
+            device,
+            eos,
+            sablon,
+            model_name: model_name.to_string(),
+        })
     }
 
     /// Şablona göre prompt kur (ChatML ya da DeepSeek-R1).
@@ -84,7 +97,13 @@ impl LocalBrain {
     /// Greedy'e yakın (temp düşük) → tutarlı/deterministik; halüsilasyon savunmasına uygun.
     /// temp=0.0 → GREEDY (deterministik): aynı girdi → aynı çıktı. Ağ doğrulaması
     /// (yedekli worker çıktılarının birebir eşleşmesi) için şart. temp>0 → örnekleme.
-    pub fn generate(&mut self, system: &str, user: &str, max_new: usize, temp: f64) -> anyhow::Result<(String, usize)> {
+    pub fn generate(
+        &mut self,
+        system: &str,
+        user: &str,
+        max_new: usize,
+        temp: f64,
+    ) -> anyhow::Result<(String, usize)> {
         let prompt = self.prompt_kur(system, user);
         let enc = self
             .tokenizer

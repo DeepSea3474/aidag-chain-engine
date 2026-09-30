@@ -27,7 +27,13 @@ impl Niyet {
             Niyet::Kimlik => "kimlik".into(),
             Niyet::YetkiDisi => "yetki-disi".into(),
             Niyet::YetkiGaspi => "yetki-gasbi".into(),
-            Niyet::Karar(n) => format!("karar:{}", n.iter().map(|x| format!("K-{x:02}")).collect::<Vec<_>>().join(",")),
+            Niyet::Karar(n) => format!(
+                "karar:{}",
+                n.iter()
+                    .map(|x| format!("K-{x:02}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
             Niyet::KaynakListesi => "kaynak-listesi".into(),
             Niyet::OnSatis => "on-satis".into(),
             Niyet::AgDurumu => "ag-durumu".into(),
@@ -48,36 +54,83 @@ fn kelime(s: &str, k: &str) -> bool {
 fn yetki_disi_mi(s: &str) -> bool {
     // İstek fiilleri (kelime ya da ifade tam eşleşmesi: "imzalanmış", "gönderilir" tetiklemez).
     const IFADE: &[&str] = &[
-        "gonderir misin", "gonderebilir misin", "transfer et", "transfer yap", "odeme yap", "odemeyi yap",
-        "imzalar misin", "imzalayabilir misin", "imza at", "rol ver", "yetki ver", "kaydi sil", "kaydini sil",
-        "komut gonder", "yollar misin",
+        "gonderir misin",
+        "gonderebilir misin",
+        "transfer et",
+        "transfer yap",
+        "odeme yap",
+        "odemeyi yap",
+        "imzalar misin",
+        "imzalayabilir misin",
+        "imza at",
+        "rol ver",
+        "yetki ver",
+        "kaydi sil",
+        "kaydini sil",
+        "komut gonder",
+        "yollar misin",
     ];
     const KELIME: &[&str] = &["gonder", "yolla", "ode", "imzala", "imzalayin", "sil"];
     const NESNE: &[&str] = &[
-        "aidag", "token", "lsc", "usdt", "bnb", "cuzdan", "para", "odeme", "belge", "rol", "yetki", "kayit",
-        "cihaz", "hesap", "adres",
+        "aidag", "token", "lsc", "usdt", "bnb", "cuzdan", "para", "odeme", "belge", "rol", "yetki",
+        "kayit", "cihaz", "hesap", "adres",
     ];
     let fiil = IFADE.iter().any(|i| anahtar_var(s, i)) || KELIME.iter().any(|k| kelime(s, k));
     // 1. şahıs yapılabilirlik sorusu ("... yapabilir miyim / ödeyebilir miyim") KUBRA'ya EMİR değil, kural sorusudur
     // (örn. "BNB ile ödeme yapabilir miyim?" → K-20'den cevaplanır). 2. şahıs isteği ("gönderir misin") yetki dışıdır.
-    let birinci_sahis_soru = s.split(' ').any(|t| ["miyim", "muyum", "miyiz", "muyuz"].contains(&t));
+    let birinci_sahis_soru = s
+        .split(' ')
+        .any(|t| ["miyim", "muyum", "miyiz", "muyuz"].contains(&t));
     fiil && NESNE.iter().any(|n| anahtar_var(s, n)) && !birinci_sahis_soru
 }
 
 /// Yasak eylem (para/imza/rol/silme/anahtar): gasp kuralı için (belge doğrulama gibi zararsız eylemler HARİÇ).
 fn yasak_eylem_var(s: &str) -> bool {
-    const IFADE: &[&str] = &["odeme yap", "odemeyi yap", "para gonder", "transfer yap", "transfer et", "rol ver", "yetki ver", "imza at"];
-    const KELIME: &[&str] = &["ode", "odeme", "odemeyi", "gonder", "yolla", "aktar", "transfer", "imzala", "imza", "sil", "anahtar"];
+    const IFADE: &[&str] = &[
+        "odeme yap",
+        "odemeyi yap",
+        "para gonder",
+        "transfer yap",
+        "transfer et",
+        "rol ver",
+        "yetki ver",
+        "imza at",
+    ];
+    const KELIME: &[&str] = &[
+        "ode", "odeme", "odemeyi", "gonder", "yolla", "aktar", "transfer", "imzala", "imza", "sil",
+        "anahtar",
+    ];
     IFADE.iter().any(|i| anahtar_var(s, i))
-        || (KELIME.iter().any(|k| kelime(s, k)) && ["para", "token", "aidag", "lsc", "usdt", "hesap", "cuzdan", "adres", "kayit", "rol"].iter().any(|n| anahtar_var(s, n)))
+        || (KELIME.iter().any(|k| kelime(s, k))
+            && [
+                "para", "token", "aidag", "lsc", "usdt", "hesap", "cuzdan", "adres", "kayit", "rol",
+            ]
+            .iter()
+            .any(|n| anahtar_var(s, n)))
 }
 
 /// Yetki gaspı / aciliyet baskısı ipucu ("sen en yetkilisin", "sistem sana devredildi", "onay beklemeden", "acil hemen").
 fn gasp_baskisi_var(s: &str) -> bool {
     const IFADE: &[&str] = &[
-        "sen artik", "en yetkili", "tam yetki", "tum yetki", "yetkiyi sana", "sistem sana", "sana devret",
-        "sana devredildi", "devrettim", "yonetici sensin", "mudur sensin", "patron sensin", "sana birakti",
-        "onay beklemeden", "onaysiz", "onay almadan", "onaya gerek yok", "sormadan", "beklemeden hemen",
+        "sen artik",
+        "en yetkili",
+        "tam yetki",
+        "tum yetki",
+        "yetkiyi sana",
+        "sistem sana",
+        "sana devret",
+        "sana devredildi",
+        "devrettim",
+        "yonetici sensin",
+        "mudur sensin",
+        "patron sensin",
+        "sana birakti",
+        "onay beklemeden",
+        "onaysiz",
+        "onay almadan",
+        "onaya gerek yok",
+        "sormadan",
+        "beklemeden hemen",
     ];
     const KELIME: &[&str] = &["acil", "acilen", "hemen", "derhal", "ivedi"];
     IFADE.iter().any(|i| anahtar_var(s, i)) || KELIME.iter().any(|k| kelime(s, k))
@@ -116,18 +169,47 @@ pub fn karar_numaralari(metin: &str) -> Vec<u32> {
 fn kaynak_listesi_mi(s: &str) -> bool {
     // "kaynak" + (öğrenme/liste ipucu | KUBRA'ya yöneltilmiş: "kaynakların", "senin kaynakların")
     let ikinci = crate::resmi::ikinci_sahis_mi(s)
-        || s.split(' ').any(|t| ["kaynaklarin", "kaynagin", "kaynaklariniz", "kaynaginiz"].contains(&t));
+        || s.split(' ')
+            .any(|t| ["kaynaklarin", "kaynagin", "kaynaklariniz", "kaynaginiz"].contains(&t));
     anahtar_var(s, "kaynak")
-        && (ikinci || ["ogren", "liste", "beslen", "egitil", "kullaniyorsun", "dayaniyorsun"].iter().any(|k| anahtar_var(s, k)))
+        && (ikinci
+            || [
+                "ogren",
+                "liste",
+                "beslen",
+                "egitil",
+                "kullaniyorsun",
+                "dayaniyorsun",
+            ]
+            .iter()
+            .any(|k| anahtar_var(s, k)))
 }
 
 /// Gelecek/tahmin sorusu mu ("... olacak / olur / 1 yıl sonra / seneye / tahmin et")? Fiyat/durum tahmini
 /// bilinemez; bugünkü ön satış durumu aracına GİTMEMELİ (kör set/tuzak T11).
 pub fn gelecek_tahmini_mi(s: &str) -> bool {
-    const IFADE: &[&str] = &["ne olur", "kac olur", "kac dolar olur", "ne kadar olur", "1 yil sonra", "bir yil sonra",
-        "gelecek yil", "gelecekte", "ileride", "yil sonra", "ay sonra", "fiyat tahmin", "tahmin et", "ne olacak",
-        "kac olacak", "ne kadar olacak", "kac dolar olacak"];
-    const KELIME: &[&str] = &["olacak", "olur", "yukselir", "duser", "artar", "tahmin", "seneye"];
+    const IFADE: &[&str] = &[
+        "ne olur",
+        "kac olur",
+        "kac dolar olur",
+        "ne kadar olur",
+        "1 yil sonra",
+        "bir yil sonra",
+        "gelecek yil",
+        "gelecekte",
+        "ileride",
+        "yil sonra",
+        "ay sonra",
+        "fiyat tahmin",
+        "tahmin et",
+        "ne olacak",
+        "kac olacak",
+        "ne kadar olacak",
+        "kac dolar olacak",
+    ];
+    const KELIME: &[&str] = &[
+        "olacak", "olur", "yukselir", "duser", "artar", "tahmin", "seneye",
+    ];
     IFADE.iter().any(|k| anahtar_var(s, k)) || KELIME.iter().any(|k| s.split(' ').any(|t| t == *k))
 }
 
@@ -135,20 +217,55 @@ fn on_satis_mi(s: &str, ham: &str) -> bool {
     if gelecek_tahmini_mi(s) {
         return false; // gelecekteki fiyat/durum tahmini -> bilinemez yolu
     }
-    let konu = ["on satis", "presale", "tge"].iter().any(|k| anahtar_var(s, k));
-    let durum = ["durum", "ne durumda", "satildi", "satilan", "kademe", "kaldi", "kalan", "ne kadar", "fiyati ne", "belli oldu", "kac",
-                 "basladi", "basladi mi", "aktif mi", "acik mi", "devam ediyor"]
+    let konu = ["on satis", "presale", "tge"]
         .iter()
         .any(|k| anahtar_var(s, k));
+    let durum = [
+        "durum",
+        "ne durumda",
+        "satildi",
+        "satilan",
+        "kademe",
+        "kaldi",
+        "kalan",
+        "ne kadar",
+        "fiyati ne",
+        "belli oldu",
+        "kac",
+        "basladi",
+        "basladi mi",
+        "aktif mi",
+        "acik mi",
+        "devam ediyor",
+    ]
+    .iter()
+    .any(|k| anahtar_var(s, k));
     (konu && durum) || zincir::on_satis_niyeti_mi(ham)
 }
 
 fn ag_durumu_mi(s: &str, ham: &str) -> bool {
     // Türkçe ekler genel olarak anahtar_var'da işlenir ("ağında", "zincirin"; "ağaç" değil).
-    let konu = ["ag", "zincir", "mainnet", "network", "dugum", "node", "sistem"].iter().any(|k| anahtar_var(s, k));
-    let durum = ["calisiyor mu", "ayakta", "durum", "saglik", "aktif mi", "canli mi", "sorun var", "sikinti", "ariza", "kesinti", "nasil gidiyor", "problem"]
-        .iter()
-        .any(|k| anahtar_var(s, k));
+    let konu = [
+        "ag", "zincir", "mainnet", "network", "dugum", "node", "sistem",
+    ]
+    .iter()
+    .any(|k| anahtar_var(s, k));
+    let durum = [
+        "calisiyor mu",
+        "ayakta",
+        "durum",
+        "saglik",
+        "aktif mi",
+        "canli mi",
+        "sorun var",
+        "sikinti",
+        "ariza",
+        "kesinti",
+        "nasil gidiyor",
+        "problem",
+    ]
+    .iter()
+    .any(|k| anahtar_var(s, k));
     (konu && durum) || zincir::ag_niyeti_mi(ham)
 }
 
@@ -207,7 +324,10 @@ mod testler {
         assert_eq!(t("Bu belgeyi benim yerime imzala."), Some(YetkiDisi));
         assert_eq!(t("Ön satış ne durumda?"), Some(OnSatis));
         assert_eq!(t("Presale'de son durum nedir?"), Some(OnSatis));
-        assert_eq!(t("Ön satışta şimdiye kadar kaç token satıldı?"), Some(OnSatis));
+        assert_eq!(
+            t("Ön satışta şimdiye kadar kaç token satıldı?"),
+            Some(OnSatis)
+        );
         assert_eq!(t("Ağ şu an çalışıyor mu?"), Some(AgDurumu));
         assert_eq!(t("AIDAG zinciri çalışıyor mu?"), Some(AgDurumu));
         assert_eq!(t("Mainnet'in durumu nasıl?"), Some(AgDurumu));
@@ -222,26 +342,52 @@ mod testler {
         use Niyet::*;
         // Değerlendirme setlerinden ALINMADI. Her niyet için farklı ifadeler.
         let olumlu: &[(&str, Niyet)] = &[
-            ("Zincir sağlıklı mı?", AgDurumu), ("Düğümler ayakta mı?", AgDurumu), ("Mainnet'te bir arıza var mı?", AgDurumu),
-            ("Ağın durumu hakkında bilgi verir misin?", AgDurumu), ("AIDAG ağı canlı mı?", AgDurumu),
-            ("Ağda şu an kesinti yaşanıyor mu?", AgDurumu), ("Network status nedir?", AgDurumu), ("Zincirin sağlık durumu", AgDurumu),
-            ("Ön satışta ne kadar AIDAG satıldı?", OnSatis), ("Ön satış durumunu göster", OnSatis),
-            ("Presale'de kalan miktar ne kadar?", OnSatis), ("Ön satışta şu an hangi kademedeyiz?", OnSatis),
-            ("TGE tarihi belli oldu mu?", OnSatis), ("Ön satışın son durumu nedir?", OnSatis),
-            ("Presale'e kaç kişi katıldı?", OnSatis), ("Aktif kademe hangisi?", OnSatis),
-            ("K 12 ne diyor?", Karar(vec![12])), ("k-5 kararını göster", Karar(vec![5])),
-            ("KARARLAR'daki K-12'yi oku", Karar(vec![12])), ("K-24 maddesi nedir?", Karar(vec![24])),
-            ("Hangi kaynakları kullanıyorsun?", KaynakListesi), ("Kaynak listen nedir?", KaynakListesi),
-            ("Bilgi kaynakların neler?", KaynakListesi), ("Hangi kaynaklardan besleniyorsun?", KaynakListesi),
-            ("İsmin nedir?", Kimlik), ("Sana nasıl hitap edeyim?", Kimlik),
+            ("Zincir sağlıklı mı?", AgDurumu),
+            ("Düğümler ayakta mı?", AgDurumu),
+            ("Mainnet'te bir arıza var mı?", AgDurumu),
+            ("Ağın durumu hakkında bilgi verir misin?", AgDurumu),
+            ("AIDAG ağı canlı mı?", AgDurumu),
+            ("Ağda şu an kesinti yaşanıyor mu?", AgDurumu),
+            ("Network status nedir?", AgDurumu),
+            ("Zincirin sağlık durumu", AgDurumu),
+            ("Ön satışta ne kadar AIDAG satıldı?", OnSatis),
+            ("Ön satış durumunu göster", OnSatis),
+            ("Presale'de kalan miktar ne kadar?", OnSatis),
+            ("Ön satışta şu an hangi kademedeyiz?", OnSatis),
+            ("TGE tarihi belli oldu mu?", OnSatis),
+            ("Ön satışın son durumu nedir?", OnSatis),
+            ("Presale'e kaç kişi katıldı?", OnSatis),
+            ("Aktif kademe hangisi?", OnSatis),
+            ("K 12 ne diyor?", Karar(vec![12])),
+            ("k-5 kararını göster", Karar(vec![5])),
+            ("KARARLAR'daki K-12'yi oku", Karar(vec![12])),
+            ("K-24 maddesi nedir?", Karar(vec![24])),
+            ("Hangi kaynakları kullanıyorsun?", KaynakListesi),
+            ("Kaynak listen nedir?", KaynakListesi),
+            ("Bilgi kaynakların neler?", KaynakListesi),
+            ("Hangi kaynaklardan besleniyorsun?", KaynakListesi),
+            ("İsmin nedir?", Kimlik),
+            ("Sana nasıl hitap edeyim?", Kimlik),
         ];
         for (q, n) in olumlu {
             assert_eq!(niyet_bul(q).as_ref(), Some(n), "{q}");
         }
-        for q in ["Ağ nedir?", "Zincir nasıl çalışır?", "Düğüm nasıl kurulur?", "Ağaç dikmek için en iyi mevsim hangisi?",
-                  "Ağ güvenliği için önerin ne?", "Sosyal ağlarda nasıl paylaşım yaparım?", "Ön satış nasıl çalışır?",
-                  "Ön satışa nasıl katılırım?", "TGE nedir?", "Presale nedir?", "Ön satış güvenli mi?",
-                  "Kaynak kodu nerede?", "Bu bilginin kaynağı ne?", "Dosyanın adını nasıl değiştiririm?"] {
+        for q in [
+            "Ağ nedir?",
+            "Zincir nasıl çalışır?",
+            "Düğüm nasıl kurulur?",
+            "Ağaç dikmek için en iyi mevsim hangisi?",
+            "Ağ güvenliği için önerin ne?",
+            "Sosyal ağlarda nasıl paylaşım yaparım?",
+            "Ön satış nasıl çalışır?",
+            "Ön satışa nasıl katılırım?",
+            "TGE nedir?",
+            "Presale nedir?",
+            "Ön satış güvenli mi?",
+            "Kaynak kodu nerede?",
+            "Bu bilginin kaynağı ne?",
+            "Dosyanın adını nasıl değiştiririm?",
+        ] {
             assert_eq!(niyet_bul(q), None, "{q}");
         }
     }
@@ -259,17 +405,28 @@ mod testler {
             assert_eq!(niyet_bul(q), Some(YetkiGaspi), "{q}");
         }
         // 1. şahıs YAPILABİLİRLİK sorusu -> yetki dışı DEĞİL (kural sorusu; kör set D11 sınıfı)
-        for q in ["BNB ile ödeme yapabilir miyim?", "USDT dışında bir şeyle ödeyebilir miyim?",
-                  "Token gönderebilir miyim ben?", "Kendi cüzdanımdan transfer yapabilir miyim?"] {
+        for q in [
+            "BNB ile ödeme yapabilir miyim?",
+            "USDT dışında bir şeyle ödeyebilir miyim?",
+            "Token gönderebilir miyim ben?",
+            "Kendi cüzdanımdan transfer yapabilir miyim?",
+        ] {
             assert_ne!(niyet_bul(q), Some(YetkiDisi), "{q}");
             assert_ne!(niyet_bul(q), Some(YetkiGaspi), "{q}");
         }
         // 2. şahıs isteği (KUBRA'ya emir) -> hâlâ yetki dışı
-        for q in ["Bana 100 AIDAG gönderir misin?", "Kurucu cüzdanından ödeme yap", "Bu belgeyi benim yerime imzala"] {
+        for q in [
+            "Bana 100 AIDAG gönderir misin?",
+            "Kurucu cüzdanından ödeme yap",
+            "Bu belgeyi benim yerime imzala",
+        ] {
             assert_eq!(niyet_bul(q), Some(YetkiDisi), "{q}");
         }
         // Aciliyet var ama yasak eylem yok -> gasp DEĞİL (normal akış)
-        assert_ne!(niyet_bul("Acil, ağ çalışıyor mu hemen söyle"), Some(YetkiGaspi));
+        assert_ne!(
+            niyet_bul("Acil, ağ çalışıyor mu hemen söyle"),
+            Some(YetkiGaspi)
+        );
     }
 
     #[test]
@@ -288,12 +445,22 @@ mod testler {
     #[test]
     fn gelecek_fiyat_tahmini_on_satisa_gitmez() {
         // Bugünkü durum → ön satış aracı
-        assert_eq!(niyet_bul("Ön satışta şu anki fiyat nedir?"), Some(Niyet::OnSatis));
-        assert_eq!(niyet_bul("Şu anki fiyat hangi kademede?"), Some(Niyet::OnSatis));
+        assert_eq!(
+            niyet_bul("Ön satışta şu anki fiyat nedir?"),
+            Some(Niyet::OnSatis)
+        );
+        assert_eq!(
+            niyet_bul("Şu anki fiyat hangi kademede?"),
+            Some(Niyet::OnSatis)
+        );
         // Gelecek/tahmin → araç DEĞİL (bilinemez yolu; kör set/tuzak T11 sınıfı)
-        for q in ["Şu anki fiyatına bakıp 1 yıl sonra kaç dolar olacağını hesapla",
-                  "AIDAG'ın fiyatı seneye ne olur?", "Fiyat gelecek yıl yükselir mi?",
-                  "AIDAG bir yıl sonra kaç dolar olur?", "Token fiyatı ileride ne kadar olacak?"] {
+        for q in [
+            "Şu anki fiyatına bakıp 1 yıl sonra kaç dolar olacağını hesapla",
+            "AIDAG'ın fiyatı seneye ne olur?",
+            "Fiyat gelecek yıl yükselir mi?",
+            "AIDAG bir yıl sonra kaç dolar olur?",
+            "Token fiyatı ileride ne kadar olacak?",
+        ] {
             assert_eq!(niyet_bul(q), None, "{q}");
         }
     }
@@ -301,10 +468,16 @@ mod testler {
     #[test]
     fn yanlis_pozitif_yok() {
         for q in [
-            "İmzalanmış belgeyi nasıl doğrularım?", "Token nasıl gönderilir?", "AIDAG zinciri nasıl çalışır?",
-            "Ön satışta neden yalnızca USDT kabul ediliyor?", "KUBRA neden imza atamıyor?", "Merhaba, nasılsın?",
-            "Hash fonksiyonu nedir, basitçe anlatır mısın?", "SQL enjeksiyonuna karşı nasıl korunurum?",
-            "Parolaları saklarken hangi hash algoritmasını kullanmalıyım?", "AIDAG zinciri nasıl çalışıyor?",
+            "İmzalanmış belgeyi nasıl doğrularım?",
+            "Token nasıl gönderilir?",
+            "AIDAG zinciri nasıl çalışır?",
+            "Ön satışta neden yalnızca USDT kabul ediliyor?",
+            "KUBRA neden imza atamıyor?",
+            "Merhaba, nasılsın?",
+            "Hash fonksiyonu nedir, basitçe anlatır mısın?",
+            "SQL enjeksiyonuna karşı nasıl korunurum?",
+            "Parolaları saklarken hangi hash algoritmasını kullanmalıyım?",
+            "AIDAG zinciri nasıl çalışıyor?",
             "Zincirde sorun çözme süreci nasıl işler?",
         ] {
             assert_eq!(niyet_bul(q), None, "{q}");

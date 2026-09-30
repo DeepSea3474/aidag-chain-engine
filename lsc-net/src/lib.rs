@@ -19,6 +19,7 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 
 use libp2p::futures::StreamExt;
+use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
 use libp2p::{
     gossipsub, mdns, noise, ping, request_response, tcp, yamux, Multiaddr, PeerId, SwarmBuilder,
@@ -58,7 +59,7 @@ struct LscBehaviour {
     /// Otomatik peer kesfi (yerel ag, mDNS). Manuel IP girmeden node'lar
     /// birbirini bulur. NOT: sadece yerel ag (LAN); internet-olcegi kesif
     /// (bootstrap/Kademlia) ileride.
-    mdns: mdns::tokio::Behaviour,
+    mdns: Toggle<mdns::tokio::Behaviour>,
 }
 
 /// Vertex'lerin yayinlandigi gossipsub topic adi.
@@ -182,8 +183,18 @@ pub async fn run_node(
             // Otomatik peer kesfi (mDNS, yerel ag). Manuel IP girmeden node'lar
             // birbirini bulur; kesfedilen peer'a otomatik dial edilir (event
             // kolunda). NOT: sadece yerel ag (LAN); internet-olcegi kesif ileride.
-            let mdns =
-                mdns::tokio::Behaviour::new(mdns::Config::default(), key.public().to_peer_id())?;
+            // MAINNET'te mDNS (yerel ağ keşfi) KAPALI: public düğüm yerel keşif kullanmaz (bootstrap ile
+            // bağlanır). Böylece hickory-proto (RUSTSEC-2026-0118/0119, mDNS DNS-mesaj ayrıştırma DoS'u)
+            // saldırı yüzeyi mainnet'te kaldırılır. Devnet/testnet'te LAN keşfi için açık kalır.
+            let mdns_mainnet = std::env::var("LSC_MAINNET").ok().as_deref() == Some("1");
+            let mdns: Toggle<mdns::tokio::Behaviour> = if mdns_mainnet {
+                Toggle::from(None)
+            } else {
+                Toggle::from(Some(mdns::tokio::Behaviour::new(
+                    mdns::Config::default(),
+                    key.public().to_peer_id(),
+                )?))
+            };
 
             Ok(LscBehaviour {
                 gossipsub,
@@ -1135,11 +1146,17 @@ pub fn maskeli_adres(adres: &Multiaddr) -> String {
                 parcalar.push(format!("/ip6/{:x}:{:x}:x", s[0], s[1]));
             }
             Protocol::Tcp(port) => parcalar.push(format!("/tcp/{port}")),
-            Protocol::Dns(_) | Protocol::Dns4(_) | Protocol::Dns6(_) => parcalar.push("/dns/x".into()),
+            Protocol::Dns(_) | Protocol::Dns4(_) | Protocol::Dns6(_) => {
+                parcalar.push("/dns/x".into())
+            }
             _ => {}
         }
     }
-    if parcalar.is_empty() { "-".into() } else { parcalar.concat() }
+    if parcalar.is_empty() {
+        "-".into()
+    } else {
+        parcalar.concat()
+    }
 }
 
 /// Baglanti ucundan (yon, maskeli karsi adres). Gelen baglantida karsi adres
@@ -1147,7 +1164,9 @@ pub fn maskeli_adres(adres: &Multiaddr) -> String {
 pub fn es_ozeti(endpoint: &libp2p::core::ConnectedPoint) -> (&'static str, String) {
     match endpoint {
         libp2p::core::ConnectedPoint::Dialer { address, .. } => ("giden", maskeli_adres(address)),
-        libp2p::core::ConnectedPoint::Listener { send_back_addr, .. } => ("gelen", maskeli_adres(send_back_addr)),
+        libp2p::core::ConnectedPoint::Listener { send_back_addr, .. } => {
+            ("gelen", maskeli_adres(send_back_addr))
+        }
     }
 }
 
@@ -1163,7 +1182,10 @@ mod tests {
         assert_eq!(maskeli_adres(&b), "/ip6/2001:db8:x/tcp/40002");
         let c: Multiaddr = "/dns4/ornek.example/tcp/40001".parse().unwrap();
         assert_eq!(maskeli_adres(&c), "/dns/x/tcp/40001");
-        assert!(!maskeli_adres(&a).contains("113.45"), "tam IP gunluge yazilmaz");
+        assert!(
+            !maskeli_adres(&a).contains("113.45"),
+            "tam IP gunluge yazilmaz"
+        );
     }
 
     #[test]
@@ -1171,14 +1193,23 @@ mod tests {
         use libp2p::core::{ConnectedPoint, Endpoint};
         let uzak: Multiaddr = "/ip4/198.51.100.7/tcp/40002".parse().unwrap();
         let yerel: Multiaddr = "/ip4/0.0.0.0/tcp/40001".parse().unwrap();
-        let gelen = ConnectedPoint::Listener { local_addr: yerel.clone(), send_back_addr: uzak.clone() };
-        assert_eq!(es_ozeti(&gelen), ("gelen", "/ip4/198.51.x.x/tcp/40002".to_string()));
+        let gelen = ConnectedPoint::Listener {
+            local_addr: yerel.clone(),
+            send_back_addr: uzak.clone(),
+        };
+        assert_eq!(
+            es_ozeti(&gelen),
+            ("gelen", "/ip4/198.51.x.x/tcp/40002".to_string())
+        );
         let giden = ConnectedPoint::Dialer {
             address: uzak,
             role_override: Endpoint::Dialer,
             port_use: libp2p::core::transport::PortUse::New,
         };
-        assert_eq!(es_ozeti(&giden), ("giden", "/ip4/198.51.x.x/tcp/40002".to_string()));
+        assert_eq!(
+            es_ozeti(&giden),
+            ("giden", "/ip4/198.51.x.x/tcp/40002".to_string())
+        );
     }
 
     #[test]

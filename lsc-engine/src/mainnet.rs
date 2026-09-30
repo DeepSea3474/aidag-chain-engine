@@ -20,6 +20,7 @@
 //! anahtari yoksa uretir + kaydeder, genesis'i deterministik hesaplar ve
 //! asagidaki sabitlerin degerlerini basar. Ciktiyi bu dosyaya islersin.
 
+#![allow(clippy::items_after_test_module)]
 use crate::dag::vertex::VertexId;
 
 /// Mainnet ag kimligi. EVM `chain_id` (3474) ile ayni — tek kimlik.
@@ -182,120 +183,6 @@ fn hex_decode(s: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::dag::vertex::Vertex;
-    use crate::dag::wire;
-    use crate::registry::public_key_to_adres;
-    use ed25519_dalek::SigningKey;
-
-    /// Kurucu anahtar dosyasinin yolu (repo koku). Format: [algo_id=1][32 seed].
-    fn kurucu_key_path() -> std::path::PathBuf {
-        std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../aidag-kurucu.key"))
-    }
-
-    /// TEK SEFERLIK: kurucu anahtarini uret (yoksa) + genesis'i deterministik
-    /// hesapla + sabit degerleri bas. Ciktiyi mainnet.rs sabitlerine isle.
-    /// `cargo test -p lsc-engine uret_mainnet_genesis -- --ignored --nocapture`
-    #[test]
-    #[ignore]
-    fn uret_mainnet_genesis() {
-        use rand::rngs::OsRng;
-        use rand::RngCore;
-
-        let path = kurucu_key_path();
-        // Anahtari yukle ya da uret+kaydet (idempotent → hep ayni genesis).
-        let seed: [u8; 32] = if path.exists() {
-            let data = std::fs::read(&path).expect("kurucu.key okunamadi");
-            assert!(
-                data.len() == 33 && data[0] == 1,
-                "kurucu.key format [1][32seed] olmali"
-            );
-            let mut s = [0u8; 32];
-            s.copy_from_slice(&data[1..33]);
-            s
-        } else {
-            let mut s = [0u8; 32];
-            OsRng.fill_bytes(&mut s);
-            let mut dosya = vec![1u8]; // algo_id = ed25519
-            dosya.extend_from_slice(&s);
-            std::fs::write(&path, &dosya).expect("kurucu.key yazilamadi");
-            eprintln!("[URETILDI] Yeni kurucu anahtari: {:?}", path);
-            s
-        };
-
-        let key = SigningKey::from_bytes(&seed);
-        let pubkey = key.verifying_key().to_bytes();
-        let adres = public_key_to_adres(&pubkey);
-
-        // Deterministik genesis: (network_id, [], payload, timestamp, key).
-        // ed25519 imzasi RFC8032 belirlenimci → ayni girdi = ayni id, her zaman.
-        let genesis = Vertex::new_signed(
-            MAINNET_NETWORK_ID,
-            vec![],
-            MAINNET_GENESIS_PAYLOAD.to_vec(),
-            MAINNET_GENESIS_ZAMANI,
-            &key,
-        )
-        .expect("genesis uretilemedi");
-        let id = *genesis.id();
-        let wire_bytes = wire::encode(&genesis);
-
-        // Tekrar-uretilebilirlik teyidi: decode → ayni id.
-        let geri = wire::decode(&wire_bytes).expect("genesis decode");
-        assert_eq!(*geri.id(), id, "wire round-trip id uyusmuyor");
-
-        eprintln!("\n================ MAINNET GENESIS (mainnet.rs'e isle) ================");
-        eprintln!("MAINNET_KURUCU_PUBKEY_HEX = \"{}\"", hex_encode(&pubkey));
-        eprintln!("MAINNET_KURUCU_ADRES_HEX  = \"{}\"", hex_encode(&adres));
-        eprintln!("MAINNET_GENESIS_ID_HEX    = \"{}\"", hex_encode(&id));
-        eprintln!(
-            "MAINNET_GENESIS_WIRE_HEX  = \"{}\"",
-            hex_encode(&wire_bytes)
-        );
-        eprintln!("====================================================================\n");
-    }
-
-    /// Sabitler DOLU (uret_mainnet_genesis islenmis) ise: baked genesis gercekten
-    /// pinli id'yi ve kurucu adresini uretiyor mu? Placeholder iken atlanir.
-    #[test]
-    fn baked_genesis_tutarli() {
-        if MAINNET_GENESIS_WIRE_HEX.is_empty() {
-            eprintln!("baked_genesis_tutarli: sabitler henuz bos — atlandi.");
-            return;
-        }
-        let wire_bytes = genesis_wire();
-        let v = wire::decode(&wire_bytes).expect("baked genesis decode");
-        v.verify().expect("baked genesis imza/id dogrulanmali");
-        assert_eq!(*v.id(), genesis_id(), "baked wire id != MAINNET_GENESIS_ID");
-        assert_eq!(
-            v.network_id(),
-            MAINNET_NETWORK_ID,
-            "genesis network_id != 3474"
-        );
-        assert!(v.parents().is_empty(), "genesis parent'siz olmali");
-        assert_eq!(
-            v.timestamp(),
-            MAINNET_GENESIS_ZAMANI,
-            "genesis zamani != sabit"
-        );
-        assert_eq!(
-            public_key_to_adres(v.public_key()),
-            kurucu_adres(),
-            "genesis imzalayan != kurucu adresi"
-        );
-    }
-
-    fn hex_encode(b: &[u8]) -> String {
-        let mut s = String::with_capacity(b.len() * 2);
-        for x in b {
-            s.push_str(&format!("{:02x}", x));
-        }
-        s
-    }
-}
-
 // ===================================================================
 // ON SATIS KONSENSUS GUVENLIK SINIRLARI (2026-07-25)
 // Otomatik toplu dagitim oncesi eklendi. Bu kurallar KONSENSUS
@@ -426,3 +313,117 @@ pub const RWA_YONETIM_IMZACILARI: &[[u8; 32]] = &[];
 
 /// RWA yonetim baslangic esigi (M). Baslangic: 2-of-3.
 pub const RWA_YONETIM_BASLANGIC_ESIK: u8 = 2;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dag::vertex::Vertex;
+    use crate::dag::wire;
+    use crate::registry::public_key_to_adres;
+    use ed25519_dalek::SigningKey;
+
+    /// Kurucu anahtar dosyasinin yolu (repo koku). Format: [algo_id=1][32 seed].
+    fn kurucu_key_path() -> std::path::PathBuf {
+        std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../aidag-kurucu.key"))
+    }
+
+    /// TEK SEFERLIK: kurucu anahtarini uret (yoksa) + genesis'i deterministik
+    /// hesapla + sabit degerleri bas. Ciktiyi mainnet.rs sabitlerine isle.
+    /// `cargo test -p lsc-engine uret_mainnet_genesis -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn uret_mainnet_genesis() {
+        use rand::rngs::OsRng;
+        use rand::RngCore;
+
+        let path = kurucu_key_path();
+        // Anahtari yukle ya da uret+kaydet (idempotent → hep ayni genesis).
+        let seed: [u8; 32] = if path.exists() {
+            let data = std::fs::read(&path).expect("kurucu.key okunamadi");
+            assert!(
+                data.len() == 33 && data[0] == 1,
+                "kurucu.key format [1][32seed] olmali"
+            );
+            let mut s = [0u8; 32];
+            s.copy_from_slice(&data[1..33]);
+            s
+        } else {
+            let mut s = [0u8; 32];
+            OsRng.fill_bytes(&mut s);
+            let mut dosya = vec![1u8]; // algo_id = ed25519
+            dosya.extend_from_slice(&s);
+            std::fs::write(&path, &dosya).expect("kurucu.key yazilamadi");
+            eprintln!("[URETILDI] Yeni kurucu anahtari: {:?}", path);
+            s
+        };
+
+        let key = SigningKey::from_bytes(&seed);
+        let pubkey = key.verifying_key().to_bytes();
+        let adres = public_key_to_adres(&pubkey);
+
+        // Deterministik genesis: (network_id, [], payload, timestamp, key).
+        // ed25519 imzasi RFC8032 belirlenimci → ayni girdi = ayni id, her zaman.
+        let genesis = Vertex::new_signed(
+            MAINNET_NETWORK_ID,
+            vec![],
+            MAINNET_GENESIS_PAYLOAD.to_vec(),
+            MAINNET_GENESIS_ZAMANI,
+            &key,
+        )
+        .expect("genesis uretilemedi");
+        let id = *genesis.id();
+        let wire_bytes = wire::encode(&genesis);
+
+        // Tekrar-uretilebilirlik teyidi: decode → ayni id.
+        let geri = wire::decode(&wire_bytes).expect("genesis decode");
+        assert_eq!(*geri.id(), id, "wire round-trip id uyusmuyor");
+
+        eprintln!("\n================ MAINNET GENESIS (mainnet.rs'e isle) ================");
+        eprintln!("MAINNET_KURUCU_PUBKEY_HEX = \"{}\"", hex_encode(&pubkey));
+        eprintln!("MAINNET_KURUCU_ADRES_HEX  = \"{}\"", hex_encode(&adres));
+        eprintln!("MAINNET_GENESIS_ID_HEX    = \"{}\"", hex_encode(&id));
+        eprintln!(
+            "MAINNET_GENESIS_WIRE_HEX  = \"{}\"",
+            hex_encode(&wire_bytes)
+        );
+        eprintln!("====================================================================\n");
+    }
+
+    /// Sabitler DOLU (uret_mainnet_genesis islenmis) ise: baked genesis gercekten
+    /// pinli id'yi ve kurucu adresini uretiyor mu? Placeholder iken atlanir.
+    #[test]
+    fn baked_genesis_tutarli() {
+        if MAINNET_GENESIS_WIRE_HEX.is_empty() {
+            eprintln!("baked_genesis_tutarli: sabitler henuz bos — atlandi.");
+            return;
+        }
+        let wire_bytes = genesis_wire();
+        let v = wire::decode(&wire_bytes).expect("baked genesis decode");
+        v.verify().expect("baked genesis imza/id dogrulanmali");
+        assert_eq!(*v.id(), genesis_id(), "baked wire id != MAINNET_GENESIS_ID");
+        assert_eq!(
+            v.network_id(),
+            MAINNET_NETWORK_ID,
+            "genesis network_id != 3474"
+        );
+        assert!(v.parents().is_empty(), "genesis parent'siz olmali");
+        assert_eq!(
+            v.timestamp(),
+            MAINNET_GENESIS_ZAMANI,
+            "genesis zamani != sabit"
+        );
+        assert_eq!(
+            public_key_to_adres(v.public_key()),
+            kurucu_adres(),
+            "genesis imzalayan != kurucu adresi"
+        );
+    }
+
+    fn hex_encode(b: &[u8]) -> String {
+        let mut s = String::with_capacity(b.len() * 2);
+        for x in b {
+            s.push_str(&format!("{:02x}", x));
+        }
+        s
+    }
+}

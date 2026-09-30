@@ -29,7 +29,12 @@ pub fn yeni_tuz() -> [u8; TUZ_LEN] {
 
 /// Etkilesim hash'i. `tuz` yoksa ESKI (tuzsuz) sema, varsa TUZLU sema.
 /// `alanlar` 0x1e ile ayrilir (eski kodun bayt dizilimiyle birebir ayni).
-pub fn kanit_hash(net_id: u32, ts: u64, alanlar: &[&[u8]], tuz: Option<&[u8; TUZ_LEN]>) -> [u8; 32] {
+pub fn kanit_hash(
+    net_id: u32,
+    ts: u64,
+    alanlar: &[&[u8]],
+    tuz: Option<&[u8; TUZ_LEN]>,
+) -> [u8; 32] {
     let mut h = match tuz {
         Some(t) => blake3::Hasher::new_keyed(t),
         None => blake3::Hasher::new(),
@@ -50,7 +55,10 @@ pub fn tuz_coz(s: &str) -> Result<[u8; TUZ_LEN], String> {
     let b = hex::decode(s.trim().trim_start_matches("0x"))
         .map_err(|_| "salt gecersiz hex".to_string())?;
     if b.len() != TUZ_LEN {
-        return Err(format!("salt {TUZ_LEN} bayt (64 hex) olmali, {} bayt geldi", b.len()));
+        return Err(format!(
+            "salt {TUZ_LEN} bayt (64 hex) olmali, {} bayt geldi",
+            b.len()
+        ));
     }
     let mut t = [0u8; TUZ_LEN];
     t.copy_from_slice(&b);
@@ -87,8 +95,18 @@ pub fn dogrulama_hash(net_id: u32, r: &DogrulaIstek) -> Result<([u8; 32], bool),
         }
         None => {
             let h = match r.model.as_deref() {
-                Some(m) => kanit_hash(net_id, r.ts, &[r.prompt.as_bytes(), r.answer.as_bytes(), m.as_bytes()], None),
-                None => kanit_hash(net_id, r.ts, &[r.prompt.as_bytes(), r.answer.as_bytes()], None),
+                Some(m) => kanit_hash(
+                    net_id,
+                    r.ts,
+                    &[r.prompt.as_bytes(), r.answer.as_bytes(), m.as_bytes()],
+                    None,
+                ),
+                None => kanit_hash(
+                    net_id,
+                    r.ts,
+                    &[r.prompt.as_bytes(), r.answer.as_bytes()],
+                    None,
+                ),
             };
             Ok((h, false))
         }
@@ -117,8 +135,10 @@ mod tests {
     }
     fn eski_stream(net: u32, ts: u64, prompt: &str, metin: &str) -> [u8; 32] {
         let mut h = blake3::Hasher::new();
-        h.update(&net.to_le_bytes()); h.update(&ts.to_le_bytes());
-        h.update(prompt.as_bytes()); h.update(&[0x1e]);
+        h.update(&net.to_le_bytes());
+        h.update(&ts.to_le_bytes());
+        h.update(prompt.as_bytes());
+        h.update(&[0x1e]);
         h.update(metin.as_bytes());
         *h.finalize().as_bytes()
     }
@@ -128,14 +148,22 @@ mod tests {
         h.update(&ts.to_le_bytes());
         h.update(prompt.as_bytes());
         h.update(&[0x1e]);
-        if let Some(w) = wallet { h.update(w.as_bytes()); h.update(&[0x1e]); }
+        if let Some(w) = wallet {
+            h.update(w.as_bytes());
+            h.update(&[0x1e]);
+        }
         h.update(bytes);
         *h.finalize().as_bytes()
     }
 
     fn ornekler() -> Vec<(u64, &'static str, &'static str, &'static str)> {
         vec![
-            (1_758_650_000, "AIDAG nedir?", "AIDAG Chain bir DAG L1 zinciridir.", "qwen2.5-7b"),
+            (
+                1_758_650_000,
+                "AIDAG nedir?",
+                "AIDAG Chain bir DAG L1 zinciridir.",
+                "qwen2.5-7b",
+            ),
             (0, "", "", ""),
             (u64::MAX, "çğıöşü İĞŞ 😀", "yanıt\u{1e}ayraçlı", "ag-durumu"),
             (1_758_650_123, "7 çarpı 8", "56", "hesap-makinesi"),
@@ -146,13 +174,25 @@ mod tests {
     fn eski_sema_birebir_korunur() {
         for (ts, p, a, m) in ornekler() {
             // /v1/ask ve arac_kanit: prompt|cevap|model
-            assert_eq!(kanit_hash(NET, ts, &[p.as_bytes(), a.as_bytes(), m.as_bytes()], None), eski_ask(NET, ts, p, a, m));
+            assert_eq!(
+                kanit_hash(NET, ts, &[p.as_bytes(), a.as_bytes(), m.as_bytes()], None),
+                eski_ask(NET, ts, p, a, m)
+            );
             // /v1/ask-stream model cevabi: prompt|metin
-            assert_eq!(kanit_hash(NET, ts, &[p.as_bytes(), a.as_bytes()], None), eski_stream(NET, ts, p, a));
+            assert_eq!(
+                kanit_hash(NET, ts, &[p.as_bytes(), a.as_bytes()], None),
+                eski_stream(NET, ts, p, a)
+            );
             // gorsel/video: prompt|[cuzdan]|bayt
             let b = [0u8, 1, 0x1e, 255];
-            assert_eq!(kanit_hash(NET, ts, &[p.as_bytes(), &b], None), eski_medya(NET, ts, p, None, &b));
-            assert_eq!(kanit_hash(NET, ts, &[p.as_bytes(), b"0xabc", &b], None), eski_medya(NET, ts, p, Some("0xabc"), &b));
+            assert_eq!(
+                kanit_hash(NET, ts, &[p.as_bytes(), &b], None),
+                eski_medya(NET, ts, p, None, &b)
+            );
+            assert_eq!(
+                kanit_hash(NET, ts, &[p.as_bytes(), b"0xabc", &b], None),
+                eski_medya(NET, ts, p, Some("0xabc"), &b)
+            );
         }
     }
 
@@ -161,11 +201,25 @@ mod tests {
         // Uygulamadan bagimsiz sabit: blake3 kutuphanesi/kod degisse bile eski
         // kayitlarin hash'i degismemeli. Deger Python `blake3` paketiyle
         // (Rust kodundan bagimsiz) hesaplandi.
-        let h = eski_ask(NET, 1_758_650_000, "AIDAG nedir?", "AIDAG Chain bir DAG L1 zinciridir.", "qwen2.5-7b");
+        let h = eski_ask(
+            NET,
+            1_758_650_000,
+            "AIDAG nedir?",
+            "AIDAG Chain bir DAG L1 zinciridir.",
+            "qwen2.5-7b",
+        );
         assert_eq!(hex::encode(h), SABIT_ESKI);
         assert_eq!(
-            hex::encode(kanit_hash(NET, 1_758_650_000,
-                &[b"AIDAG nedir?", "AIDAG Chain bir DAG L1 zinciridir.".as_bytes(), b"qwen2.5-7b"], None)),
+            hex::encode(kanit_hash(
+                NET,
+                1_758_650_000,
+                &[
+                    b"AIDAG nedir?",
+                    "AIDAG Chain bir DAG L1 zinciridir.".as_bytes(),
+                    b"qwen2.5-7b"
+                ],
+                None
+            )),
             SABIT_ESKI
         );
     }
@@ -175,9 +229,20 @@ mod tests {
     fn tuzlu_sema_sabit_vektor() {
         // Dis dogrulayicilar icin referans: Python `blake3.blake3(girdi, key=tuz)`
         // ile ayni sonucu verir (tuz = 32 x 0x07).
-        let h = kanit_hash(NET, 1_758_650_000,
-            &[b"AIDAG nedir?", "AIDAG Chain bir DAG L1 zinciridir.".as_bytes(), b"qwen2.5-7b"], Some(&[7u8; 32]));
-        assert_eq!(hex::encode(h), "bfe6123c22fabe0d7458f1694f3bb0091f50de14cd7953fade0d2b8a1f8ac192");
+        let h = kanit_hash(
+            NET,
+            1_758_650_000,
+            &[
+                b"AIDAG nedir?",
+                "AIDAG Chain bir DAG L1 zinciridir.".as_bytes(),
+                b"qwen2.5-7b",
+            ],
+            Some(&[7u8; 32]),
+        );
+        assert_eq!(
+            hex::encode(h),
+            "bfe6123c22fabe0d7458f1694f3bb0091f50de14cd7953fade0d2b8a1f8ac192"
+        );
     }
 
     #[test]
@@ -196,7 +261,10 @@ mod tests {
         // alanlarin her biri hash'e girer
         assert_ne!(h1, kanit_hash(NET, 6, &al, Some(&t1)));
         assert_ne!(h1, kanit_hash(NET + 1, 5, &al, Some(&t1)));
-        assert_ne!(h1, kanit_hash(NET, 5, &[b"soru", b"cevap!", b"model"], Some(&t1)));
+        assert_ne!(
+            h1,
+            kanit_hash(NET, 5, &[b"soru", b"cevap!", b"model"], Some(&t1))
+        );
     }
 
     #[test]
@@ -219,15 +287,22 @@ mod tests {
         assert_eq!(payload.len(), 33);
         assert_eq!(payload[0], 1);
         assert_eq!(&payload[1..], &h);
-        assert!(!payload.windows(32).any(|w| w == t), "tuz payload'da bulunmamali");
+        assert!(
+            !payload.windows(32).any(|w| w == t),
+            "tuz payload'da bulunmamali"
+        );
         // ve hash'ten geri cozulebilir degil: Record yalniz hash'i tasir
         assert_eq!(Record::decode(&payload).unwrap().data_hash, h);
     }
 
     fn istek(ts: u64, model: Option<&str>, salt: Option<String>) -> DogrulaIstek {
         DogrulaIstek {
-            ts, prompt: "AIDAG nedir?".into(), answer: "Bir DAG L1.".into(),
-            model: model.map(Into::into), salt, proof_hash: None,
+            ts,
+            prompt: "AIDAG nedir?".into(),
+            answer: "Bir DAG L1.".into(),
+            model: model.map(Into::into),
+            salt,
+            proof_hash: None,
         }
     }
 
@@ -248,14 +323,24 @@ mod tests {
     #[test]
     fn dogrulama_tuzu_kabul_eder() {
         let t = yeni_tuz();
-        let beklenen = kanit_hash(NET, 7, &[b"AIDAG nedir?", b"Bir DAG L1.", b"qwen"], Some(&t));
-        for s in [hex::encode(t), format!("0x{}", hex::encode(t)), hex::encode(t).to_uppercase()] {
+        let beklenen = kanit_hash(
+            NET,
+            7,
+            &[b"AIDAG nedir?", b"Bir DAG L1.", b"qwen"],
+            Some(&t),
+        );
+        for s in [
+            hex::encode(t),
+            format!("0x{}", hex::encode(t)),
+            hex::encode(t).to_uppercase(),
+        ] {
             let (h, tuzlu) = dogrulama_hash(NET, &istek(7, Some("qwen"), Some(s))).unwrap();
             assert!(tuzlu);
             assert_eq!(h, beklenen);
         }
         // yanlis tuz -> farkli hash (eslesmez)
-        let (h, _) = dogrulama_hash(NET, &istek(7, Some("qwen"), Some(hex::encode(yeni_tuz())))).unwrap();
+        let (h, _) =
+            dogrulama_hash(NET, &istek(7, Some("qwen"), Some(hex::encode(yeni_tuz())))).unwrap();
         assert_ne!(h, beklenen);
         // tuzlu kayit tuzsuz dogrulanamaz
         let (h, _) = dogrulama_hash(NET, &istek(7, Some("qwen"), None)).unwrap();

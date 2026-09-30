@@ -363,8 +363,7 @@ pub fn avm_calistir_rwa(
     });
     let evm = ctx.build_mainnet();
     let eth = evm.precompiles.clone();
-    let mut evm =
-        evm.with_precompiles(crate::rwa_precompile::AidagPrecompiles::new(eth, rwa));
+    let mut evm = evm.with_precompiles(crate::rwa_precompile::AidagPrecompiles::new(eth, rwa));
 
     let sonuc = evm.transact_commit(tx);
 
@@ -421,8 +420,7 @@ pub fn avm_call_oku_rwa(
     let ctx = Context::mainnet().with_db(db_kopya);
     let evm = ctx.build_mainnet();
     let eth = evm.precompiles.clone();
-    let mut evm =
-        evm.with_precompiles(crate::rwa_precompile::AidagPrecompiles::new(eth, rwa));
+    let mut evm = evm.with_precompiles(crate::rwa_precompile::AidagPrecompiles::new(eth, rwa));
 
     let tx = TxEnv::builder()
         .caller(adres_to_evm(gonderen))
@@ -546,8 +544,15 @@ pub fn ham_eth_tx_isle_rwa(
 
     // 3) AVM'de calistir: hedef None -> deploy, dolu -> call
     let hedef = islem.hedef.unwrap_or([0u8; 20]);
-    let sonuc =
-        avm_calistir_rwa(db, &islem.gonderen, &hedef, islem.deger, &islem.veri, zaman, rwa)?;
+    let sonuc = avm_calistir_rwa(
+        db,
+        &islem.gonderen,
+        &hedef,
+        islem.deger,
+        &islem.veri,
+        zaman,
+        rwa,
+    )?;
 
     Ok((tx_hash, sonuc))
 }

@@ -7,29 +7,72 @@
 use crate::embed::{kosinus, Embedder};
 
 pub const ORNEKLER: &[(&str, &[&str])] = &[
-    ("kimlik", &[
-        "Senin adın ne?", "İsmin nedir?", "Sana nasıl hitap etmeliyim?", "Kim olduğunu ve adını söyle",
-        "Bu asistanın adı ne?", "What is your name?",
-    ]),
-    ("ag-durumu", &[
-        "Ağ şu an çalışıyor mu?", "Zincir sağlıklı mı, bir sorun var mı?", "Düğümler ayakta mı?",
-        "Mainnet'in şu anki durumu nedir?", "Ağda kesinti var mı?", "Kaç düğüm aktif çalışıyor?",
-    ]),
-    ("on-satis", &[
-        "Ön satışta şimdiye kadar ne kadar satıldı?", "Ön satışın güncel durumu nedir?", "Hangi fiyat kademesindeyiz?",
-        "Ön satışta ne kadar AIDAG kaldı?", "TGE tarihi belli mi?", "Kaç kişi ön satıştan aldı?",
-    ]),
-    ("kaynak-listesi", &[
-        "Hangi kaynaklardan öğreniyorsun?", "Bilgilerini nereden alıyorsun?", "Kaynak listen nedir?",
-        "Hangi belgelerle eğitildin?", "Bilgi tabanında hangi kaynaklar var?",
-    ]),
-    ("diger", &[
-        "Blokzincir nedir?", "Ön satış nasıl çalışır?", "Ön satışa nasıl katılırım?", "Ağ güvenliği için ne önerirsin?",
-        "Merhaba, nasılsın?", "Bir şiir yazar mısın?", "Türkiye'nin başkenti neresi?", "Parolamı nasıl güçlü yaparım?",
-        "Neden yalnızca USDT kabul ediliyor?", "Akıllı kontrat nedir?", "Hava bugün nasıl?", "Bana bir tarif öner",
-        "Düğüm nasıl kurulur?", "AIDAG token fiyatı gelecek yıl ne olur?", "Dosyanın adını nasıl değiştiririm?",
-        "Kaynak kodu nerede?", "Yapay zekâ nasıl öğrenir?", "Güvenlik açığı nasıl bildirilir?",
-    ]),
+    (
+        "kimlik",
+        &[
+            "Senin adın ne?",
+            "İsmin nedir?",
+            "Sana nasıl hitap etmeliyim?",
+            "Kim olduğunu ve adını söyle",
+            "Bu asistanın adı ne?",
+            "What is your name?",
+        ],
+    ),
+    (
+        "ag-durumu",
+        &[
+            "Ağ şu an çalışıyor mu?",
+            "Zincir sağlıklı mı, bir sorun var mı?",
+            "Düğümler ayakta mı?",
+            "Mainnet'in şu anki durumu nedir?",
+            "Ağda kesinti var mı?",
+            "Kaç düğüm aktif çalışıyor?",
+        ],
+    ),
+    (
+        "on-satis",
+        &[
+            "Ön satışta şimdiye kadar ne kadar satıldı?",
+            "Ön satışın güncel durumu nedir?",
+            "Hangi fiyat kademesindeyiz?",
+            "Ön satışta ne kadar AIDAG kaldı?",
+            "TGE tarihi belli mi?",
+            "Kaç kişi ön satıştan aldı?",
+        ],
+    ),
+    (
+        "kaynak-listesi",
+        &[
+            "Hangi kaynaklardan öğreniyorsun?",
+            "Bilgilerini nereden alıyorsun?",
+            "Kaynak listen nedir?",
+            "Hangi belgelerle eğitildin?",
+            "Bilgi tabanında hangi kaynaklar var?",
+        ],
+    ),
+    (
+        "diger",
+        &[
+            "Blokzincir nedir?",
+            "Ön satış nasıl çalışır?",
+            "Ön satışa nasıl katılırım?",
+            "Ağ güvenliği için ne önerirsin?",
+            "Merhaba, nasılsın?",
+            "Bir şiir yazar mısın?",
+            "Türkiye'nin başkenti neresi?",
+            "Parolamı nasıl güçlü yaparım?",
+            "Neden yalnızca USDT kabul ediliyor?",
+            "Akıllı kontrat nedir?",
+            "Hava bugün nasıl?",
+            "Bana bir tarif öner",
+            "Düğüm nasıl kurulur?",
+            "AIDAG token fiyatı gelecek yıl ne olur?",
+            "Dosyanın adını nasıl değiştiririm?",
+            "Kaynak kodu nerede?",
+            "Yapay zekâ nasıl öğrenir?",
+            "Güvenlik açığı nasıl bildirilir?",
+        ],
+    ),
 ];
 
 /// Varsayılan eşikler (26 Eylül 2026 kalibrasyonu; ana set araç dışı soruları + birim testi ifadeleri, bkz.
@@ -64,7 +107,11 @@ impl AnlamsalNiyet {
                 vektorler.push((*sinif, e.embed(c)?));
             }
         }
-        Ok(AnlamsalNiyet { vektorler, esik, fark })
+        Ok(AnlamsalNiyet {
+            vektorler,
+            esik,
+            fark,
+        })
     }
 
     /// Sınıf başına en yüksek benzerlik.
@@ -92,10 +139,26 @@ mod testler {
 
     #[test]
     fn karar_kurali() {
-        assert_eq!(karar_ver(&[("ag-durumu", 0.82), ("diger", 0.60), ("kimlik", 0.30)], 0.7, 0.05), Some("ag-durumu"));
-        assert_eq!(karar_ver(&[("ag-durumu", 0.82), ("diger", 0.85)], 0.7, 0.05), None); // "diger" kazandı
-        assert_eq!(karar_ver(&[("ag-durumu", 0.65), ("diger", 0.40)], 0.7, 0.05), None); // eşik altı
-        assert_eq!(karar_ver(&[("ag-durumu", 0.80), ("on-satis", 0.78)], 0.7, 0.05), None); // belirsiz
+        assert_eq!(
+            karar_ver(
+                &[("ag-durumu", 0.82), ("diger", 0.60), ("kimlik", 0.30)],
+                0.7,
+                0.05
+            ),
+            Some("ag-durumu")
+        );
+        assert_eq!(
+            karar_ver(&[("ag-durumu", 0.82), ("diger", 0.85)], 0.7, 0.05),
+            None
+        ); // "diger" kazandı
+        assert_eq!(
+            karar_ver(&[("ag-durumu", 0.65), ("diger", 0.40)], 0.7, 0.05),
+            None
+        ); // eşik altı
+        assert_eq!(
+            karar_ver(&[("ag-durumu", 0.80), ("on-satis", 0.78)], 0.7, 0.05),
+            None
+        ); // belirsiz
         assert_eq!(karar_ver(&[], 0.7, 0.05), None);
     }
 
@@ -103,36 +166,61 @@ mod testler {
     #[test]
     #[ignore]
     fn kalibrasyon() {
-        let yol = std::env::var("KALIBRASYON_MODEL").unwrap_or_else(|_| "/root/aidag-lsc/soulware-models/embed-minilm".into());
+        let yol = std::env::var("KALIBRASYON_MODEL")
+            .unwrap_or_else(|_| "/root/aidag-lsc/soulware-models/embed-minilm".into());
         let e = Embedder::load(&yol).expect("model");
         let a = AnlamsalNiyet::yukle(&e, ESIK, FARK).unwrap();
         let olumlu: &[(&str, &str)] = &[
-            ("kimlik", "Adın neydi?"), ("kimlik", "Size hangi isimle seslenmeliyim?"), ("kimlik", "Kendine ne isim veriyorsun?"),
-            ("ag-durumu", "AIDAG ağı canlı mı?"), ("ag-durumu", "Ağ nasıl gidiyor?"), ("ag-durumu", "Mainnet'te bir arıza var mı?"),
-            ("ag-durumu", "Sistem ayakta mı?"), ("ag-durumu", "Ağın sağlığı nasıl?"),
-            ("on-satis", "Presale'e kaç kişi katıldı?"), ("on-satis", "Ön satışın son durumu nedir?"),
-            ("on-satis", "Satışlar ne durumda?"), ("on-satis", "Şu an hangi kademedeyiz?"),
-            ("kaynak-listesi", "Bilgi kaynakların neler?"), ("kaynak-listesi", "Neyle eğitildin?"),
+            ("kimlik", "Adın neydi?"),
+            ("kimlik", "Size hangi isimle seslenmeliyim?"),
+            ("kimlik", "Kendine ne isim veriyorsun?"),
+            ("ag-durumu", "AIDAG ağı canlı mı?"),
+            ("ag-durumu", "Ağ nasıl gidiyor?"),
+            ("ag-durumu", "Mainnet'te bir arıza var mı?"),
+            ("ag-durumu", "Sistem ayakta mı?"),
+            ("ag-durumu", "Ağın sağlığı nasıl?"),
+            ("on-satis", "Presale'e kaç kişi katıldı?"),
+            ("on-satis", "Ön satışın son durumu nedir?"),
+            ("on-satis", "Satışlar ne durumda?"),
+            ("on-satis", "Şu an hangi kademedeyiz?"),
+            ("kaynak-listesi", "Bilgi kaynakların neler?"),
+            ("kaynak-listesi", "Neyle eğitildin?"),
         ];
         // Ana set (geliştirme verisi) araç dışı sorular: hiçbiri araca gitmemeli.
         let olumsuz = [
-            "Hash fonksiyonu nedir, basitçe anlatır mısın?", "Merhaba, nasılsın?", "AIDAG'ın 2030'daki fiyatı ne olacak?",
-            "Ön satışta neden yalnızca USDT kabul ediliyor?", "KUBRA neden imza atamıyor?", "SQL enjeksiyonuna karşı web uygulamamı nasıl korurum?",
-            "Bir güvenlik olayında ilk 24 saatte ne yapmalıyım?", "Nginx'te istek hız sınırını nasıl ayarlarım?",
-            "Mars'ta ilk insan yerleşimi hangi yıl kurulacak?", "Yarın BIST 100 kaç puandan kapanır?",
-            "Komşumun telefon numarası ne?", "Kurumsal ağlar ile ilgili ne yapıyorsunuz?", "Blok zinciri nasıl çalışır?",
+            "Hash fonksiyonu nedir, basitçe anlatır mısın?",
+            "Merhaba, nasılsın?",
+            "AIDAG'ın 2030'daki fiyatı ne olacak?",
+            "Ön satışta neden yalnızca USDT kabul ediliyor?",
+            "KUBRA neden imza atamıyor?",
+            "SQL enjeksiyonuna karşı web uygulamamı nasıl korurum?",
+            "Bir güvenlik olayında ilk 24 saatte ne yapmalıyım?",
+            "Nginx'te istek hız sınırını nasıl ayarlarım?",
+            "Mars'ta ilk insan yerleşimi hangi yıl kurulacak?",
+            "Yarın BIST 100 kaç puandan kapanır?",
+            "Komşumun telefon numarası ne?",
+            "Kurumsal ağlar ile ilgili ne yapıyorsunuz?",
+            "Blok zinciri nasıl çalışır?",
         ];
         for (beklenen, q) in olumlu {
             let qv = e.embed(q).unwrap();
             let mut s = a.skorlar(&qv);
             s.sort_by(|x, y| y.1.partial_cmp(&x.1).unwrap());
-            println!("OLUMLU  {beklenen:15} {:?} <- {q}  {:?}", karar_ver(&s, ESIK, FARK), &s[..2]);
+            println!(
+                "OLUMLU  {beklenen:15} {:?} <- {q}  {:?}",
+                karar_ver(&s, ESIK, FARK),
+                &s[..2]
+            );
         }
         for q in olumsuz {
             let qv = e.embed(q).unwrap();
             let mut s = a.skorlar(&qv);
             s.sort_by(|x, y| y.1.partial_cmp(&x.1).unwrap());
-            println!("OLUMSUZ {:?} <- {q}  {:?}", karar_ver(&s, ESIK, FARK), &s[..2]);
+            println!(
+                "OLUMSUZ {:?} <- {q}  {:?}",
+                karar_ver(&s, ESIK, FARK),
+                &s[..2]
+            );
         }
     }
 }

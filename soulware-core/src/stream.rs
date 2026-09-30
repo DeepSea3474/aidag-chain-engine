@@ -26,7 +26,8 @@ pub async fn beyin_stream(
         "stop": ["\nuser", "user\n", "\nUser", "<|im_end|>", "<|im_start|>", "\nSORU:"],
     });
 
-    let resp = http.post(remote_url)
+    let resp = http
+        .post(remote_url)
         .header("content-type", "application/json")
         .json(&body)
         .send()
@@ -52,9 +53,12 @@ pub async fn beyin_stream(
         // SSE satirlari "data: {...}\n\n" formatinda gelir; satir satir isle.
         for line in tam_satirlar(&mut buf) {
             if let Some(json_str) = line.strip_prefix("data: ") {
-                if json_str.trim() == "[DONE]" { continue; }
+                if json_str.trim() == "[DONE]" {
+                    continue;
+                }
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(json_str) {
-                    if let Some(delta) = v.get("choices")
+                    if let Some(delta) = v
+                        .get("choices")
                         .and_then(|c| c.get(0))
                         .and_then(|c| c.get("delta"))
                         .and_then(|d| d.get("content"))
@@ -63,7 +67,9 @@ pub async fn beyin_stream(
                         if !delta.is_empty() {
                             tam_metin.push_str(delta);
                             // Token'i tarayiciya akit
-                            let _ = tx.send(Ok(Event::default().event("token").data(delta))).await;
+                            let _ = tx
+                                .send(Ok(Event::default().event("token").data(delta)))
+                                .await;
                         }
                     }
                 }
@@ -95,7 +101,10 @@ mod tests {
         let kes = tam.iter().position(|&b| b == 0xC5).unwrap() + 1;
         let mut buf = Vec::new();
         buf.extend_from_slice(&tam[..kes]);
-        assert!(tam_satirlar(&mut buf).is_empty(), "yarım satır beklemede kalmalı");
+        assert!(
+            tam_satirlar(&mut buf).is_empty(),
+            "yarım satır beklemede kalmalı"
+        );
         buf.extend_from_slice(&tam[kes..]);
         let satirlar = tam_satirlar(&mut buf);
         assert_eq!(satirlar, vec!["data: {\"t\":\"şğıü\"}".to_string()]);

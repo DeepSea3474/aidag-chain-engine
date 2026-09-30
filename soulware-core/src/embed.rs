@@ -36,12 +36,20 @@ impl Embedder {
         };
         let model = BertModel::load(vb, &config)
             .map_err(|e| anyhow::anyhow!("embed model yüklenemedi: {e}"))?;
-        Ok(Self { model, tokenizer, device, boyut })
+        Ok(Self {
+            model,
+            tokenizer,
+            device,
+            boyut,
+        })
     }
 
     /// Metni tek bir normalize edilmiş vektöre gömer (ortalama-havuzlama).
     pub fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>> {
-        let enc = self.tokenizer.encode(text, true).map_err(|e| anyhow::anyhow!("encode: {e}"))?;
+        let enc = self
+            .tokenizer
+            .encode(text, true)
+            .map_err(|e| anyhow::anyhow!("encode: {e}"))?;
         let ids: Vec<u32> = enc.get_ids().to_vec();
         let mask: Vec<u32> = enc.get_attention_mask().to_vec();
         let seq = ids.len();
@@ -50,16 +58,18 @@ impl Embedder {
         let attn = Tensor::from_vec(mask, (1, seq), &self.device)?;
 
         // BERT ileri: [1, seq, hidden]
-        let out = self.model.forward(&input_ids, &token_type_ids, Some(&attn))?;
+        let out = self
+            .model
+            .forward(&input_ids, &token_type_ids, Some(&attn))?;
         // Ortalama-havuzlama (attention mask ağırlıklı).
         let mask_f = attn.to_dtype(DType::F32)?.unsqueeze(2)?; // [1, seq, 1]
-        let masked = out.broadcast_mul(&mask_f)?;              // [1, seq, hidden]
-        let summed = masked.sum(1)?;                            // [1, hidden]
-        let counts = mask_f.sum(1)?;                            // [1, 1]
-        let mean = summed.broadcast_div(&counts)?;              // [1, hidden]
-        // L2 normalize
-        let norm = mean.sqr()?.sum_keepdim(1)?.sqrt()?;        // [1, 1]
-        let normed = mean.broadcast_div(&norm)?;                // [1, hidden]
+        let masked = out.broadcast_mul(&mask_f)?; // [1, seq, hidden]
+        let summed = masked.sum(1)?; // [1, hidden]
+        let counts = mask_f.sum(1)?; // [1, 1]
+        let mean = summed.broadcast_div(&counts)?; // [1, hidden]
+                                                   // L2 normalize
+        let norm = mean.sqr()?.sum_keepdim(1)?.sqrt()?; // [1, 1]
+        let normed = mean.broadcast_div(&norm)?; // [1, hidden]
         let v = normed.squeeze(0)?.to_vec1::<f32>()?;
         Ok(v)
     }

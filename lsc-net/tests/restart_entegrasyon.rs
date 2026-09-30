@@ -13,7 +13,10 @@ const RPC: &str = "127.0.0.1:8699";
 const NET_ID: u32 = 99999;
 
 fn simdi() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
 }
 
 fn log_yolu() -> String {
@@ -94,7 +97,10 @@ fn surec_restart_diskten_ayni_state() {
     // --- 1) ILK CALISTIRMA ---
     let ch1 = dugum_baslat(&veri);
     let d1 = genesis_bekle();
-    assert_eq!(d1["network_id"], NET_ID, "IZOLASYON: test agi disinda acildi!");
+    assert_eq!(
+        d1["network_id"], NET_ID,
+        "IZOLASYON: test agi disinda acildi!"
+    );
     let genesis_once = d1["genesis"].as_str().unwrap().to_string();
     assert_ne!(genesis_once, "yok", "genesis uretilmedi");
     assert_eq!(d1["vertex_count"], 1, "baslangicta sadece genesis olmali");
@@ -117,19 +123,32 @@ fn surec_restart_diskten_ayni_state() {
     let hexstr = hex::encode(lsc_engine::dag::wire::encode(&v));
 
     let out = Command::new("curl")
-        .args(["-s", "--max-time", "5", "-X", "POST",
-               &format!("http://{RPC}/submit"), "--data", &hexstr])
+        .args([
+            "-s",
+            "--max-time",
+            "5",
+            "-X",
+            "POST",
+            &format!("http://{RPC}/submit"),
+            "--data",
+            &hexstr,
+        ])
         .output()
         .expect("submit");
     let cevap = String::from_utf8_lossy(&out.stdout).to_string();
 
     let mut d2 = durum_bekle();
     for _ in 0..20 {
-        if d2["vertex_count"] == 2 { break; }
+        if d2["vertex_count"] == 2 {
+            break;
+        }
         std::thread::sleep(Duration::from_millis(500));
         d2 = durum_bekle();
     }
-    assert_eq!(d2["vertex_count"], 2, "vertex eklenmedi (submit cevabi: {cevap})");
+    assert_eq!(
+        d2["vertex_count"], 2,
+        "vertex eklenmedi (submit cevabi: {cevap})"
+    );
 
     // --- 3) SURECI OLDUR ---
     oldur(ch1);
@@ -139,7 +158,11 @@ fn surec_restart_diskten_ayni_state() {
     let d3 = genesis_bekle();
 
     // --- 5) KANIT: state diskten birebir kuruldu ---
-    assert_eq!(d3["genesis"].as_str().unwrap(), genesis_once, "RESTART: genesis degisti!");
+    assert_eq!(
+        d3["genesis"].as_str().unwrap(),
+        genesis_once,
+        "RESTART: genesis degisti!"
+    );
     assert_eq!(d3["vertex_count"], 2, "RESTART: vertex sayisi korunmadi");
     assert_eq!(d3["orphan_count"], 0, "RESTART: orphan olustu");
     assert_eq!(d3["network_id"], NET_ID, "RESTART: ag kimligi degisti");

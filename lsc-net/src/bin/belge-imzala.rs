@@ -27,8 +27,10 @@ use serde_json::Value;
 const TALEP_TUR: &str = "aidag-belge-kayit-talebi";
 
 fn hex32(s: &str, alan: &str) -> Result<[u8; 32], String> {
-    let b = hex::decode(s.trim().trim_start_matches("0x")).map_err(|_| format!("{alan}: gecersiz hex"))?;
-    b.try_into().map_err(|_| format!("{alan}: 32 bayt (64 hex) olmali"))
+    let b = hex::decode(s.trim().trim_start_matches("0x"))
+        .map_err(|_| format!("{alan}: gecersiz hex"))?;
+    b.try_into()
+        .map_err(|_| format!("{alan}: 32 bayt (64 hex) olmali"))
 }
 
 /// Talepten imzali vertex kur. `ts`: None -> talepteki ts.
@@ -42,16 +44,33 @@ fn talepten_vertex(talep: &Value, sk: &SigningKey, ts: Option<u64>) -> Result<Ve
     if talep["durum"] == "zaten-kayitli" || talep["zincir"]["kayitli"] == true {
         return Err("belge zaten zincirde kayitli; imzalanmadi".into());
     }
-    let net_id = talep["network_id"].as_u64().and_then(|n| u32::try_from(n).ok()).ok_or("network_id eksik")?;
-    let hash = hex32(talep["belge_hash"].as_str().ok_or("belge_hash eksik")?, "belge_hash")?;
-    let parents = talep["parents"].as_array().ok_or("parents eksik")?
-        .iter().map(|p| p.as_str().ok_or("parent hex degil".to_string()).and_then(|s| hex32(s, "parent")))
+    let net_id = talep["network_id"]
+        .as_u64()
+        .and_then(|n| u32::try_from(n).ok())
+        .ok_or("network_id eksik")?;
+    let hash = hex32(
+        talep["belge_hash"].as_str().ok_or("belge_hash eksik")?,
+        "belge_hash",
+    )?;
+    let parents = talep["parents"]
+        .as_array()
+        .ok_or("parents eksik")?
+        .iter()
+        .map(|p| {
+            p.as_str()
+                .ok_or("parent hex degil".to_string())
+                .and_then(|s| hex32(s, "parent"))
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let talep_ts = talep["ts"].as_u64().ok_or("ts eksik")?;
-    let kt = KayitTalebi::yeni(net_id, hash, parents, ts.unwrap_or(talep_ts)).map_err(|e| e.to_string())?;
+    let kt = KayitTalebi::yeni(net_id, hash, parents, ts.unwrap_or(talep_ts))
+        .map_err(|e| e.to_string())?;
     // Talep yalniz Record(belge_hash) imzalatabilir: payload_hex bununla BIREBIR ayni olmali.
     if talep["payload_hex"].as_str() != Some(hex::encode(kt.payload()).as_str()) {
-        return Err("payload_hex belge_hash ile uyusmuyor (talep degistirilmis olabilir); imzalanmadi".into());
+        return Err(
+            "payload_hex belge_hash ile uyusmuyor (talep degistirilmis olabilir); imzalanmadi"
+                .into(),
+        );
     }
     // Talep belirli bir personel icin hazirlandiysa, anahtar o personelin olmali.
     let pk = sk.verifying_key().to_bytes();
@@ -76,22 +95,35 @@ fn anahtar_oku(yol: &str) -> Result<SigningKey, String> {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let talep_ts = args.iter().any(|a| a == "--talep-ts");
-    let konum: Vec<&String> = args.iter().skip(1).filter(|a| !a.starts_with("--")).collect();
+    let konum: Vec<&String> = args
+        .iter()
+        .skip(1)
+        .filter(|a| !a.starts_with("--"))
+        .collect();
     let calis = || -> Result<(), String> {
         if konum.len() != 2 {
-            return Err("Kullanim: belge-imzala <anahtar_dosyasi> <talep.json> [--talep-ts]".into());
+            return Err(
+                "Kullanim: belge-imzala <anahtar_dosyasi> <talep.json> [--talep-ts]".into(),
+            );
         }
         let sk = anahtar_oku(konum[0])?;
-        let talep: Value = serde_json::from_slice(&std::fs::read(konum[1]).map_err(|_| "talep dosyasi okunamadi")?)
-            .map_err(|e| format!("talep JSON degil: {e}"))?;
-        let simdi = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e| e.to_string())?.as_secs();
+        let talep: Value = serde_json::from_slice(
+            &std::fs::read(konum[1]).map_err(|_| "talep dosyasi okunamadi")?,
+        )
+        .map_err(|e| format!("talep JSON degil: {e}"))?;
+        let simdi = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| e.to_string())?
+            .as_secs();
         let v = talepten_vertex(&talep, &sk, (!talep_ts).then_some(simdi))?;
         println!("{}", hex::encode(wire::encode(&v)));
         eprintln!(
             "OK  belge_hash={}  imzalayan=0x{}  net={}  ts={}  vertex={}",
             talep["belge_hash"].as_str().unwrap_or(""),
             hex::encode(lsc_engine::public_key_to_adres(v.public_key())),
-            v.network_id(), v.timestamp(), hex::encode(v.id())
+            v.network_id(),
+            v.timestamp(),
+            hex::encode(v.id())
         );
         eprintln!("UYARI: kurum kaydi zincirde beyana dayanir; bu arac cevrimdisidir ve kurum kaydini kontrol etmez.");
         eprintln!("-> curl -X POST <RPC>/submit -H 'Content-Type: application/json' -d '{{\"hex\":\"<yukaridaki>\"}}'");
@@ -109,7 +141,9 @@ mod tests {
     use serde_json::json;
 
     const H: &str = "0dcce43d9a705bcd6f3b3a8a1b2c3d4e5f60718293a4b5c6d7e8f90112233445";
-    fn sk(b: u8) -> SigningKey { SigningKey::from_bytes(&[b; 32]) }
+    fn sk(b: u8) -> SigningKey {
+        SigningKey::from_bytes(&[b; 32])
+    }
     fn talep() -> Value {
         json!({ "tur": TALEP_TUR, "surum": 1, "network_id": 3474, "belge_hash": H,
                 "payload_hex": format!("01{H}"), "parents": [hex::encode([2u8; 32])], "ts": 1000,
@@ -132,7 +166,9 @@ mod tests {
         let mut t = talep();
         // talep baska bir islem imzalatmaya calisiyor (ör. tip=4 transfer)
         t["payload_hex"] = json!(format!("04{H}"));
-        assert!(talepten_vertex(&t, &sk(1), None).unwrap_err().contains("uyusmuyor"));
+        assert!(talepten_vertex(&t, &sk(1), None)
+            .unwrap_err()
+            .contains("uyusmuyor"));
     }
 
     #[test]
@@ -145,13 +181,17 @@ mod tests {
 
     #[test]
     fn kayitli_veya_bozuk_talep_reddedilir() {
-        let mut t = talep(); t["durum"] = json!("zaten-kayitli");
+        let mut t = talep();
+        t["durum"] = json!("zaten-kayitli");
         assert!(talepten_vertex(&t, &sk(1), None).is_err());
-        let mut t = talep(); t["tur"] = json!("baska");
+        let mut t = talep();
+        t["tur"] = json!("baska");
         assert!(talepten_vertex(&t, &sk(1), None).is_err());
-        let mut t = talep(); t["belge_hash"] = json!(&H[..60]);
+        let mut t = talep();
+        t["belge_hash"] = json!(&H[..60]);
         assert!(talepten_vertex(&t, &sk(1), None).is_err());
-        let mut t = talep(); t["network_id"] = json!(u64::MAX);
+        let mut t = talep();
+        t["network_id"] = json!(u64::MAX);
         assert!(talepten_vertex(&t, &sk(1), None).is_err());
     }
 }

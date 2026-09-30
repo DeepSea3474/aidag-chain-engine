@@ -1,0 +1,52 @@
+# cargo-deny: güvenlik açığı (advisories) + lisans + kaynak denetimi. CI'da `cargo deny check`.
+[advisories]
+version = 2
+yanked = "deny"
+# GEREKÇELİ İSTİSNALAR — her biri: RUSTSEC-ID + gerekçe + gözden geçirme tarihi (90 gün: 2026-12-29).
+# Süre dolunca deploy/guvenlik-istisna-suresi.sh CI'da uyarır; haftalık audit (audit-haftalik.yml) istisnasız koşar.
+ignore = [
+  # hickory-proto 0.25.2 (libp2p-mdns) DNS-mesaj DoS. mDNS mainnet'te KAPALI (Toggle); yalnız yerel devnet.
+  # Sömürü yerel ağda kötü niyetli mDNS yanıtı ister; mainnet saldırı yüzeyi yok. libp2p major güncellemesi yol haritasında.
+  { id = "RUSTSEC-2026-0118", reason = "mDNS mainnet'te kapalı; yalnız yerel devnet; gözden geçirme 2026-12-29" },
+  { id = "RUSTSEC-2026-0119", reason = "mDNS mainnet'te kapalı; yalnız yerel devnet; gözden geçirme 2026-12-29" },
+  # rand 0.8.5 unsound: yalnız thread_rng()+özel logger senaryosunda. Biz OsRng (kripto) kullanıyoruz → UYGULANMAZ.
+  { id = "RUSTSEC-2026-0097", reason = "OsRng kullanıyoruz, thread_rng değil → uygulanmaz; gözden geçirme 2026-12-29" },
+  # tracing-subscriber 0.2.25 ANSI (ark-relations, zk derin transitive). Bizim log yolunda değil; direct 0.3.20'ye yükseltildi.
+  { id = "RUSTSEC-2025-0055", reason = "eski 0.2.25 ark-relations transitive; log yolumuzda değil; direct 0.3.20; gözden geçirme 2026-12-29" },
+  # Bakımsız (bilgilendirme, açık değil) — derin transitive (alloy/tokenizers); düzeltme yok.
+  { id = "RUSTSEC-2024-0388", reason = "derivative bakımsız (bilgi); alloy transitive; gözden geçirme 2026-12-29" },
+  { id = "RUSTSEC-2024-0436", reason = "paste bakımsız (bilgi); alloy transitive; gözden geçirme 2026-12-29" },
+  { id = "RUSTSEC-2025-0119", reason = "number_prefix bakımsız (bilgi); tokenizers transitive; gözden geçirme 2026-12-29" },
+]
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+# Kendi yayınlanmayan (publish=false) crate'lerimiz (BUSL-1.1) lisans kontrolünden muaf; yalnız bağımlılıklar denetlenir.
+private = { ignore = true }
+# İzin verilen lisanslar (izin verici / uyumlu). Listede olmayan lisans → CI RED.
+allow = [
+  "BUSL-1.1",            # kendi çekirdek crate'lerimiz (first-party)
+  "CDLA-Permissive-2.0", # webpki-roots (Mozilla kök CA verisi) — izin verici
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-DFS-2016",
+  "Unicode-3.0",
+  "Zlib",
+  "CC0-1.0",
+  "MPL-2.0",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "warn"
+
+[sources]
+# Yalnız resmî crates.io; bilinmeyen registry/git kaynağı → RED (tedarik zinciri).
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

@@ -24,7 +24,11 @@ pub fn kaydet(uc: &str, govde: &[u8]) {
             uc: uc.to_string(),
             yanit_ozeti: hex::encode(blake3::hash(govde).as_bytes()),
             boyut: govde.len(),
-            yanit: if govde.len() <= 512 { serde_json::from_slice(govde).ok() } else { None },
+            yanit: if govde.len() <= 512 {
+                serde_json::from_slice(govde).ok()
+            } else {
+                None
+            },
         })
     });
 }
@@ -45,22 +49,36 @@ fn niyet_cikar(sorgu: &str) -> Option<(&'static str, serde_json::Value, String)>
     let s = sade(sorgu);
     // Kelime düzeyinde (Türkçe ekler anahtar_var'da): "blokzincirde son gelişmeler" blok sorgusu DEĞİLDİR.
     let var = |k: &str| anahtar_var(&s, k);
-    let kac = s.split(' ').any(|t| t == "kac" || t.starts_with("kacinci") || ek_ile_eslesir(t, "kac"));
+    let kac = s
+        .split(' ')
+        .any(|t| t == "kac" || t.starts_with("kacinci") || ek_ile_eslesir(t, "kac"));
     // Bakiye: açık "bakiye" kelimesi YA DA adres + miktar sorusu + varlık ("0x... içinde kaç AIDAG var?").
     // İşlem/transfer sayısı soruları bakiye değildir.
     let miktar_sorusu = (kac || var("ne kadar") || var("miktar"))
-        && ["aidag", "lsc", "token", "coin", "para", "varlik"].iter().any(|k| var(k))
-        && !["islem", "transfer", "tx", "transaction"].iter().any(|k| var(k));
+        && ["aidag", "lsc", "token", "coin", "para", "varlik"]
+            .iter()
+            .any(|k| var(k))
+        && !["islem", "transfer", "tx", "transaction"]
+            .iter()
+            .any(|k| var(k));
     if var("bakiye") || var("balance") || miktar_sorusu {
         if let Some(adr) = adres_bul(sorgu) {
-            return Some(("eth_getBalance", json!([adr, "latest"]),
-                format!("{} adresinin bakiyesi", adr)));
+            return Some((
+                "eth_getBalance",
+                json!([adr, "latest"]),
+                format!("{} adresinin bakiyesi", adr),
+            ));
         }
     }
     if (var("blok") || var("block") || var("yukseklik"))
-        && (kac || var("son") || var("number") || var("numara")) {
-            return Some(("eth_blockNumber", json!([]), "guncel blok yuksekligi".to_string()));
-        }
+        && (kac || var("son") || var("number") || var("numara"))
+    {
+        return Some((
+            "eth_blockNumber",
+            json!([]),
+            "guncel blok yuksekligi".to_string(),
+        ));
+    }
     None
 }
 
@@ -88,7 +106,11 @@ pub async fn sorgula(http: &reqwest::Client, rpc_url: &str, sorgu: &str) -> Opti
     let resp = http.post(rpc_url).json(&istek).send().await.ok()?;
     let v = json_oku(resp, &format!("json-rpc:{method}")).await?;
     let sonuc = v.get("result")?.as_str()?;
-    let okunur = if sonuc.starts_with("0x") { hex_to_dec_str(sonuc) } else { sonuc.to_string() };
+    let okunur = if sonuc.starts_with("0x") {
+        hex_to_dec_str(sonuc)
+    } else {
+        sonuc.to_string()
+    };
     Some(format!("{}: {}", aciklama, okunur))
 }
 
@@ -102,14 +124,32 @@ pub fn ag_niyeti_mi(sorgu: &str) -> bool {
     // sade(): Türkçe harfler katlanır → "ağ sağlık" ile "ag saglik" aynı eşleşir.
     let s = sade(sorgu);
     let anahtarlar = [
-        "ag durumu", "ag saglik", "saglik durumu", "aidag durumu", "aidag saglik",
-        "network durum", "network status", "status", "durum raporu",
-        "zincir durum", "zincir calisiyor", "zincir ayakta", "ag calisiyor", "ag ayakta",
-        "aidag calisiyor", "mainnet calisiyor", "mainnet durum",
+        "ag durumu",
+        "ag saglik",
+        "saglik durumu",
+        "aidag durumu",
+        "aidag saglik",
+        "network durum",
+        "network status",
+        "status",
+        "durum raporu",
+        "zincir durum",
+        "zincir calisiyor",
+        "zincir ayakta",
+        "ag calisiyor",
+        "ag ayakta",
+        "aidag calisiyor",
+        "mainnet calisiyor",
+        "mainnet durum",
         // "ag nasil" kaldırıldı: Türkçe ek işlemeyle "ağlarda nasıl paylaşım" gibi soruları da yakalıyordu;
         // "ağ nasıl gidiyor" yönlendiricide konu+durum ("nasil gidiyor") ile tanınır.
-        "kac dugum", "kac node", "dugum sayisi", "tps",
-        "kac vertex", "tip sayisi", "orphan",
+        "kac dugum",
+        "kac node",
+        "dugum sayisi",
+        "tps",
+        "kac vertex",
+        "tip sayisi",
+        "orphan",
     ];
     anahtarlar.iter().any(|a| anahtar_var(&s, a))
 }
@@ -154,10 +194,26 @@ pub async fn ag_durumu_getir(http: &reqwest::Client, rpc_url: &str) -> Option<St
 fn belge_niyeti_mi(sorgu: &str) -> bool {
     // Nesne + doğrulama fiili birlikte olmalı ("doğrulanmış bilgi" belge sorusu değildir).
     let s = sade(sorgu);
-    let nesne = ["belge", "hash", "document", "dosya", "evrak", "sertifika", "diploma"];
+    let nesne = [
+        "belge",
+        "hash",
+        "document",
+        "dosya",
+        "evrak",
+        "sertifika",
+        "diploma",
+    ];
     let fiil = [
-        "dogrula", "gecerli", "sahte", "degistirilmis", "orijinal", "kayitli", "zincirde var",
-        "kontrol", "sorgula", "verify",
+        "dogrula",
+        "gecerli",
+        "sahte",
+        "degistirilmis",
+        "orijinal",
+        "kayitli",
+        "zincirde var",
+        "kontrol",
+        "sorgula",
+        "verify",
     ];
     nesne.iter().any(|a| anahtar_var(&s, a)) && fiil.iter().any(|a| anahtar_var(&s, a))
 }
@@ -166,9 +222,16 @@ fn belge_niyeti_mi(sorgu: &str) -> bool {
 /// resmi kaynak belgesine gider (KUBRA süreci anlatır).
 fn aciklama_sorusu_mu(sorgu: &str) -> bool {
     let s = sade(sorgu);
-    ["nasil calisir", "nasil isler", "nedir", "ne ise yarar", "ne demek", "mantigi"]
-        .iter()
-        .any(|a| anahtar_var(&s, a))
+    [
+        "nasil calisir",
+        "nasil isler",
+        "nedir",
+        "ne ise yarar",
+        "ne demek",
+        "mantigi",
+    ]
+    .iter()
+    .any(|a| anahtar_var(&s, a))
 }
 
 /// Kullanıcı belge KAYDETMEK/oluşturmak istiyor (doğrulamak değil).
@@ -176,8 +239,19 @@ pub fn belge_kayit_niyeti_mi(sorgu: &str) -> bool {
     let s = sade(sorgu);
     let nesne = ["belge", "dosya", "sertifika", "diploma", "evrak", "hash"];
     let fiil = [
-        "olustur", "kaydet", "kaydede", "kayit et", "kayit yap", "kaydini yap", "kaydolu",
-        "zincire yaz", "zincire ekle", "zincire isle", "damgala", "tescil", "belgelendir",
+        "olustur",
+        "kaydet",
+        "kaydede",
+        "kayit et",
+        "kayit yap",
+        "kaydini yap",
+        "kaydolu",
+        "zincire yaz",
+        "zincire ekle",
+        "zincire isle",
+        "damgala",
+        "tescil",
+        "belgelendir",
     ];
     nesne.iter().any(|a| anahtar_var(&s, a)) && fiil.iter().any(|a| anahtar_var(&s, a))
 }
@@ -209,7 +283,10 @@ fn hex_parcalari(s: &str) -> Vec<(String, bool)> {
 
 /// Sorgudan tam 64-hex belge hash'i çıkar (0x opsiyonel, metnin herhangi bir yerinde).
 pub fn belge_hash_bul(s: &str) -> Option<String> {
-    hex_parcalari(s).into_iter().find(|(h, _)| h.len() == 64).map(|(h, _)| h)
+    hex_parcalari(s)
+        .into_iter()
+        .find(|(h, _)| h.len() == 64)
+        .map(|(h, _)| h)
 }
 
 /// Kısaltılmış hash var mı? ("0dcce43d9a70..." veya "0dcce43d...0c544f")
@@ -233,7 +310,11 @@ fn utc_tarih(unix: u64) -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = yoe + era * 400 + if m <= 2 { 1 } else { 0 };
-    format!("{y:04}-{m:02}-{d:02} {:02}:{:02}", sn / 3600, (sn % 3600) / 60)
+    format!(
+        "{y:04}-{m:02}-{d:02} {:02}:{:02}",
+        sn / 3600,
+        (sn % 3600) / 60
+    )
 }
 
 const BELGE_KAYIT_SURECI: &str = "Belge kaydını kurum personeli yapar; ben (KUBRA) kayıt talebini hazırlarım ama İMZALAMAM ve zincire göndermem:\n\
@@ -277,15 +358,21 @@ pub async fn belge_dogrula(http: &reqwest::Client, rpc_url: &str, sorgu: &str) -
     };
 
     // /belge/:hash yaniti: kayitli + (varsa) kaydeden/zaman.
-    let kayitli = v.get("kayitli").and_then(|x| x.as_bool())
+    let kayitli = v
+        .get("kayitli")
+        .and_then(|x| x.as_bool())
         .or_else(|| v.get("var").and_then(|x| x.as_bool()))
         .unwrap_or(false);
 
     if kayitli {
-        let kaydeden = v.get("kaydeden").and_then(|x| x.as_str())
+        let kaydeden = v
+            .get("kaydeden")
+            .and_then(|x| x.as_str())
             .map(|a| format!(" Kaydeden adres: 0x{}.", a.trim_start_matches("0x")))
             .unwrap_or_default();
-        let zaman = v.get("zaman").and_then(|x| x.as_u64())
+        let zaman = v
+            .get("zaman")
+            .and_then(|x| x.as_u64())
             .map(|z| format!(" Kayıt zamanı: {} UTC.", utc_tarih(z)))
             .unwrap_or_default();
         Some(format!(
@@ -305,19 +392,40 @@ mod niyet_cikar_testleri {
     #[test]
     fn bakiye_blok_ifade_cesitliligi() {
         let a = "0x0ffe438e047dfb08c0c79aac9a63ea32d49a272c";
-        for q in [format!("{a} bakiyesi nedir?"), format!("{a} adresinin bakiyesini göster"), format!("Balance of {a}"),
-                  format!("{a} cüzdanında ne kadar token var?"), format!("{a} adresinde kaç LSC bulunuyor?"),
-                  format!("{a} hesabındaki AIDAG miktarı nedir?")] {
+        for q in [
+            format!("{a} bakiyesi nedir?"),
+            format!("{a} adresinin bakiyesini göster"),
+            format!("Balance of {a}"),
+            format!("{a} cüzdanında ne kadar token var?"),
+            format!("{a} adresinde kaç LSC bulunuyor?"),
+            format!("{a} hesabındaki AIDAG miktarı nedir?"),
+        ] {
             assert_eq!(niyet_cikar(&q).map(|x| x.0), Some("eth_getBalance"), "{q}");
         }
-        for q in ["Blok yüksekliği kaç?", "Son blok numarası nedir?", "Kaçıncı bloktayız?", "Zincirin blok sayısı kaç?", "Block number?"] {
+        for q in [
+            "Blok yüksekliği kaç?",
+            "Son blok numarası nedir?",
+            "Kaçıncı bloktayız?",
+            "Zincirin blok sayısı kaç?",
+            "Block number?",
+        ] {
             assert_eq!(niyet_cikar(q).map(|x| x.0), Some("eth_blockNumber"), "{q}");
         }
-        for q in ["Blok nedir?", "Blok zinciri nasıl çalışır?", "Bakiye nasıl sorgulanır?", "Blokzincirde son gelişmeler neler?",
-                  "Kaç kişi çalışıyor?", "Son haberler neler?", "Kaç AIDAG satıldı?"] {
+        for q in [
+            "Blok nedir?",
+            "Blok zinciri nasıl çalışır?",
+            "Bakiye nasıl sorgulanır?",
+            "Blokzincirde son gelişmeler neler?",
+            "Kaç kişi çalışıyor?",
+            "Son haberler neler?",
+            "Kaç AIDAG satıldı?",
+        ] {
             assert_eq!(niyet_cikar(q).map(|x| x.0), None, "{q}");
         }
-        for q in [format!("{a} adresine kaç işlem yapıldı?"), format!("{a} adresi geçerli mi?")] {
+        for q in [
+            format!("{a} adresine kaç işlem yapıldı?"),
+            format!("{a} adresi geçerli mi?"),
+        ] {
             assert_eq!(niyet_cikar(&q).map(|x| x.0), None, "{q}");
         }
     }
@@ -331,8 +439,14 @@ mod tests {
     #[test]
     fn tek_basina_hash_bulunur() {
         assert_eq!(belge_hash_bul(H).as_deref(), Some(H));
-        assert_eq!(belge_hash_bul(&format!("şunu kontrol et: 0x{H}, lütfen")).as_deref(), Some(H));
-        assert_eq!(belge_hash_bul(&format!("({})", H.to_uppercase())).as_deref(), Some(H));
+        assert_eq!(
+            belge_hash_bul(&format!("şunu kontrol et: 0x{H}, lütfen")).as_deref(),
+            Some(H)
+        );
+        assert_eq!(
+            belge_hash_bul(&format!("({})", H.to_uppercase())).as_deref(),
+            Some(H)
+        );
     }
 
     #[test]
@@ -362,7 +476,13 @@ mod tests {
 
     #[test]
     fn ag_niyetleri() {
-        for q in ["Aidag sağlık durumu", "ağ durumu", "status", "zincir çalışıyor mu", "AIDAG durumu"] {
+        for q in [
+            "Aidag sağlık durumu",
+            "ağ durumu",
+            "status",
+            "zincir çalışıyor mu",
+            "AIDAG durumu",
+        ] {
             assert!(ag_niyeti_mi(q), "{q}");
         }
         assert!(!ag_niyeti_mi("https://aidag-chain.com nedir"));
@@ -374,34 +494,57 @@ mod tests {
 // eskir. Bu arac her soruda zincirden okur (arka planda kendiliginden guncel).
 // Kademe tablosu on-satis-izleyici.py + site (app/on-satis/page.tsx) ile AYNI olmali.
 const KADEMELER: [(u64, f64); 8] = [
-    (210_000, 0.20), (420_000, 0.25), (630_000, 0.30),
-    (840_000, 0.35), (1_050_000, 0.40), (1_260_000, 0.45), (1_470_000, 0.50), (1_680_000, 0.55),
+    (210_000, 0.20),
+    (420_000, 0.25),
+    (630_000, 0.30),
+    (840_000, 0.35),
+    (1_050_000, 0.40),
+    (1_260_000, 0.45),
+    (1_470_000, 0.50),
+    (1_680_000, 0.55),
 ];
 const TGE_BELIRSIZ: u64 = 4_102_444_800; // lsc_engine::mainnet::TGE_BELIRSIZ
 
 pub fn on_satis_niyeti_mi(sorgu: &str) -> bool {
     let s = sade(sorgu);
     let canli = [
-        "ne kadar satildi", "kac aidag satildi", "kac satildi", "satilan", "satis durumu",
-        "on satis durumu", "presale durumu", "hangi kademe", "aktif kademe", "su anki fiyat",
-        "guncel fiyat", "simdiki fiyat", "tge ne zaman", "tge tarihi", "tge belli mi",
-        "kalan aidag", "ne kadar kaldi",
+        "ne kadar satildi",
+        "kac aidag satildi",
+        "kac satildi",
+        "satilan",
+        "satis durumu",
+        "on satis durumu",
+        "presale durumu",
+        "hangi kademe",
+        "aktif kademe",
+        "su anki fiyat",
+        "guncel fiyat",
+        "simdiki fiyat",
+        "tge ne zaman",
+        "tge tarihi",
+        "tge belli mi",
+        "kalan aidag",
+        "ne kadar kaldi",
     ];
     canli.iter().any(|a| anahtar_var(&s, a))
 }
 
 /// Satilan (test haric) miktara gore aktif kademe: (faz, kademe_no 1..8, fiyat, kademede kalan).
 fn aktif_kademe(satilan: u64) -> Option<(u8, usize, f64, u64)> {
-    KADEMELER.iter().enumerate().find(|(_, (sinir, _))| satilan < *sinir).map(|(i, (sinir, fiyat))| {
-        (if i < 3 { 1 } else { 2 }, i + 1, *fiyat, sinir - satilan)
-    })
+    KADEMELER
+        .iter()
+        .enumerate()
+        .find(|(_, (sinir, _))| satilan < *sinir)
+        .map(|(i, (sinir, fiyat))| (if i < 3 { 1 } else { 2 }, i + 1, *fiyat, sinir - satilan))
 }
 
 fn binlik(n: u64) -> String {
     let s = n.to_string();
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 { out.push('.'); }
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
+            out.push('.');
+        }
         out.push(c);
     }
     out
@@ -412,14 +555,33 @@ pub async fn on_satis_getir(http: &reqwest::Client, rpc_url: &str) -> Option<Str
     let base = rpc_url.trim_end_matches('/');
     let oz: serde_json::Value = match http.get(format!("{base}/on-satis-ozet")).send().await {
         Ok(r) => json_oku(r, "/on-satis-ozet").await?,
-        Err(_) => return Some("Ön satış durumunu şu an zincirden okuyamadım; lütfen biraz sonra tekrar dene.".to_string()),
+        Err(_) => {
+            return Some(
+                "Ön satış durumunu şu an zincirden okuyamadım; lütfen biraz sonra tekrar dene."
+                    .to_string(),
+            )
+        }
     };
-    let satilan = oz.get("toplam_satilan_aidag").and_then(|x| x.as_str())
-        .and_then(|x| x.parse::<u128>().ok()).map(|w| (w / 1_000_000_000_000_000_000) as u64)?;
+    let satilan = oz
+        .get("toplam_satilan_aidag")
+        .and_then(|x| x.as_str())
+        .and_then(|x| x.parse::<u128>().ok())
+        .map(|w| (w / 1_000_000_000_000_000_000) as u64)?;
     let alim = oz.get("alim_sayisi").and_then(|x| x.as_u64()).unwrap_or(0);
-    let tge_r = http.get(format!("{base}/on-satis-tahsis/0000000000000000000000000000000000000000")).send().await.ok()?;
-    let tge = json_oku(tge_r, "/on-satis-tahsis/0000000000000000000000000000000000000000").await?
-        .get("tge").and_then(|x| x.as_u64())?;
+    let tge_r = http
+        .get(format!(
+            "{base}/on-satis-tahsis/0000000000000000000000000000000000000000"
+        ))
+        .send()
+        .await
+        .ok()?;
+    let tge = json_oku(
+        tge_r,
+        "/on-satis-tahsis/0000000000000000000000000000000000000000",
+    )
+    .await?
+    .get("tge")
+    .and_then(|x| x.as_u64())?;
     let kademe = match aktif_kademe(satilan) {
         Some((faz, no, fiyat, kalan)) => format!(
             "Aktif kademe: Faz {faz}{} · kademe {no}/8 · {fiyat:.2} $ / AIDAG · bu kademede kalan {} AIDAG.",
@@ -445,7 +607,11 @@ mod on_satis_testleri {
     #[test]
     fn kademe_gecisleri() {
         assert_eq!(aktif_kademe(29), Some((1, 1, 0.20, 209_971)));
-        assert_eq!(aktif_kademe(630_000), Some((2, 4, 0.35, 210_000)), "Faz 1 dolunca Faz 2 baslar");
+        assert_eq!(
+            aktif_kademe(630_000),
+            Some((2, 4, 0.35, 210_000)),
+            "Faz 1 dolunca Faz 2 baslar"
+        );
         assert_eq!(aktif_kademe(1_679_999).map(|k| k.1), Some(8));
         assert_eq!(aktif_kademe(1_680_000), None);
         assert_eq!(binlik(1_680_000), "1.680.000");
@@ -453,7 +619,9 @@ mod on_satis_testleri {
 
     #[test]
     fn niyet() {
-        assert!(on_satis_niyeti_mi("Ön satışta şu ana kadar ne kadar satıldı?"));
+        assert!(on_satis_niyeti_mi(
+            "Ön satışta şu ana kadar ne kadar satıldı?"
+        ));
         assert!(on_satis_niyeti_mi("TGE ne zaman"));
         assert!(!on_satis_niyeti_mi("Ön satış nasıl çalışır"));
     }

@@ -22,7 +22,11 @@ fn mainnet_kurum_dogrulama_mevcut_kayitlari_bozmaz() {
         .collect();
     assert_eq!(vs.len(), ham.len(), "her kayit decode edilmeli");
     let genesis = vs.iter().find(|v| v.parents().is_empty()).map(|v| *v.id());
-    assert_eq!(genesis, Some(lsc_engine::mainnet::genesis_id()), "pinli genesis");
+    assert_eq!(
+        genesis,
+        Some(lsc_engine::mainnet::genesis_id()),
+        "pinli genesis"
+    );
 
     let mut yuklu = std::collections::HashSet::new();
     loop {
@@ -57,13 +61,19 @@ fn mainnet_kurum_dogrulama_mevcut_kayitlari_bozmaz() {
         match v.payload().first() {
             Some(&lsc_engine::TX_TYPE_RECORD) => {
                 let r = lsc_engine::Record::decode(v.payload()).expect("record");
-                assert!(st.belge_dogrula(&r.data_hash).is_some(), "belge kayitli kalmali");
+                assert!(
+                    st.belge_dogrula(&r.data_hash).is_some(),
+                    "belge kayitli kalmali"
+                );
                 belge += 1;
             }
             Some(&lsc_engine::tx::TX_TYPE_KURUM) => {
                 let a = lsc_engine::public_key_to_adres(v.public_key());
                 assert!(st.kurum_sorgula(&a).is_some(), "kurum kayitli kalmali");
-                assert!(!st.kurum_dogrulanmis_mi(&a), "mainnet'te dogrulanmis kurum OLAMAZ");
+                assert!(
+                    !st.kurum_dogrulanmis_mi(&a),
+                    "mainnet'te dogrulanmis kurum OLAMAZ"
+                );
                 kurum += 1;
             }
             _ => {}

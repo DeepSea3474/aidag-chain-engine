@@ -38,12 +38,17 @@ fn main() {
         hata("5 arguman gerekli");
     }
     let net: u32 = a[2].parse().unwrap_or_else(|_| hata("net_id sayi olmali"));
-    let tge: u64 = a[3].parse().unwrap_or_else(|_| hata("tge_unix sayi olmali"));
+    let tge: u64 = a[3]
+        .parse()
+        .unwrap_or_else(|_| hata("tge_unix sayi olmali"));
     let ts: u64 = a[4].parse().unwrap_or_else(|_| hata("ts_unix sayi olmali"));
     let mut tips: Vec<[u8; 32]> = if a[5] == "-" || a[5].is_empty() {
         vec![]
     } else {
-        a[5].split(',').filter(|t| !t.is_empty()).map(hex32).collect()
+        a[5].split(',')
+            .filter(|t| !t.is_empty())
+            .map(hex32)
+            .collect()
     };
     tips.sort();
     tips.dedup();
@@ -62,6 +67,8 @@ fn main() {
     println!("{}", hex::encode(wire::encode(&v)));
     eprintln!(
         "OK  owner=0x{}  net={net}  yeni TGE={tge}. Hex'i /submit'e POST et.",
-        hex::encode(lsc_engine::public_key_to_adres(&sk.verifying_key().to_bytes()))
+        hex::encode(lsc_engine::public_key_to_adres(
+            &sk.verifying_key().to_bytes()
+        ))
     );
 }

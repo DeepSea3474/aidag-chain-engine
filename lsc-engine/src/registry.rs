@@ -84,12 +84,17 @@ impl TokenRegistry {
             .to_string();
         // KALKAN: yasak sembol — hic kimse kaydedemez (dis taklit korumasi)
         if YASAK_SEMBOLLER.iter().any(|s| *s == gelen_sembol) {
-            return KayitSonucu::TaklitReddedildi { taklit_edilen_adres: [0u8; 20] };
+            return KayitSonucu::TaklitReddedildi {
+                taklit_edilen_adres: [0u8; 20],
+            };
         }
         // KALKAN: rezerve sembol — sadece kurucu kanonik adresi kaydedebilir
         if REZERVE_SEMBOLLER.iter().any(|s| *s == gelen_sembol)
-            && gelen.kanonik_adres != KURUCU_KANONIK_ADRES {
-            return KayitSonucu::TaklitReddedildi { taklit_edilen_adres: [0u8; 20] };
+            && gelen.kanonik_adres != KURUCU_KANONIK_ADRES
+        {
+            return KayitSonucu::TaklitReddedildi {
+                taklit_edilen_adres: [0u8; 20],
+            };
         }
         for kayitli in &self.kayitlar {
             let ayni_sembol = kayitli.sembol == gelen.sembol;
@@ -540,7 +545,8 @@ impl KurumRegistry {
         if !dogrulanmis && !self.dogrulamalar.contains_key(&kurum) {
             return false; // hic dogrulanmamis kurumdan kaldirilacak bir sey yok
         }
-        self.dogrulamalar.insert(kurum, KurumDogrulama { dogrulanmis, zaman });
+        self.dogrulamalar
+            .insert(kurum, KurumDogrulama { dogrulanmis, zaman });
         true
     }
 
@@ -567,7 +573,8 @@ impl KurumRegistry {
         if matches!(self.yetkiler.get(&anahtar), Some(k) if k.iptal.is_none()) {
             return false;
         }
-        self.yetkiler.insert(anahtar, RolKaydi { etkin, iptal: None });
+        self.yetkiler
+            .insert(anahtar, RolKaydi { etkin, iptal: None });
         true
     }
 
@@ -789,7 +796,10 @@ mod tests {
     fn rezerve_aidag_sahte_adresle_reddedilir() {
         let mut reg = TokenRegistry::yeni();
         let sahte = TokenKaydi::new([0xBB; 20], sym("AIDAG"));
-        assert!(matches!(reg.kaydet(sahte), KayitSonucu::TaklitReddedildi { .. }));
+        assert!(matches!(
+            reg.kaydet(sahte),
+            KayitSonucu::TaklitReddedildi { .. }
+        ));
     }
 
     #[test]
@@ -803,7 +813,10 @@ mod tests {
     fn yasak_usdt_herkese_reddedilir() {
         let mut reg = TokenRegistry::yeni();
         let sahte = TokenKaydi::new(KURUCU_KANONIK_ADRES, sym("USDT"));
-        assert!(matches!(reg.kaydet(sahte), KayitSonucu::TaklitReddedildi { .. }));
+        assert!(matches!(
+            reg.kaydet(sahte),
+            KayitSonucu::TaklitReddedildi { .. }
+        ));
     }
 
     #[test]
@@ -1433,11 +1446,11 @@ impl EslestirmeRegistry {
 pub struct OnSatisKaydi {
     pub odeme_adresi: [u8; 20],
     pub alici: [u8; 20],
-    pub aidag: Tutar,        // TAHSIS edilen toplam AIDAG (owner'da bekler, TGE'de claim edilir)
-    pub lsc_hediye: Tutar,   // claim aninda verilecek LSC hediye (gas icin)
-    pub zaman: u64,          // tahsis (satis) zamani
-    pub claimlenen: Tutar,   // simdiye kadar claim edilmis AIDAG (baslangicta 0)
-    pub lsc_verildi: bool,   // LSC hediye bir kez verildi mi (ilk claim'de)
+    pub aidag: Tutar, // TAHSIS edilen toplam AIDAG (owner'da bekler, TGE'de claim edilir)
+    pub lsc_hediye: Tutar, // claim aninda verilecek LSC hediye (gas icin)
+    pub zaman: u64,   // tahsis (satis) zamani
+    pub claimlenen: Tutar, // simdiye kadar claim edilmis AIDAG (baslangicta 0)
+    pub lsc_verildi: bool, // LSC hediye bir kez verildi mi (ilk claim'de)
 }
 
 impl OnSatisKaydi {
@@ -1458,9 +1471,7 @@ impl OnSatisKaydi {
             return self.aidag; // tamami acildi
         }
         // dogrusal: vesting_kismi * gecen / sure
-        let acilan_vesting = vesting_kismi
-            .saturating_mul(gecen as u128)
-            / (sure as u128);
+        let acilan_vesting = vesting_kismi.saturating_mul(gecen as u128) / (sure as u128);
         tge_aninda + acilan_vesting
     }
 
@@ -1574,12 +1585,7 @@ impl OnSatisRegistry {
     /// CLAIM: bir tahsis kaydinin claimlenen degerini artir ve lsc_verildi isaretle.
     /// node.rs claim yolu, transferleri BASARIYLA yaptiktan SONRA bunu cagirir.
     /// Kayit yoksa false. Deterministik: tum dugumler ayni cagriyi yapar.
-    pub fn claim_isle(
-        &mut self,
-        odeme_ref: u64,
-        eklenen_claim: Tutar,
-        lsc_verildi: bool,
-    ) -> bool {
+    pub fn claim_isle(&mut self, odeme_ref: u64, eklenen_claim: Tutar, lsc_verildi: bool) -> bool {
         if let Some(k) = self.kayitlar.get_mut(&odeme_ref) {
             k.claimlenen = k.claimlenen.saturating_add(eklenen_claim);
             if lsc_verildi {
@@ -1602,8 +1608,8 @@ impl OnSatisRegistry {
 
 #[cfg(test)]
 mod on_satis_testleri {
-    use super::OnSatisRegistry;
     use super::OnSatisKaydi;
+    use super::OnSatisRegistry;
 
     #[test]
     fn hak_edilen_vesting_egrisi_dogru() {
@@ -1628,7 +1634,11 @@ mod on_satis_testleri {
         // TGE + 360 gun: %100 = 1000
         assert_eq!(k.hak_edilen(tge + 360 * gun, tge), 1000 * od, "12 ay: %100");
         // TGE + 500 gun (asiri): yine %100, tavan
-        assert_eq!(k.hak_edilen(tge + 500 * gun, tge), 1000 * od, "sonrasi da %100");
+        assert_eq!(
+            k.hak_edilen(tge + 500 * gun, tge),
+            1000 * od,
+            "sonrasi da %100"
+        );
     }
 
     #[test]
@@ -1650,15 +1660,22 @@ mod on_satis_testleri {
         // 200 claim edildi diyelim
         k.claimlenen = 200 * od;
         // Ayni anda tekrar: 0 (hak edilen hala 200, hepsi claimlendi)
-        assert_eq!(k.claim_edilebilir(tge, tge), 0, "ayni anda tekrar claim = 0");
+        assert_eq!(
+            k.claim_edilebilir(tge, tge),
+            0,
+            "ayni anda tekrar claim = 0"
+        );
         // 6 ay sonra: hak edilen 600, claimlenen 200 -> 400 cekebilir
-        assert_eq!(k.claim_edilebilir(tge + 180 * gun, tge), 400 * od, "6 ayda kalan 400");
+        assert_eq!(
+            k.claim_edilebilir(tge + 180 * gun, tge),
+            400 * od,
+            "6 ayda kalan 400"
+        );
         // hepsini claimle
         k.claimlenen = 1000 * od;
         assert!(k.tamamlandi(), "tamami claimlendi");
         assert_eq!(k.claim_edilebilir(tge + 360 * gun, tge), 0, "bitince 0");
     }
-
 
     #[test]
     fn cifte_dagitim_engellenir() {
@@ -1816,6 +1833,6 @@ pub const REZERVE_SEMBOLLER: [&str; 3] = ["AIDAG", "LSC", "KUBR"];
 pub const YASAK_SEMBOLLER: [&str; 8] = ["USDT", "USDC", "BTC", "ETH", "BNB", "USD", "WBTC", "DAI"];
 /// Kurucu kanonik adresi (mainnet.rs MAINNET_KURUCU_ADRES_HEX ile ayni).
 pub const KURUCU_KANONIK_ADRES: [u8; 20] = [
-    0x11,0xc1,0x90,0x6e,0x07,0x50,0x8e,0x0b,0x83,0xef,
-    0x4a,0xfa,0x04,0x28,0x79,0x28,0x1e,0x19,0x6b,0x9f,
+    0x11, 0xc1, 0x90, 0x6e, 0x07, 0x50, 0x8e, 0x0b, 0x83, 0xef, 0x4a, 0xfa, 0x04, 0x28, 0x79, 0x28,
+    0x1e, 0x19, 0x6b, 0x9f,
 ];

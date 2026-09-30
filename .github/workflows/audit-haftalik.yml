@@ -1,0 +1,23 @@
+name: audit-haftalik
+on:
+  schedule:
+    - cron: "17 4 * * 1"   # her Pazartesi 04:17 UTC
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  full-audit:
+    name: Tam audit (istisnasız) + istisna süresi
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo-audit kur
+        run: cargo install cargo-audit --locked
+      - name: İstisna süresi kontrolü
+        run: bash deploy/guvenlik-istisna-suresi.sh
+      - name: TAM audit — İSTİSNASIZ (güncel durumu raporla; bloklamaz)
+        run: |
+          rm -f .cargo/audit.toml   # ignore listesini devre dışı bırak → tüm advisory'ler görünür
+          cargo audit || true
+        continue-on-error: true

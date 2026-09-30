@@ -98,7 +98,11 @@ impl<CTX: ContextTr> PrecompileProvider<CTX> for AidagPrecompiles<'_> {
         <EthPrecompiles as PrecompileProvider<CTX>>::set_spec(&mut self.eth, spec)
     }
 
-    fn run(&mut self, context: &mut CTX, inputs: &CallInputs) -> Result<Option<InterpreterResult>, String> {
+    fn run(
+        &mut self,
+        context: &mut CTX,
+        inputs: &CallInputs,
+    ) -> Result<Option<InterpreterResult>, String> {
         if let Some(rwa) = self.rwa {
             let adres: [u8; 20] = inputs.bytecode_address.into_array();
             if rwa_adresi_mi(&adres) {
@@ -132,7 +136,11 @@ fn sonuc(inputs: &CallInputs, basari: bool, cikti: Vec<u8>) -> InterpreterResult
         };
     }
     InterpreterResult {
-        result: if basari { InstructionResult::Return } else { InstructionResult::Revert },
+        result: if basari {
+            InstructionResult::Return
+        } else {
+            InstructionResult::Revert
+        },
         output: Bytes::from(cikti),
         gas,
     }
@@ -181,7 +189,12 @@ fn arguman(girdi: &[u8], i: usize) -> Option<&[u8]> {
     girdi.get(4 + 32 * i..4 + 32 * (i + 1))
 }
 
-fn rwa_calistir(rwa: &RwaGorunum<'_>, adres: &[u8; 20], girdi: &[u8], inputs: &CallInputs) -> InterpreterResult {
+fn rwa_calistir(
+    rwa: &RwaGorunum<'_>,
+    adres: &[u8; 20],
+    girdi: &[u8],
+    inputs: &CallInputs,
+) -> InterpreterResult {
     // SALT OKUNUR: deger aktarimi reddedilir (frame, revert'te aktarimi geri alir).
     if matches!(inputs.value, CallValue::Transfer(v) if !v.is_zero()) {
         return sonuc(inputs, false, hata("RWA: deger kabul edilmez"));
@@ -212,7 +225,11 @@ fn rwa_calistir(rwa: &RwaGorunum<'_>, adres: &[u8; 20], girdi: &[u8], inputs: &C
         return sonuc(inputs, false, hata("RWA: akis yok"));
     };
     match sec {
-        SEC_DECIMALS => sonuc(inputs, true, kelime_u64(u64::from(akis.tanim.ondalik)).to_vec()),
+        SEC_DECIMALS => sonuc(
+            inputs,
+            true,
+            kelime_u64(u64::from(akis.tanim.ondalik)).to_vec(),
+        ),
         SEC_DESCRIPTION => sonuc(inputs, true, abi_string(&akis.tanim.aciklama)),
         SEC_VERSION => sonuc(inputs, true, kelime_u64(RWA_ORACLE_SURUM).to_vec()),
         SEC_LATEST_ROUND_DATA => match rwa.oracle.son_veri(akis_no, rwa.zincir_saati) {
@@ -248,7 +265,7 @@ fn rwa_calistir(rwa: &RwaGorunum<'_>, adres: &[u8; 20], girdi: &[u8], inputs: &C
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::avm::{avm_call_oku_rwa, avm_calistir_rwa, AidagDatabase};
+    use crate::avm::{avm_calistir_rwa, avm_call_oku_rwa, AidagDatabase};
     use crate::registry::{KurumKategori, KurumRegistry};
     use crate::rwa::{KycRegistry, OracleRegistry};
     use crate::tx::{OracleAkisTanim, OracleRapor, ROL_KYC_ONAYLAYICI};
@@ -280,18 +297,33 @@ mod tests {
             },
             T,
         );
-        let r = OracleRapor { akis_no: 1, tur_no: 1, deger: 250_012_345_678, olcum_zamani: T, veri_hash: [1; 32] };
+        let r = OracleRapor {
+            akis_no: 1,
+            tur_no: 1,
+            deger: 250_012_345_678,
+            olcum_zamani: T,
+            veri_hash: [1; 32],
+        };
         oracle.rapor_isle(KURUM, &r, T, |_| true);
         let mut kurumlar = KurumRegistry::yeni();
         kurumlar.kaydet(KURUM, "Banka".into(), KurumKategori::Ozel, 0);
         kurumlar.rol_ver(KURUM, ROL_KYC_ONAYLAYICI, 0, 0);
         let mut kyc = KycRegistry::yeni();
         kyc.isle(MUSTERI, KURUM, true, [2; 32], T);
-        Durum { oracle, kurumlar, kyc }
+        Durum {
+            oracle,
+            kurumlar,
+            kyc,
+        }
     }
 
     fn gorunum(d: &Durum, saat: u64) -> RwaGorunum<'_> {
-        RwaGorunum { oracle: &d.oracle, kurumlar: &d.kurumlar, kyc: &d.kyc, zincir_saati: saat }
+        RwaGorunum {
+            oracle: &d.oracle,
+            kurumlar: &d.kurumlar,
+            kyc: &d.kyc,
+            zincir_saati: saat,
+        }
     }
 
     fn cagri(sec: [u8; 4], arg: Option<[u8; 32]>) -> Vec<u8> {
@@ -309,7 +341,13 @@ mod tests {
     }
 
     fn oku(d: &Durum, saat: u64, hedef: [u8; 20], data: &[u8]) -> Result<Vec<u8>, &'static str> {
-        avm_call_oku_rwa(&AidagDatabase::yeni(), &[0; 20], &hedef, data, Some(gorunum(d, saat)))
+        avm_call_oku_rwa(
+            &AidagDatabase::yeni(),
+            &[0; 20],
+            &hedef,
+            data,
+            Some(gorunum(d, saat)),
+        )
     }
 
     #[test]
@@ -337,15 +375,27 @@ mod tests {
             PrecompileSpecId::PRAGUE,
             PrecompileSpecId::OSAKA,
         ];
-        let bizim: Vec<[u8; 20]> = [KYC_ADRESI, oracle_adresi(1), oracle_adresi(2), oracle_adresi(u32::MAX)].to_vec();
+        let bizim: Vec<[u8; 20]> = [
+            KYC_ADRESI,
+            oracle_adresi(1),
+            oracle_adresi(2),
+            oracle_adresi(u32::MAX),
+        ]
+        .to_vec();
         for sp in specler {
             let eth = Precompiles::new(sp);
             assert!(eth.addresses().count() > 0);
             for a in eth.addresses() {
                 let a: [u8; 20] = a.into_array();
-                assert!(!rwa_adresi_mi(&a), "{sp:?}: Ethereum adresi RWA sayildi: {a:?}");
+                assert!(
+                    !rwa_adresi_mi(&a),
+                    "{sp:?}: Ethereum adresi RWA sayildi: {a:?}"
+                );
                 // Ethereum precompile'lari dusuk aralikta (<= 0x100); bizimkiler 2^63 ustu.
-                assert!(a[..18] == [0u8; 18], "{sp:?}: beklenmeyen Ethereum precompile adresi");
+                assert!(
+                    a[..18] == [0u8; 18],
+                    "{sp:?}: beklenmeyen Ethereum precompile adresi"
+                );
             }
             for b in &bizim {
                 assert!(!eth.contains(&Address::from(*b)), "{sp:?}: cakisma");
@@ -359,7 +409,13 @@ mod tests {
     #[test]
     fn latest_round_data_chainlink_abi() {
         let d = durum();
-        let o = oku(&d, T + 60, oracle_adresi(1), &cagri(SEC_LATEST_ROUND_DATA, None)).unwrap();
+        let o = oku(
+            &d,
+            T + 60,
+            oracle_adresi(1),
+            &cagri(SEC_LATEST_ROUND_DATA, None),
+        )
+        .unwrap();
         assert_eq!(o.len(), 160);
         let w = |i: usize| &o[32 * i..32 * (i + 1)];
         assert_eq!(w(0), &kelime_u64(1)); // roundId
@@ -375,7 +431,13 @@ mod tests {
         assert_eq!(desc, abi_string("XAU / USD"));
         let mut tur = [0u8; 32];
         tur[31] = 1;
-        let g = oku(&d, T + 10 * 86_400, oracle_adresi(1), &cagri(SEC_GET_ROUND_DATA, Some(tur))).unwrap();
+        let g = oku(
+            &d,
+            T + 10 * 86_400,
+            oracle_adresi(1),
+            &cagri(SEC_GET_ROUND_DATA, Some(tur)),
+        )
+        .unwrap();
         assert_eq!(g, o, "gecmis tur bayatlik kontrolu olmadan okunur");
     }
 
@@ -392,35 +454,88 @@ mod tests {
     fn bayat_durmus_tanimsiz_ve_hatali_cagri_revert() {
         let d = durum();
         let latest = cagri(SEC_LATEST_ROUND_DATA, None);
-        assert!(oku(&d, T + 3_600, oracle_adresi(1), &latest).is_ok(), "sinir: bayat degil");
-        assert!(oku(&d, T + 3_601, oracle_adresi(1), &latest).is_err(), "ZINCIR saatine gore bayat");
-        assert!(oku(&d, T, oracle_adresi(2), &latest).is_err(), "tanimsiz akis");
-        assert!(oku(&d, T, oracle_adresi(1), &[0xde, 0xad]).is_err(), "secici yok");
-        assert!(oku(&d, T, oracle_adresi(1), &cagri([1, 2, 3, 4], None)).is_err(), "bilinmeyen fonksiyon");
-        assert!(oku(&d, T, oracle_adresi(1), &cagri(SEC_GET_ROUND_DATA, None)).is_err(), "arguman eksik");
+        assert!(
+            oku(&d, T + 3_600, oracle_adresi(1), &latest).is_ok(),
+            "sinir: bayat degil"
+        );
+        assert!(
+            oku(&d, T + 3_601, oracle_adresi(1), &latest).is_err(),
+            "ZINCIR saatine gore bayat"
+        );
+        assert!(
+            oku(&d, T, oracle_adresi(2), &latest).is_err(),
+            "tanimsiz akis"
+        );
+        assert!(
+            oku(&d, T, oracle_adresi(1), &[0xde, 0xad]).is_err(),
+            "secici yok"
+        );
+        assert!(
+            oku(&d, T, oracle_adresi(1), &cagri([1, 2, 3, 4], None)).is_err(),
+            "bilinmeyen fonksiyon"
+        );
+        assert!(
+            oku(&d, T, oracle_adresi(1), &cagri(SEC_GET_ROUND_DATA, None)).is_err(),
+            "arguman eksik"
+        );
         let mut buyuk = [0u8; 32];
         buyuk[0] = 1;
-        assert!(oku(&d, T, oracle_adresi(1), &cagri(SEC_GET_ROUND_DATA, Some(buyuk))).is_err());
+        assert!(oku(
+            &d,
+            T,
+            oracle_adresi(1),
+            &cagri(SEC_GET_ROUND_DATA, Some(buyuk))
+        )
+        .is_err());
         let mut tur9 = [0u8; 32];
         tur9[31] = 9;
-        assert!(oku(&d, T, oracle_adresi(1), &cagri(SEC_GET_ROUND_DATA, Some(tur9))).is_err());
+        assert!(oku(
+            &d,
+            T,
+            oracle_adresi(1),
+            &cagri(SEC_GET_ROUND_DATA, Some(tur9))
+        )
+        .is_err());
         // Devre kesici: %50 sicrama -> akis durur -> latestRoundData revert.
         let mut d2 = durum();
-        let r = OracleRapor { akis_no: 1, tur_no: 2, deger: 375_000_000_000, olcum_zamani: T + 1, veri_hash: [3; 32] };
+        let r = OracleRapor {
+            akis_no: 1,
+            tur_no: 2,
+            deger: 375_000_000_000,
+            olcum_zamani: T + 1,
+            veri_hash: [3; 32],
+        };
         d2.oracle.rapor_isle(KURUM, &r, T + 1, |_| true);
-        assert!(oku(&d2, T + 1, oracle_adresi(1), &latest).is_err(), "durmus akis okunmaz");
+        assert!(
+            oku(&d2, T + 1, oracle_adresi(1), &latest).is_err(),
+            "durmus akis okunmaz"
+        );
     }
 
     #[test]
     fn kyc_is_approved() {
         let d = durum();
-        let sor = |a| oku(&d, T, KYC_ADRESI, &cagri(SEC_IS_APPROVED, Some(adres_arg(a)))).unwrap();
+        let sor = |a| {
+            oku(
+                &d,
+                T,
+                KYC_ADRESI,
+                &cagri(SEC_IS_APPROVED, Some(adres_arg(a))),
+            )
+            .unwrap()
+        };
         assert_eq!(sor(MUSTERI), kelime_u64(1));
         assert_eq!(sor([0xC2; 20]), kelime_u64(0));
         // Kurum rolu iptal edilince onay gecersiz.
         let mut d2 = durum();
         d2.kurumlar.rol_al(KURUM, ROL_KYC_ONAYLAYICI, 0, T);
-        let o = oku(&d2, T, KYC_ADRESI, &cagri(SEC_IS_APPROVED, Some(adres_arg(MUSTERI)))).unwrap();
+        let o = oku(
+            &d2,
+            T,
+            KYC_ADRESI,
+            &cagri(SEC_IS_APPROVED, Some(adres_arg(MUSTERI))),
+        )
+        .unwrap();
         assert_eq!(o, kelime_u64(0));
         // Ust 12 bayti dolu (gecersiz ABI adres) ve eksik arguman -> revert.
         let mut kotu = adres_arg(MUSTERI);
@@ -435,9 +550,18 @@ mod tests {
         // None: RWA adresi siradan bos hesap -> cagri basarili, cikti BOS (veri yok).
         let db = AidagDatabase::yeni();
         let latest = cagri(SEC_LATEST_ROUND_DATA, None);
-        assert_eq!(avm_call_oku_rwa(&db, &[0; 20], &oracle_adresi(1), &latest, None), Ok(vec![]));
         assert_eq!(
-            avm_call_oku_rwa(&db, &[0; 20], &KYC_ADRESI, &cagri(SEC_IS_APPROVED, Some(adres_arg(MUSTERI))), None),
+            avm_call_oku_rwa(&db, &[0; 20], &oracle_adresi(1), &latest, None),
+            Ok(vec![])
+        );
+        assert_eq!(
+            avm_call_oku_rwa(
+                &db,
+                &[0; 20],
+                &KYC_ADRESI,
+                &cagri(SEC_IS_APPROVED, Some(adres_arg(MUSTERI))),
+                None
+            ),
             Ok(vec![])
         );
         // Ethereum precompile (0x02 SHA-256) her iki durumda ayni sonucu verir.
@@ -466,15 +590,41 @@ mod tests {
         r.extend_from_slice(&[0x60, hedef_ofs as u8, 0x57]); // jumpi(basari)
         r.extend_from_slice(&[0x3d, 0x60, 0x00, 0xfd]); // revert(0, rds)
         r.extend_from_slice(&[0x5b, 0x3d, 0x60, 0x00, 0xf3]); // jumpdest; return(0, rds)
-        let mut init = vec![0x60, r.len() as u8, 0x60, 0x0c, 0x60, 0x00, 0x39, 0x60, r.len() as u8, 0x60, 0x00, 0xf3];
+        let mut init = vec![
+            0x60,
+            r.len() as u8,
+            0x60,
+            0x0c,
+            0x60,
+            0x00,
+            0x39,
+            0x60,
+            r.len() as u8,
+            0x60,
+            0x00,
+            0xf3,
+        ];
         assert_eq!(init.len(), 0x0c);
         init.extend_from_slice(&r);
         init
     }
 
-    fn vekil_kur(db: &mut AidagDatabase, hedef: [u8; 20], gaz: Option<u16>, zaman: u64) -> [u8; 20] {
-        let s = avm_calistir_rwa(db, &[0x11; 20], &[0; 20], 0, &vekil_kontrat(hedef, gaz), zaman, None)
-            .expect("deploy");
+    fn vekil_kur(
+        db: &mut AidagDatabase,
+        hedef: [u8; 20],
+        gaz: Option<u16>,
+        zaman: u64,
+    ) -> [u8; 20] {
+        let s = avm_calistir_rwa(
+            db,
+            &[0x11; 20],
+            &[0; 20],
+            0,
+            &vekil_kontrat(hedef, gaz),
+            zaman,
+            None,
+        )
+        .expect("deploy");
         assert!(s.basarili);
         s.olusan_adres.expect("adres")
     }
@@ -484,13 +634,34 @@ mod tests {
         let d = durum();
         let mut db = AidagDatabase::yeni();
         let v = vekil_kur(&mut db, oracle_adresi(1), None, T);
-        let o = avm_call_oku_rwa(&db, &[0; 20], &v, &cagri(SEC_LATEST_ROUND_DATA, None), Some(gorunum(&d, T))).unwrap();
+        let o = avm_call_oku_rwa(
+            &db,
+            &[0; 20],
+            &v,
+            &cagri(SEC_LATEST_ROUND_DATA, None),
+            Some(gorunum(&d, T)),
+        )
+        .unwrap();
         assert_eq!(&o[32..64], &kelime_i128(250_012_345_678));
         let k = vekil_kur(&mut db, KYC_ADRESI, None, T);
-        let o = avm_call_oku_rwa(&db, &[0; 20], &k, &cagri(SEC_IS_APPROVED, Some(adres_arg(MUSTERI))), Some(gorunum(&d, T))).unwrap();
+        let o = avm_call_oku_rwa(
+            &db,
+            &[0; 20],
+            &k,
+            &cagri(SEC_IS_APPROVED, Some(adres_arg(MUSTERI))),
+            Some(gorunum(&d, T)),
+        )
+        .unwrap();
         assert_eq!(o, kelime_u64(1));
         // Bayat veri kontrattan da okunamaz (ZINCIR saati; vekil revert eder).
-        assert!(avm_call_oku_rwa(&db, &[0; 20], &v, &cagri(SEC_LATEST_ROUND_DATA, None), Some(gorunum(&d, T + 3_601))).is_err());
+        assert!(avm_call_oku_rwa(
+            &db,
+            &[0; 20],
+            &v,
+            &cagri(SEC_LATEST_ROUND_DATA, None),
+            Some(gorunum(&d, T + 3_601))
+        )
+        .is_err());
     }
 
     #[test]
@@ -498,11 +669,27 @@ mod tests {
         let d = durum();
         let mut db = AidagDatabase::yeni();
         // Tam RWA_PRECOMPILE_GAZ ile basarili, bir eksigiyle OOG.
-        let yeter = vekil_kur(&mut db, oracle_adresi(1), Some(RWA_PRECOMPILE_GAZ as u16), T);
-        let eksik = vekil_kur(&mut db, oracle_adresi(1), Some(RWA_PRECOMPILE_GAZ as u16 - 1), T);
+        let yeter = vekil_kur(
+            &mut db,
+            oracle_adresi(1),
+            Some(RWA_PRECOMPILE_GAZ as u16),
+            T,
+        );
+        let eksik = vekil_kur(
+            &mut db,
+            oracle_adresi(1),
+            Some(RWA_PRECOMPILE_GAZ as u16 - 1),
+            T,
+        );
         let data = cagri(SEC_DECIMALS, None);
-        assert_eq!(avm_call_oku_rwa(&db, &[0; 20], &yeter, &data, Some(gorunum(&d, T))), Ok(kelime_u64(8).to_vec()));
-        assert!(avm_call_oku_rwa(&db, &[0; 20], &eksik, &data, Some(gorunum(&d, T))).is_err(), "2599 gaz: OOG");
+        assert_eq!(
+            avm_call_oku_rwa(&db, &[0; 20], &yeter, &data, Some(gorunum(&d, T))),
+            Ok(kelime_u64(8).to_vec())
+        );
+        assert!(
+            avm_call_oku_rwa(&db, &[0; 20], &eksik, &data, Some(gorunum(&d, T))).is_err(),
+            "2599 gaz: OOG"
+        );
         // Revert eden cagri da ayni gazi oder: bilinmeyen fonksiyon 2600 ile revert (OOG degil)
         // -> vekil revert verisini (Error(string)) aynen tasir.
         let kyc_yeter = vekil_kur(&mut db, KYC_ADRESI, Some(RWA_PRECOMPILE_GAZ as u16), T);
@@ -511,10 +698,28 @@ mod tests {
         // bayt x 16) + RWA_PRECOMPILE_GAZ. Revert eden cagri (bilinmeyen secici) AYNI gazi oder.
         let mut db2 = AidagDatabase::yeni();
         let beklenen = 21_000 + 4 * 16 + RWA_PRECOMPILE_GAZ;
-        let a = avm_calistir_rwa(&mut db2, &[0x11; 20], &oracle_adresi(1), 0, &data, T, Some(gorunum(&d, T))).unwrap();
+        let a = avm_calistir_rwa(
+            &mut db2,
+            &[0x11; 20],
+            &oracle_adresi(1),
+            0,
+            &data,
+            T,
+            Some(gorunum(&d, T)),
+        )
+        .unwrap();
         assert!(a.basarili);
         assert_eq!(a.gas_used, beklenen);
-        let r = avm_calistir_rwa(&mut db2, &[0x12; 20], &oracle_adresi(1), 0, &[1, 2, 3, 4], T, Some(gorunum(&d, T))).unwrap();
+        let r = avm_calistir_rwa(
+            &mut db2,
+            &[0x12; 20],
+            &oracle_adresi(1),
+            0,
+            &[1, 2, 3, 4],
+            T,
+            Some(gorunum(&d, T)),
+        )
+        .unwrap();
         assert!(!r.basarili);
         assert_eq!(r.gas_used, beklenen, "revert de ayni sabit gazi oder");
     }
@@ -527,14 +732,30 @@ mod tests {
         let mut b = std::collections::HashMap::new();
         b.insert(gonderen, 1_000_000u128);
         db.aidag_yukle_hepsi(&b);
-        let s = avm_calistir_rwa(&mut db, &gonderen, &KYC_ADRESI, 5, &cagri(SEC_IS_APPROVED, Some(adres_arg(MUSTERI))), T, Some(gorunum(&d, T)))
-            .unwrap();
+        let s = avm_calistir_rwa(
+            &mut db,
+            &gonderen,
+            &KYC_ADRESI,
+            5,
+            &cagri(SEC_IS_APPROVED, Some(adres_arg(MUSTERI))),
+            T,
+            Some(gorunum(&d, T)),
+        )
+        .unwrap();
         assert!(!s.basarili, "deger aktarimi REVERT");
         assert_eq!(db.aidag_bakiye(&gonderen), 1_000_000);
         assert_eq!(db.aidag_bakiye(&KYC_ADRESI), 0);
         // Degersiz ayni cagri basarili.
-        let s = avm_calistir_rwa(&mut db, &gonderen, &KYC_ADRESI, 0, &cagri(SEC_IS_APPROVED, Some(adres_arg(MUSTERI))), T, Some(gorunum(&d, T)))
-            .unwrap();
+        let s = avm_calistir_rwa(
+            &mut db,
+            &gonderen,
+            &KYC_ADRESI,
+            0,
+            &cagri(SEC_IS_APPROVED, Some(adres_arg(MUSTERI))),
+            T,
+            Some(gorunum(&d, T)),
+        )
+        .unwrap();
         assert!(s.basarili);
     }
 }
