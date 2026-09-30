@@ -1622,6 +1622,8 @@ async fn ret_akit(
 
 // Beyin çağrısı (ask): Uzak GPU > yerel > Claude. Hata → hazır hata yanıtı.
 type BeyinSonucu = (String, String, String, Option<u64>, Option<u64>);
+// AskResp (hata varyantı) büyük; bu iç yardımcıda boxlamak imza/çağrı yerlerini gereksiz karmaşıklaştırır.
+#[allow(clippy::result_large_err)]
 async fn beyin_uret(
     st: &Arc<AppState>,
     req: &AskReq,
