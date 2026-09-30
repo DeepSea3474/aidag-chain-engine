@@ -11,6 +11,8 @@ confidence-threshold = 0.9
 private = { ignore = true }
 # İzin verilen lisanslar (izin verici / uyumlu). Listede olmayan lisans → CI RED.
 allow = [
+  "BUSL-1.1",            # kendi çekirdek crate'lerimiz (first-party)
+  "CDLA-Permissive-2.0", # webpki-roots (Mozilla kök CA verisi) — izin verici
   "MIT",
   "Apache-2.0",
   "Apache-2.0 WITH LLVM-exception",

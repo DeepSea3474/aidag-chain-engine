@@ -47,7 +47,8 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: 2) Lint (cargo clippy, uyari = hata)
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        # --all-features KULLANMA: 'cuda' feature'ı nvcc/GPU ister (CI runner'ında yok). Varsayılan (CPU) feature'larla lint.
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: 3) Testler (cargo test)
         # Birim + izole. Model/GPU gerektiren kor/eval CI'da KOSMAZ (deploy kilidi test-kaydet.sh'te olculur).
