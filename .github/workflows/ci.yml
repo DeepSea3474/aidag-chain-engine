@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Kodu checkout et
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Rust toolchain (stable + rustfmt + clippy)
         uses: dtolnay/rust-toolchain@stable
@@ -58,7 +58,7 @@ jobs:
     name: 4) cargo audit (RUSTSEC)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Güvenlik istisnası süresi kontrolü (dolduysa CI kırmızı)
@@ -72,7 +72,7 @@ jobs:
     name: 5) cargo deny (lisans + kaynak + advisories)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Lisans + kaynak + advisory denetimi
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
