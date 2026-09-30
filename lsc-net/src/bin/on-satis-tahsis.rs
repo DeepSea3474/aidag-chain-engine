@@ -62,17 +62,29 @@ fn main() {
         hata("9 arguman gerekli");
     }
     let key_path = &args[1];
-    let net_id: u32 = args[2].parse().unwrap_or_else(|_| hata("net_id sayi olmali"));
+    let net_id: u32 = args[2]
+        .parse()
+        .unwrap_or_else(|_| hata("net_id sayi olmali"));
     let alici = hex20(&args[3]);
     let odeme_adresi = hex20(&args[4]);
-    let aidag_tam: u128 = args[5].parse().unwrap_or_else(|_| hata("aidag sayi olmali"));
-    let lsc_tam: u128 = args[6].parse().unwrap_or_else(|_| hata("lsc_hediye sayi olmali"));
-    let odeme_ref: u64 = args[7].parse().unwrap_or_else(|_| hata("odeme_ref sayi olmali"));
+    let aidag_tam: u128 = args[5]
+        .parse()
+        .unwrap_or_else(|_| hata("aidag sayi olmali"));
+    let lsc_tam: u128 = args[6]
+        .parse()
+        .unwrap_or_else(|_| hata("lsc_hediye sayi olmali"));
+    let odeme_ref: u64 = args[7]
+        .parse()
+        .unwrap_or_else(|_| hata("odeme_ref sayi olmali"));
     let ts: u64 = args[8].parse().unwrap_or_else(|_| hata("ts sayi olmali"));
     let mut tips: Vec<[u8; 32]> = if args[9] == "-" || args[9].is_empty() {
         vec![]
     } else {
-        args[9].split(',').filter(|t| !t.is_empty()).map(hex32).collect()
+        args[9]
+            .split(',')
+            .filter(|t| !t.is_empty())
+            .map(hex32)
+            .collect()
     };
     // Kanoniklik: parent seti KESIN ARTAN olmali (vertex check_bounds). Sirala.
     tips.sort();

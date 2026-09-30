@@ -192,12 +192,12 @@ mod tests {
     // ===============================================================
     #[test]
     fn restart_diskten_ayni_state_kurulur() {
-        use lsc_engine::NodeState;
-        use lsc_engine::tx::TransferKaydi;
+        use ed25519_dalek::SigningKey;
         use lsc_engine::dag::vertex::Vertex;
         use lsc_engine::dag::wire;
         use lsc_engine::public_key_to_adres;
-        use ed25519_dalek::SigningKey;
+        use lsc_engine::tx::TransferKaydi;
+        use lsc_engine::NodeState;
 
         let net = 1u32;
         let now = 1_000_000u64;
@@ -212,7 +212,7 @@ mod tests {
 
         // genesis
         let gpayload: Vec<u8> = vec![]; // parent'siz genesis; ilk vertex
-        // genesis'i uret (parent yok). Vertex API'siyle imzali genesis:
+                                        // genesis'i uret (parent yok). Vertex API'siyle imzali genesis:
         let gen = Vertex::new_signed(net, vec![], gpayload, now, &sk).expect("genesis");
         let gid = *gen.id();
         let gbytes = wire::encode(&gen);
@@ -259,13 +259,23 @@ mod tests {
                 }
             }
             kalan = pending;
-            if node2.vertex_count() == before || kalan.is_empty() { break; }
+            if node2.vertex_count() == before || kalan.is_empty() {
+                break;
+            }
         }
 
         // --- 3) KANIT: restart-sonrasi state == restart-oncesi ---
-        assert_eq!(node2.vertex_count(), ref_vcount, "RESTART: vertex sayisi ayni");
+        assert_eq!(
+            node2.vertex_count(),
+            ref_vcount,
+            "RESTART: vertex sayisi ayni"
+        );
         assert_eq!(node2.orphan_count(), 0, "RESTART: orphan kalmadi");
-        assert_eq!(node2.bakiye(&gonderen), ref_gonderen, "RESTART: gonderen bakiye");
+        assert_eq!(
+            node2.bakiye(&gonderen),
+            ref_gonderen,
+            "RESTART: gonderen bakiye"
+        );
         assert_eq!(node2.bakiye(&alici), ref_alici, "RESTART: alici bakiye");
         assert_eq!(node2.beklenen_nonce(&gonderen), ref_nonce, "RESTART: nonce");
         assert_eq!(node2.toplam_bakiye_arzi(), ref_arz, "RESTART: toplam arz");

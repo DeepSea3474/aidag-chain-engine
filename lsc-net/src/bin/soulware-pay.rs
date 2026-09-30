@@ -62,15 +62,25 @@ fn main() {
         hata("7 arguman gerekli");
     }
     let key_path = &args[1];
-    let net_id: u32 = args[2].parse().unwrap_or_else(|_| hata("net_id sayi olmali"));
+    let net_id: u32 = args[2]
+        .parse()
+        .unwrap_or_else(|_| hata("net_id sayi olmali"));
     let alici = hex20(&args[3]);
-    let lsc_tam: u128 = args[4].parse().unwrap_or_else(|_| hata("lsc_tam sayi olmali"));
-    let nonce: u64 = args[5].parse().unwrap_or_else(|_| hata("nonce sayi olmali"));
+    let lsc_tam: u128 = args[4]
+        .parse()
+        .unwrap_or_else(|_| hata("lsc_tam sayi olmali"));
+    let nonce: u64 = args[5]
+        .parse()
+        .unwrap_or_else(|_| hata("nonce sayi olmali"));
     let ts: u64 = args[6].parse().unwrap_or_else(|_| hata("ts sayi olmali"));
     let mut tips: Vec<[u8; 32]> = if args[7] == "-" || args[7].is_empty() {
         vec![]
     } else {
-        args[7].split(',').filter(|t| !t.is_empty()).map(hex32).collect()
+        args[7]
+            .split(',')
+            .filter(|t| !t.is_empty())
+            .map(hex32)
+            .collect()
     };
     tips.sort();
     tips.dedup();

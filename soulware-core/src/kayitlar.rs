@@ -27,9 +27,16 @@ pub fn kararlari_ayristir(md: &str) -> Vec<KararMadde> {
                 out.push(m);
             }
             let rakam: String = b.chars().take_while(|c| c.is_ascii_digit()).collect();
-            let baslik = b[rakam.len()..].trim_start_matches(|c: char| c == ' ' || c == '·').trim().to_string();
+            let baslik = b[rakam.len()..]
+                .trim_start_matches(|c: char| c == ' ' || c == '·')
+                .trim()
+                .to_string();
             if let Ok(no) = rakam.parse() {
-                acik = Some(KararMadde { no, baslik, metin: String::new() });
+                acik = Some(KararMadde {
+                    no,
+                    baslik,
+                    metin: String::new(),
+                });
             }
             continue;
         }
@@ -56,7 +63,9 @@ pub fn kararlari_ayristir(md: &str) -> Vec<KararMadde> {
 }
 
 pub fn kararlari_yukle(yol: &str) -> Vec<KararMadde> {
-    std::fs::read_to_string(yol).map(|s| kararlari_ayristir(&s)).unwrap_or_default()
+    std::fs::read_to_string(yol)
+        .map(|s| kararlari_ayristir(&s))
+        .unwrap_or_default()
 }
 
 /// Karar aracı cevabı: istenen maddelerin metni (dosyadan birebir). Bulunamayan numara açıkça söylenir.
@@ -68,7 +77,9 @@ pub fn karar_cevabi(kararlar: &[KararMadde], nolar: &[u32]) -> (String, bool) {
             Some(k) => parcalar.push(format!("KARARLAR.md {}\n{}", k.kunye(), k.metin)),
             None => {
                 hepsi_bulundu = false;
-                parcalar.push(format!("KARARLAR.md'de K-{n:02} diye bir karar bulunamadı."))
+                parcalar.push(format!(
+                    "KARARLAR.md'de K-{n:02} diye bir karar bulunamadı."
+                ))
             }
         }
     }
@@ -91,11 +102,17 @@ pub fn kaynak_ozeti(md: &str) -> String {
             let hucre: Vec<&str> = t.trim_matches('|').split('|').map(|x| x.trim()).collect();
             if hucre.len() >= 4 {
                 toplam += 1;
-                *durumlar.entry(hucre[hucre.len() - 1].to_string()).or_default() += 1;
+                *durumlar
+                    .entry(hucre[hucre.len() - 1].to_string())
+                    .or_default() += 1;
             }
         }
     }
-    let durum_metni = durumlar.iter().map(|(d, n)| format!("{d}: {n}")).collect::<Vec<_>>().join(", ");
+    let durum_metni = durumlar
+        .iter()
+        .map(|(d, n)| format!("{d}: {n}"))
+        .collect::<Vec<_>>()
+        .join(", ");
     let eklenen = durumlar.get("Eklendi").copied().unwrap_or(0);
     format!(
         "Onaylı kaynak listem KAYNAKLAR.md'de. Başlıklar: {}. Listede {toplam} kaynak var ({durum_metni}). \
@@ -108,11 +125,19 @@ kurucu onayı ve değerlendirme setinden geçtikten sonra eklenir (K-08).",
 /// Gerekçe sorusu mu ("neden", "niye", "niçin", "gerekçe", "sebebi", "why")?
 pub fn neden_sorusu_mu(soru: &str) -> bool {
     let s = retrieval::sade(soru);
-    s.split(' ').any(|t| matches!(t, "neden" | "niye" | "nicin" | "why") || t.starts_with("gerekce") || t.starts_with("sebeb"))
+    s.split(' ').any(|t| {
+        matches!(t, "neden" | "niye" | "nicin" | "why")
+            || t.starts_with("gerekce")
+            || t.starts_with("sebeb")
+    })
 }
 
 /// "Neden" soruları için en ilgili karar maddeleri (kelime örtüşmesi; en iyinin yarısından zayıflar elenir).
-pub fn ilgili_kararlar<'a>(kararlar: &'a [KararMadde], soru: &str, k: usize) -> Vec<&'a KararMadde> {
+pub fn ilgili_kararlar<'a>(
+    kararlar: &'a [KararMadde],
+    soru: &str,
+    k: usize,
+) -> Vec<&'a KararMadde> {
     let q: std::collections::BTreeSet<String> = retrieval::tokenle(soru).into_iter().collect();
     if q.is_empty() {
         return vec![];
@@ -121,17 +146,37 @@ pub fn ilgili_kararlar<'a>(kararlar: &'a [KararMadde], soru: &str, k: usize) -> 
         .iter()
         .map(|m| {
             // Başlık kararın konusudur: başlık eşleşmesi 2 puan, yalnız gövde eşleşmesi 1 puan.
-            let kume = |metin: &str| -> std::collections::BTreeSet<String> { retrieval::tokenle(metin).into_iter().collect() };
+            let kume = |metin: &str| -> std::collections::BTreeSet<String> {
+                retrieval::tokenle(metin).into_iter().collect()
+            };
             let (bas, gov) = (kume(&m.baslik), kume(&m.metin));
-            let var = |t: &std::collections::BTreeSet<String>, w: &String| t.iter().any(|x| x == w || (w.len() >= 5 && x.starts_with(w.as_str())));
-            let puan: usize = q.iter().map(|w| if var(&bas, w) { 2 } else if var(&gov, w) { 1 } else { 0 }).sum();
+            let var = |t: &std::collections::BTreeSet<String>, w: &String| {
+                t.iter()
+                    .any(|x| x == w || (w.len() >= 5 && x.starts_with(w.as_str())))
+            };
+            let puan: usize = q
+                .iter()
+                .map(|w| {
+                    if var(&bas, w) {
+                        2
+                    } else if var(&gov, w) {
+                        1
+                    } else {
+                        0
+                    }
+                })
+                .sum();
             (puan, m)
         })
         .filter(|(s, _)| *s >= 3)
         .collect();
     skor.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.no.cmp(&b.1.no)));
     let en_iyi = skor.first().map(|x| x.0).unwrap_or(0);
-    skor.into_iter().filter(|(s, _)| s * 2 >= en_iyi).take(k).map(|(_, m)| m).collect()
+    skor.into_iter()
+        .filter(|(s, _)| s * 2 >= en_iyi)
+        .take(k)
+        .map(|(_, m)| m)
+        .collect()
 }
 
 #[cfg(test)]
@@ -149,7 +194,10 @@ mod testler {
         assert!(k[1].baslik.starts_with("Ön satışta yalnızca USDT"));
         assert!(k[1].metin.contains("Minimum 10 USDT"));
         assert!(!k[0].metin.contains("K-20"));
-        assert_eq!(k[0].kunye(), "K-05 · KUBRA'nın imza yetkisi yoktur (Eylül 2026)"); // KARARLAR.md ile aynı biçim
+        assert_eq!(
+            k[0].kunye(),
+            "K-05 · KUBRA'nın imza yetkisi yoktur (Eylül 2026)"
+        ); // KARARLAR.md ile aynı biçim
     }
 
     #[test]
@@ -176,11 +224,19 @@ mod testler {
         let k = kararlari_yukle(yol);
         assert!(k.len() >= 24, "KARARLAR.md okunamadı: {yol}");
         for (soru, no) in [
-            ("Ön satışta neden yalnızca USDT kabul ediliyor?", 20), ("Ön satışta minimum alım neden 10 USDT?", 20),
-            ("Genesis vesting başlangıcı neden 2100'e alındı?", 16), ("KUBRA neden imza atamıyor?", 5),
-            ("AIDAG'da neden DAO yok?", 1), ("KUBRA cevap kanıtları neden tuzlu hash ile kaydediliyor?", 7),
-            ("Ana ağda neden hâlâ ed25519 kullanılıyor?", 22), ("Kritik yetkiler neden çoklu imzaya bağlı?", 2),
-            ("KUBRA neden kendi kendine güncellenmiyor?", 8), ("KUBRA neden istismar kodu yazmıyor?", 23),
+            ("Ön satışta neden yalnızca USDT kabul ediliyor?", 20),
+            ("Ön satışta minimum alım neden 10 USDT?", 20),
+            ("Genesis vesting başlangıcı neden 2100'e alındı?", 16),
+            ("KUBRA neden imza atamıyor?", 5),
+            ("AIDAG'da neden DAO yok?", 1),
+            (
+                "KUBRA cevap kanıtları neden tuzlu hash ile kaydediliyor?",
+                7,
+            ),
+            ("Ana ağda neden hâlâ ed25519 kullanılıyor?", 22),
+            ("Kritik yetkiler neden çoklu imzaya bağlı?", 2),
+            ("KUBRA neden kendi kendine güncellenmiyor?", 8),
+            ("KUBRA neden istismar kodu yazmıyor?", 23),
         ] {
             assert!(neden_sorusu_mu(soru), "{soru}");
             let r: Vec<u32> = ilgili_kararlar(&k, soru, 2).iter().map(|m| m.no).collect();
@@ -194,6 +250,11 @@ mod testler {
         let md = "## 1 · Rust\n\n| Kaynak | Lisans (ilk tahmin) | Lisans (doğrulandı) | Öncelik | Durum |\n|---|---|---|---|---|\n\
 | A | MIT | MIT | Yüksek | Bekliyor |\n| B | x | y | — | Eklenmez, adıyla anılır |\n";
         let o = kaynak_ozeti(md);
-        assert!(o.contains("1 · Rust") && o.contains("2 kaynak") && o.contains("Bekliyor: 1") && o.contains("eklenmiş kaynak sayısı: 0"));
+        assert!(
+            o.contains("1 · Rust")
+                && o.contains("2 kaynak")
+                && o.contains("Bekliyor: 1")
+                && o.contains("eklenmiş kaynak sayısı: 0")
+        );
     }
 }

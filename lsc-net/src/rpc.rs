@@ -527,7 +527,9 @@ async fn on_satis_ozet(State(st): State<RpcState>) -> Json<Value> {
     };
     let haric = haric_refler();
     // Seffaflik: zincirdeki TUM tahsislerin toplami (test dahil) da ayrica verilir.
-    let zincir_toplam: u128 = liste.iter().fold(0u128, |a, (_, k)| a.saturating_add(k.aidag));
+    let zincir_toplam: u128 = liste
+        .iter()
+        .fold(0u128, |a, (_, k)| a.saturating_add(k.aidag));
     let mut haric_tutulan: Vec<u64> = liste
         .iter()
         .map(|(r, _)| *r)
@@ -715,19 +717,25 @@ async fn on_satis_claim_relay(State(st): State<RpcState>, Json(govde): Json<Valu
         let net = node.network_id();
         let cagiran = match claim.claim_eden_adres(net as u64) {
             Some(a) => a,
-            None => return Json(json!({ "ok": false, "hata": "imza gecersiz (ecrecover basarisiz)" })),
+            None => {
+                return Json(json!({ "ok": false, "hata": "imza gecersiz (ecrecover basarisiz)" }))
+            }
         };
         match node.on_satis_sorgula(odeme_ref) {
             None => {
                 return Json(json!({ "ok": false, "hata": "bu odeme_ref icin tahsis bulunamadi" }))
             }
             Some(k) if k.alici != cagiran => {
-                return Json(json!({ "ok": false, "hata": "bu tahsis bu cuzdana ait degil (imza/adres uyusmuyor)" }))
+                return Json(
+                    json!({ "ok": false, "hata": "bu tahsis bu cuzdana ait degil (imza/adres uyusmuyor)" }),
+                )
             }
             Some(k) => {
                 let tge = node.on_satis_tge();
                 if k.claim_edilebilir(now, tge) == 0 {
-                    return Json(json!({ "ok": false, "hata": "su an cekilebilir AIDAG yok (TGE gelmedi ya da tamami claimlendi)" }));
+                    return Json(
+                        json!({ "ok": false, "hata": "su an cekilebilir AIDAG yok (TGE gelmedi ya da tamami claimlendi)" }),
+                    );
                 }
             }
         }
@@ -736,7 +744,9 @@ async fn on_satis_claim_relay(State(st): State<RpcState>, Json(govde): Json<Valu
     let payload = claim.encode();
     let vertex = match lsc_engine::Vertex::new_signed(net, parents, payload, now, &st.signing_key) {
         Ok(v) => v,
-        Err(e) => return Json(json!({ "ok": false, "hata": format!("vertex uretilemedi: {e:?}") })),
+        Err(e) => {
+            return Json(json!({ "ok": false, "hata": format!("vertex uretilemedi: {e:?}") }))
+        }
     };
     let bytes = lsc_engine::dag::wire::encode(&vertex);
     let sonuc = { st.node.write().await.ingest_networked(&bytes, now) };
@@ -791,7 +801,9 @@ async fn faucet(State(st): State<RpcState>, Path(adres_hex): Path<String>) -> Js
     // (motor basimi reddettigi icin bakiye 0) -> yaniltici cevap + spam vektoru.
     // Env (LSC_PRODUCTION) degil dugumun kendisi belirler: her mainnet dugumunde kapali.
     if st.node.read().await.mainnet_mi() {
-        return Json(json!({ "ok": false, "hata": "Mainnet'te test/basim ucu KAPALI (21.000.000 sabit arz; bakiye basilmaz)." }));
+        return Json(
+            json!({ "ok": false, "hata": "Mainnet'te test/basim ucu KAPALI (21.000.000 sabit arz; bakiye basilmaz)." }),
+        );
     }
 
     let adres_bytes = match hex::decode(adres_hex.trim()) {
@@ -858,7 +870,9 @@ async fn test_bakiye(State(st): State<RpcState>, body: String) -> Json<Value> {
     // (motor basimi reddettigi icin bakiye 0) -> yaniltici cevap + spam vektoru.
     // Env (LSC_PRODUCTION) degil dugumun kendisi belirler: her mainnet dugumunde kapali.
     if st.node.read().await.mainnet_mi() {
-        return Json(json!({ "ok": false, "hata": "Mainnet'te test/basim ucu KAPALI (21.000.000 sabit arz; bakiye basilmaz)." }));
+        return Json(
+            json!({ "ok": false, "hata": "Mainnet'te test/basim ucu KAPALI (21.000.000 sabit arz; bakiye basilmaz)." }),
+        );
     }
 
     let v: Value = match serde_json::from_str(&body) {
@@ -895,7 +909,9 @@ async fn lsc_test_bakiye(State(st): State<RpcState>, body: String) -> Json<Value
     // (motor basimi reddettigi icin bakiye 0) -> yaniltici cevap + spam vektoru.
     // Env (LSC_PRODUCTION) degil dugumun kendisi belirler: her mainnet dugumunde kapali.
     if st.node.read().await.mainnet_mi() {
-        return Json(json!({ "ok": false, "hata": "Mainnet'te test/basim ucu KAPALI (21.000.000 sabit arz; bakiye basilmaz)." }));
+        return Json(
+            json!({ "ok": false, "hata": "Mainnet'te test/basim ucu KAPALI (21.000.000 sabit arz; bakiye basilmaz)." }),
+        );
     }
 
     let v: Value = match serde_json::from_str(&body) {
@@ -1525,7 +1541,9 @@ pub async fn serve(
 mod mainnet_kapisi_testleri {
     use super::*;
 
-    fn durum(node: lsc_engine::NodeState) -> (RpcState, tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>) {
+    fn durum(
+        node: lsc_engine::NodeState,
+    ) -> (RpcState, tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>) {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let st = RpcState {
             node: Arc::new(RwLock::new(node)),
@@ -1538,7 +1556,9 @@ mod mainnet_kapisi_testleri {
     #[tokio::test]
     async fn mainnet_faucet_ve_test_bakiye_hicbir_sey_yazmaz() {
         let mut node = lsc_engine::NodeState::new_mainnet();
-        let gid = node.ingest(&lsc_engine::mainnet::genesis_wire(), 1_785_024_000).expect("genesis");
+        let gid = node
+            .ingest(&lsc_engine::mainnet::genesis_wire(), 1_785_024_000)
+            .expect("genesis");
         let _ = gid;
         let (st, mut rx) = durum(node);
         let once = st.node.read().await.vertex_count();
@@ -1546,14 +1566,29 @@ mod mainnet_kapisi_testleri {
 
         let Json(v) = faucet(State(st.clone()), Path(adres.clone())).await;
         assert_eq!(v["ok"], false, "mainnet faucet reddetmeli: {v}");
-        let Json(v) = test_bakiye(State(st.clone()), format!("{{\"adres\":\"{adres}\",\"miktar\":\"5\"}}")).await;
+        let Json(v) = test_bakiye(
+            State(st.clone()),
+            format!("{{\"adres\":\"{adres}\",\"miktar\":\"5\"}}"),
+        )
+        .await;
         assert_eq!(v["ok"], false, "mainnet test_bakiye reddetmeli: {v}");
-        let Json(v) = lsc_test_bakiye(State(st.clone()), format!("{{\"adres\":\"{adres}\",\"miktar\":\"5\"}}")).await;
+        let Json(v) = lsc_test_bakiye(
+            State(st.clone()),
+            format!("{{\"adres\":\"{adres}\",\"miktar\":\"5\"}}"),
+        )
+        .await;
         assert_eq!(v["ok"], false, "mainnet lsc_test_bakiye reddetmeli: {v}");
 
         let node = st.node.read().await;
-        assert_eq!(node.vertex_count(), once, "mainnet'e HICBIR vertex yazilmamali");
-        assert_eq!(node.bakiye(&[0u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]), 0);
+        assert_eq!(
+            node.vertex_count(),
+            once,
+            "mainnet'e HICBIR vertex yazilmamali"
+        );
+        assert_eq!(
+            node.bakiye(&[0u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]),
+            0
+        );
         assert!(rx.try_recv().is_err(), "aga hicbir sey yayinlanmamali");
     }
 
@@ -1561,12 +1596,23 @@ mod mainnet_kapisi_testleri {
     async fn devnet_faucet_calismaya_devam_eder() {
         let mut node = lsc_engine::NodeState::new_devnet(1);
         let sk = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-        let g = lsc_engine::Vertex::new_signed(1, vec![], b"lsc-genesis".to_vec(), now, &sk).unwrap();
-        node.ingest(&lsc_engine::dag::wire::encode(&g), now).unwrap();
-        node.faucet_owner_ayarla(lsc_engine::public_key_to_adres(&sk.verifying_key().to_bytes()));
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let g =
+            lsc_engine::Vertex::new_signed(1, vec![], b"lsc-genesis".to_vec(), now, &sk).unwrap();
+        node.ingest(&lsc_engine::dag::wire::encode(&g), now)
+            .unwrap();
+        node.faucet_owner_ayarla(lsc_engine::public_key_to_adres(
+            &sk.verifying_key().to_bytes(),
+        ));
         let (st, _rx) = durum(node);
-        let Json(v) = faucet(State(st.clone()), Path("0000000000000000000000000000000000000002".into())).await;
+        let Json(v) = faucet(
+            State(st.clone()),
+            Path("0000000000000000000000000000000000000002".into()),
+        )
+        .await;
         assert_eq!(v["ok"], true, "devnet faucet calismali: {v}");
         assert_ne!(v["yeni_bakiye"], "0");
     }
@@ -1575,11 +1621,11 @@ mod mainnet_kapisi_testleri {
 #[cfg(test)]
 mod rwa_rpc_testleri {
     use super::*;
+    use ed25519_dalek::Signer;
     use lsc_engine::tx::{
         KurumKaydiTx, KurumYetki, KycKayit, OracleAkisTanim, OracleRapor, YonetimEylemi,
         YonetimIslemi, ROL_KYC_ONAYLAYICI, ROL_ORACLE_RAPORLAYICI,
     };
-    use ed25519_dalek::Signer;
 
     #[tokio::test]
     async fn oracle_ve_kyc_uclari_zincir_durumunu_verir() {
@@ -1589,38 +1635,91 @@ mod rwa_rpc_testleri {
         let owner = ed25519_dalek::SigningKey::from_bytes(&[0x91; 32]);
         let kurum = ed25519_dalek::SigningKey::from_bytes(&[0x21; 32]);
         let kurum_adr = lsc_engine::public_key_to_adres(&kurum.verifying_key().to_bytes());
-        node.faucet_owner_ayarla(lsc_engine::public_key_to_adres(&owner.verifying_key().to_bytes()));
-        let ys: Vec<ed25519_dalek::SigningKey> =
-            (0xE1u8..=0xE3).map(|b| ed25519_dalek::SigningKey::from_bytes(&[b; 32])).collect();
+        node.faucet_owner_ayarla(lsc_engine::public_key_to_adres(
+            &owner.verifying_key().to_bytes(),
+        ));
+        let ys: Vec<ed25519_dalek::SigningKey> = (0xE1u8..=0xE3)
+            .map(|b| ed25519_dalek::SigningKey::from_bytes(&[b; 32]))
+            .collect();
         let pks: Vec<[u8; 32]> = ys.iter().map(|k| k.verifying_key().to_bytes()).collect();
         node.rwa_yonetim_kur(&pks, 2).unwrap();
         let yonetim = |nonce: u64, y: KurumYetki| {
-            let mut i = YonetimIslemi { nonce, son_gecerlilik: u64::MAX, eylem: YonetimEylemi::Rol(y), imzalar: vec![] };
+            let mut i = YonetimIslemi {
+                nonce,
+                son_gecerlilik: u64::MAX,
+                eylem: YonetimEylemi::Rol(y),
+                imzalar: vec![],
+            };
             let m = i.imza_mesaji(NET);
-            i.imzalar = ys[..2].iter().map(|k| (k.verifying_key().to_bytes(), k.sign(&m).to_bytes())).collect();
+            i.imzalar = ys[..2]
+                .iter()
+                .map(|k| (k.verifying_key().to_bytes(), k.sign(&m).to_bytes()))
+                .collect();
             i.encode()
         };
         let g = lsc_engine::Vertex::new_signed(NET, vec![], b"g".to_vec(), t, &owner).unwrap();
         let mut son = *g.id();
         node.ingest(&lsc_engine::dag::wire::encode(&g), t).unwrap();
-        let mut gonder = |node: &mut lsc_engine::NodeState, sk: &ed25519_dalek::SigningKey, p: Vec<u8>, t: u64| {
+        let mut gonder = |node: &mut lsc_engine::NodeState,
+                          sk: &ed25519_dalek::SigningKey,
+                          p: Vec<u8>,
+                          t: u64| {
             let v = lsc_engine::Vertex::new_signed(NET, vec![son], p, t, sk).unwrap();
             son = *v.id();
             node.ingest_networked(&lsc_engine::dag::wire::encode(&v), t);
         };
         let tanim = OracleAkisTanim {
-            akis_no: 1, ondalik: 8, esik_m: 1, sapma_bps: 200, kesici_bps: 1_000,
-            bayat_sn: 3_600, aciklama: "XAU/USD".into(),
+            akis_no: 1,
+            ondalik: 8,
+            esik_m: 1,
+            sapma_bps: 200,
+            kesici_bps: 1_000,
+            bayat_sn: 3_600,
+            aciklama: "XAU/USD".into(),
         };
         gonder(&mut node, &owner, tanim.encode(), t);
-        gonder(&mut node, &kurum, KurumKaydiTx::new(1, "Rafineri".into()).encode(), t);
-        gonder(&mut node, &owner, yonetim(0, KurumYetki::new(kurum_adr, ROL_ORACLE_RAPORLAYICI, 1, true)), t);
-        gonder(&mut node, &owner, yonetim(1, KurumYetki::new(kurum_adr, ROL_KYC_ONAYLAYICI, 0, true)), t);
+        gonder(
+            &mut node,
+            &kurum,
+            KurumKaydiTx::new(1, "Rafineri".into()).encode(),
+            t,
+        );
+        gonder(
+            &mut node,
+            &owner,
+            yonetim(
+                0,
+                KurumYetki::new(kurum_adr, ROL_ORACLE_RAPORLAYICI, 1, true),
+            ),
+            t,
+        );
+        gonder(
+            &mut node,
+            &owner,
+            yonetim(1, KurumYetki::new(kurum_adr, ROL_KYC_ONAYLAYICI, 0, true)),
+            t,
+        );
         t += lsc_engine::mainnet::RWA_ROL_BILDIRIM_SURESI;
         let deger: i128 = 250_000_000_000_000_000_000_000; // JS Number'a sigmaz
-        let r = OracleRapor { akis_no: 1, tur_no: 1, deger, olcum_zamani: t, veri_hash: [3; 32] };
+        let r = OracleRapor {
+            akis_no: 1,
+            tur_no: 1,
+            deger,
+            olcum_zamani: t,
+            veri_hash: [3; 32],
+        };
         gonder(&mut node, &kurum, r.encode(), t);
-        gonder(&mut node, &kurum, KycKayit { adres: [0xAB; 20], onay: true, kanit_hash: [4; 32] }.encode(), t);
+        gonder(
+            &mut node,
+            &kurum,
+            KycKayit {
+                adres: [0xAB; 20],
+                onay: true,
+                kanit_hash: [4; 32],
+            }
+            .encode(),
+            t,
+        );
 
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let st = RpcState {
@@ -1630,7 +1729,11 @@ mod rwa_rpc_testleri {
         };
         let Json(v) = oracle(State(st.clone()), Path(1)).await;
         assert_eq!(v["tanimli"], true, "{v}");
-        assert_eq!(v["son_veri"]["deger"], deger.to_string(), "i128 string olarak: {v}");
+        assert_eq!(
+            v["son_veri"]["deger"],
+            deger.to_string(),
+            "i128 string olarak: {v}"
+        );
         assert_eq!(v["son_veri"]["tur"], 1);
         assert_eq!(v["raporlayici_n"], 1);
         assert_eq!(v["durum"]["durum"], "calisiyor");
@@ -1647,7 +1750,11 @@ mod rwa_rpc_testleri {
 
         let Json(v) = super::kurum(State(st.clone()), Path(hex::encode(kurum_adr))).await;
         assert_eq!(v["roller"].as_array().unwrap().len(), 2, "{v}");
-        assert!(v["roller"].as_array().unwrap().iter().all(|r| r["aktif"] == true));
+        assert!(v["roller"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["aktif"] == true));
 
         // KURUM DOGRULAMA gosterimi (geriye uyumlu): eski alanlar aynen, ek alanlar yeni.
         let Json(v) = super::kurum(State(st.clone()), Path(hex::encode(kurum_adr))).await;
@@ -1656,16 +1763,29 @@ mod rwa_rpc_testleri {
         assert_eq!(v["ad"], "Rafineri");
         {
             let mut n = st.node.write().await;
-            let mut g = lsc_engine::Vertex::new_signed(NET, n.tips(), lsc_engine::tx::Record::new([0x99; 32]).encode(), t, &kurum).unwrap();
+            let mut g = lsc_engine::Vertex::new_signed(
+                NET,
+                n.tips(),
+                lsc_engine::tx::Record::new([0x99; 32]).encode(),
+                t,
+                &kurum,
+            )
+            .unwrap();
             n.ingest_networked(&lsc_engine::dag::wire::encode(&g), t);
             let mut i = YonetimIslemi {
                 nonce: 2,
                 son_gecerlilik: u64::MAX,
-                eylem: YonetimEylemi::KurumDogrula { kurum: kurum_adr, dogrulanmis: true },
+                eylem: YonetimEylemi::KurumDogrula {
+                    kurum: kurum_adr,
+                    dogrulanmis: true,
+                },
                 imzalar: vec![],
             };
             let m = i.imza_mesaji(NET);
-            i.imzalar = ys[1..].iter().map(|k| (k.verifying_key().to_bytes(), k.sign(&m).to_bytes())).collect();
+            i.imzalar = ys[1..]
+                .iter()
+                .map(|k| (k.verifying_key().to_bytes(), k.sign(&m).to_bytes()))
+                .collect();
             g = lsc_engine::Vertex::new_signed(NET, vec![*g.id()], i.encode(), t, &owner).unwrap();
             n.ingest_networked(&lsc_engine::dag::wire::encode(&g), t);
         }
@@ -1678,7 +1798,10 @@ mod rwa_rpc_testleri {
         assert_eq!(v["kurum_durumu"], "dogrulanmis kurum");
         assert_eq!(v["kaydeden_kurum"]["ad"], "Rafineri");
         let Json(v) = super::kurum(State(st.clone()), Path("ee".repeat(20))).await;
-        assert_eq!((v["kayitli"].clone(), v["dogrulama_durumu"].clone()), (json!(false), json!("kurum kaydi yok")));
+        assert_eq!(
+            (v["kayitli"].clone(), v["dogrulama_durumu"].clone()),
+            (json!(false), json!("kurum kaydi yok"))
+        );
 
         let Json(v) = rwa_yonetim(State(st.clone())).await;
         assert_eq!(v["kurulu"], true, "{v}");

@@ -38,12 +38,11 @@ pub struct Pasaj {
 /// "türkiye'nin" → "nin" gibi ekler skoru yanıltmasın). Bunlar grounding'de
 /// gürültü; içerik kelimesi ("ankara") ayırt edici olmalı.
 const DURAK: &[&str] = &[
-    "ve", "ile", "bir", "bu", "su", "da", "de", "ki", "mi", "mu", "ne", "en",
-    "icin", "gibi", "kadar", "nedir", "kimdir", "nerede", "neresi", "hangi", "kac",
+    "ve", "ile", "bir", "bu", "su", "da", "de", "ki", "mi", "mu", "ne", "en", "icin", "gibi",
+    "kadar", "nedir", "kimdir", "nerede", "neresi", "hangi", "kac",
     // ek/çekim parçaları (apostrof sonrası):
-    "nin", "nun", "nen", "den", "dan", "deki", "daki", "ler", "lar", "leri", "lari",
-    "dir", "dur", "del", "ten", "tan", "nde", "nda", "nden", "ndan",
-    // İngilizce:
+    "nin", "nun", "nen", "den", "dan", "deki", "daki", "ler", "lar", "leri", "lari", "dir", "dur",
+    "del", "ten", "tan", "nde", "nda", "nden", "ndan", // İngilizce:
     "the", "an", "of", "is", "are", "what", "who", "where", "which", "how", "and", "to", "in",
 ];
 
@@ -51,7 +50,15 @@ const DURAK: &[&str] = &[
 /// ile eşleşsin. Aksi halde ş/ç/ğ/ı/ö/ü uyuşmazlığı retrieval'ı kaçırır.
 fn katla(c: char) -> char {
     match c {
-        'ç' => 'c', 'ğ' => 'g', 'ı' => 'i', 'ş' => 's', 'ö' => 'o', 'ü' => 'u', 'â' => 'a', 'î' => 'i', 'û' => 'u',
+        'ç' => 'c',
+        'ğ' => 'g',
+        'ı' => 'i',
+        'ş' => 's',
+        'ö' => 'o',
+        'ü' => 'u',
+        'â' => 'a',
+        'î' => 'i',
+        'û' => 'u',
         other => other,
     }
 }
@@ -77,18 +84,22 @@ fn ek_kumesi() -> &'static std::collections::HashSet<String> {
     static K: std::sync::OnceLock<std::collections::HashSet<String>> = std::sync::OnceLock::new();
     K.get_or_init(|| {
         const IYELIK: &[&str] = &[
-            "", "i", "u", "si", "su", "im", "um", "in", "un", "imiz", "umuz", "iniz", "unuz", "lar", "ler", "lari", "leri",
+            "", "i", "u", "si", "su", "im", "um", "in", "un", "imiz", "umuz", "iniz", "unuz",
+            "lar", "ler", "lari", "leri",
         ];
         const HAL: &[&str] = &[
-            "", "i", "u", "yi", "yu", "ni", "nu", "a", "e", "ya", "ye", "na", "ne", "da", "de", "ta", "te", "nda", "nde",
-            "dan", "den", "tan", "ten", "ndan", "nden", "in", "un", "nin", "nun", "la", "le", "yla", "yle", "daki", "deki",
-            "taki", "teki", "ndaki", "ndeki", "mi", "mu", "dir", "dur", "tir", "tur",
+            "", "i", "u", "yi", "yu", "ni", "nu", "a", "e", "ya", "ye", "na", "ne", "da", "de",
+            "ta", "te", "nda", "nde", "dan", "den", "tan", "ten", "ndan", "nden", "in", "un",
+            "nin", "nun", "la", "le", "yla", "yle", "daki", "deki", "taki", "teki", "ndaki",
+            "ndeki", "mi", "mu", "dir", "dur", "tir", "tur",
             // kişi ekli bulunma ("bloktayız", "ağdayız")
             "dayiz", "deyiz", "tayiz", "teyiz", "yiz", "yuz",
         ];
         let mut k = std::collections::HashSet::new();
         // "n" kaynaştırmalı hâl ekleri (nda, na, ni, ...) yalnız iyelikten sonra gelir: ağ-ı-nda; "rwa"+"nda" ≠ "rwanda".
-        const YALNIZ_IYELIKLE: &[&str] = &["ni", "nu", "na", "ne", "nda", "nde", "ndan", "nden", "ndaki", "ndeki"];
+        const YALNIZ_IYELIKLE: &[&str] = &[
+            "ni", "nu", "na", "ne", "nda", "nde", "ndan", "nden", "ndaki", "ndeki",
+        ];
         for i in IYELIK {
             for h in HAL {
                 if i.is_empty() && YALNIZ_IYELIKLE.contains(h) {
@@ -108,12 +119,21 @@ fn ek_kumesi() -> &'static std::collections::HashSet<String> {
 pub fn ek_ile_eslesir(kelime: &str, kok: &str) -> bool {
     let mut kokler = vec![kok.to_string()];
     if let Some(son) = kok.chars().last() {
-        let yumusak = match son { 'k' => Some('g'), 'p' => Some('b'), 't' => Some('d'), _ => None };
+        let yumusak = match son {
+            'k' => Some('g'),
+            'p' => Some('b'),
+            't' => Some('d'),
+            _ => None,
+        };
         if let Some(y) = yumusak {
             kokler.push(format!("{}{y}", &kok[..kok.len() - son.len_utf8()]));
         }
     }
-    kokler.iter().any(|k| kelime.strip_prefix(k.as_str()).map_or(false, |kalan| ek_kumesi().contains(kalan)))
+    kokler.iter().any(|k| {
+        kelime
+            .strip_prefix(k.as_str())
+            .map_or(false, |kalan| ek_kumesi().contains(kalan))
+    })
 }
 
 fn kelime_eslesir(kelime: &str, anahtar: &str, son_kelime: bool) -> bool {
@@ -131,7 +151,8 @@ pub fn ifade_tam_eslesir(sade_metin: &str, ifade: &str) -> bool {
     if k.is_empty() || t.len() < k.len() {
         return false;
     }
-    t.windows(k.len()).any(|w| w.iter().zip(&k).all(|(x, y)| x == y))
+    t.windows(k.len())
+        .any(|w| w.iter().zip(&k).all(|(x, y)| x == y))
 }
 
 /// Sade metinde anahtar var mı? Her kelime tam, geçerli Türkçe ekle ("ağında", "bloğu") ya da ≥5 harfliyse
@@ -148,9 +169,10 @@ pub fn anahtar_var(sade_metin: &str, anahtar: &str) -> bool {
         return t.iter().any(|x| kelime_eslesir(x, k[0], false));
     }
     t.windows(k.len()).any(|w| {
-        w.iter().zip(&k).enumerate().all(|(i, (x, y))| {
-            kelime_eslesir(x, y, i == k.len() - 1)
-        })
+        w.iter()
+            .zip(&k)
+            .enumerate()
+            .all(|(i, (x, y))| kelime_eslesir(x, y, i == k.len() - 1))
     })
 }
 
@@ -161,13 +183,29 @@ mod ek_testleri {
     #[test]
     fn turkce_ekler_tutarli() {
         for (metin, anahtar) in [
-            ("agi", "ag"), ("aginda", "ag"), ("agindaki", "ag"), ("agda", "ag"), ("agin", "ag"),
-            ("bloku", "blok"), ("blogu", "blok"), ("bloklari", "blok"), ("belgeyi", "belge"), ("belgenin", "belge"),
-            ("hashi", "hash"), ("tgenin", "tge"), ("rwada", "rwa"),
+            ("agi", "ag"),
+            ("aginda", "ag"),
+            ("agindaki", "ag"),
+            ("agda", "ag"),
+            ("agin", "ag"),
+            ("bloku", "blok"),
+            ("blogu", "blok"),
+            ("bloklari", "blok"),
+            ("belgeyi", "belge"),
+            ("belgenin", "belge"),
+            ("hashi", "hash"),
+            ("tgenin", "tge"),
+            ("rwada", "rwa"),
         ] {
             assert!(anahtar_var(metin, anahtar), "{metin} ~ {anahtar}");
         }
-        for (metin, anahtar) in [("agac", "ag"), ("rwanda", "rwa"), ("https", "tps"), ("blokaj", "blok"), ("agir", "ag")] {
+        for (metin, anahtar) in [
+            ("agac", "ag"),
+            ("rwanda", "rwa"),
+            ("https", "tps"),
+            ("blokaj", "blok"),
+            ("agir", "ag"),
+        ] {
             assert!(!anahtar_var(metin, anahtar), "{metin} !~ {anahtar}");
         }
     }
@@ -176,7 +214,10 @@ mod ek_testleri {
     fn ifade_eslesmesi() {
         assert!(anahtar_var("aidag aginda bir sorun var mi", "sorun var"));
         assert!(anahtar_var("ag durumunu goster", "ag durumu"));
-        assert!(anahtar_var("hangi kaynaklardan ogreniyorsun", "hangi kaynak"));
+        assert!(anahtar_var(
+            "hangi kaynaklardan ogreniyorsun",
+            "hangi kaynak"
+        ));
         assert!(anahtar_var("on satista kac token satildi", "on satis"));
         assert!(!anahtar_var("satis on", "on satis"));
     }
@@ -213,7 +254,12 @@ impl Depo {
             .ok()
             .and_then(|b| serde_json::from_slice::<Vec<Belge>>(&b).ok())
             .unwrap_or_default();
-        Depo { belgeler, yol: yol.to_string(), embeddings: vec![], korumali: HashSet::new() }
+        Depo {
+            belgeler,
+            yol: yol.to_string(),
+            embeddings: vec![],
+            korumali: HashSet::new(),
+        }
     }
 
     /// Küratörlü seed'i uygula: temiz seed belgeleri korpusa yaz (ham ingest ezmişse
@@ -225,9 +271,15 @@ impl Depo {
             if let Ok(seed) = serde_json::from_slice::<Vec<Belge>>(&data) {
                 for sb in seed {
                     self.korumali.insert(sb.baslik.to_lowercase());
-                    match self.belgeler.iter().position(|x| x.baslik.eq_ignore_ascii_case(&sb.baslik)) {
+                    match self
+                        .belgeler
+                        .iter()
+                        .position(|x| x.baslik.eq_ignore_ascii_case(&sb.baslik))
+                    {
                         Some(pos) => {
-                            if self.belgeler[pos].metin != sb.metin || self.belgeler[pos].url != sb.url {
+                            if self.belgeler[pos].metin != sb.metin
+                                || self.belgeler[pos].url != sb.url
+                            {
                                 self.belgeler[pos] = sb;
                                 degisti = true;
                             }
@@ -258,7 +310,11 @@ impl Depo {
     /// Embedding cache'ini diske yaz (restart'ta yeniden embed gerekmesin).
     fn embed_cache_kaydet(&self) {
         let tmp = format!("{}.tmp", self.emb_yol());
-        if serde_json::to_vec(&self.embeddings).ok().and_then(|b| std::fs::write(&tmp, b).ok()).is_some() {
+        if serde_json::to_vec(&self.embeddings)
+            .ok()
+            .and_then(|b| std::fs::write(&tmp, b).ok())
+            .is_some()
+        {
             let _ = std::fs::rename(&tmp, self.emb_yol());
         }
     }
@@ -267,7 +323,10 @@ impl Depo {
     pub fn embed_cache_yukle(&mut self) -> bool {
         if let Ok(data) = std::fs::read(self.emb_yol()) {
             if let Ok(embs) = serde_json::from_slice::<Vec<Vec<f32>>>(&data) {
-                if embs.len() == self.belgeler.len() && !embs.is_empty() && embs.iter().all(|e| !e.is_empty()) {
+                if embs.len() == self.belgeler.len()
+                    && !embs.is_empty()
+                    && embs.iter().all(|e| !e.is_empty())
+                {
                     self.embeddings = embs;
                     return true;
                 }
@@ -289,7 +348,13 @@ impl Depo {
     /// SEMANTİK arama: sorgu vektörü ↔ belge vektörleri kosinüs benzerliği. Keyword
     /// GÜRÜLTÜSÜNÜ çözer (anlam eşleşmesi). min_bin (x1000) altı elenir → alakasız
     /// kaynak sunulmaz (abstention). nispi_yuzde: zayıf dolgu pasajı atar.
-    pub fn ara_semantik(&self, qemb: &[f32], k: usize, min_bin: i64, nispi_yuzde: i64) -> Vec<Pasaj> {
+    pub fn ara_semantik(
+        &self,
+        qemb: &[f32],
+        k: usize,
+        min_bin: i64,
+        nispi_yuzde: i64,
+    ) -> Vec<Pasaj> {
         if self.embeddings.len() != self.belgeler.len() || qemb.is_empty() {
             return vec![];
         }
@@ -343,7 +408,11 @@ impl Depo {
 
     /// Belge ekle (ingest) + kaydet. Aynı başlık varsa metni günceller.
     pub fn ekle(&mut self, b: Belge) {
-        if let Some(mevcut) = self.belgeler.iter_mut().find(|x| x.baslik.eq_ignore_ascii_case(&b.baslik)) {
+        if let Some(mevcut) = self
+            .belgeler
+            .iter_mut()
+            .find(|x| x.baslik.eq_ignore_ascii_case(&b.baslik))
+        {
             mevcut.metin = b.metin;
             mevcut.url = b.url;
         } else {
@@ -361,7 +430,11 @@ impl Depo {
         while self.embeddings.len() < self.belgeler.len() {
             self.embeddings.push(vec![]);
         }
-        let idx = if let Some(pos) = self.belgeler.iter().position(|x| x.baslik.eq_ignore_ascii_case(&b.baslik)) {
+        let idx = if let Some(pos) = self
+            .belgeler
+            .iter()
+            .position(|x| x.baslik.eq_ignore_ascii_case(&b.baslik))
+        {
             self.belgeler[pos].metin = b.metin.clone();
             self.belgeler[pos].url = b.url.clone();
             pos
@@ -451,11 +524,7 @@ impl Depo {
 /// CANLI WIKIPEDIA (opsiyonel): sorguyu başlık kabul edip summary REST ucundan
 /// özet çeker (Wikipedia başlığı normalize/yönlendirir). Bloklu ağda None döner.
 /// Bu sunucuda (Contabo) Wikimedia IP-bloklu → varsayılan kapalı; worker PC'de açık.
-pub async fn wiki_getir(
-    http: &reqwest::Client,
-    langs: &[String],
-    sorgu: &str,
-) -> Option<Pasaj> {
+pub async fn wiki_getir(http: &reqwest::Client, langs: &[String], sorgu: &str) -> Option<Pasaj> {
     let baslik = sorgu.trim().replace(' ', "_");
     for lang in langs {
         let url = format!("https://{lang}.wikipedia.org/api/rest_v1/page/summary/{baslik}");
@@ -473,7 +542,11 @@ pub async fn wiki_getir(
         if extract.trim().len() < 20 {
             continue;
         }
-        let baslik = v.get("title").and_then(|t| t.as_str()).unwrap_or(sorgu).to_string();
+        let baslik = v
+            .get("title")
+            .and_then(|t| t.as_str())
+            .unwrap_or(sorgu)
+            .to_string();
         let sayfa_url = v
             .get("content_urls")
             .and_then(|c| c.get("desktop"))
@@ -499,10 +572,27 @@ mod tests {
         Depo {
             yol: String::new(),
             belgeler: vec![
-                Belge { baslik: "Ankara".into(), metin: "Ankara, Türkiye'nin başkenti ve İç Anadolu'da bir şehirdir.".into(), url: None },
-                Belge { baslik: "Türkiye".into(), metin: "Türkiye bir ülkedir. Başkenti Ankara, en büyük şehri İstanbul'dur.".into(), url: None },
-                Belge { baslik: "İstanbul".into(), metin: "İstanbul Türkiye'nin en kalabalık şehridir; başkenti değildir.".into(), url: None },
-                Belge { baslik: "Fransa".into(), metin: "Fransa bir ülkedir. Başkenti Paris'tir.".into(), url: None },
+                Belge {
+                    baslik: "Ankara".into(),
+                    metin: "Ankara, Türkiye'nin başkenti ve İç Anadolu'da bir şehirdir.".into(),
+                    url: None,
+                },
+                Belge {
+                    baslik: "Türkiye".into(),
+                    metin: "Türkiye bir ülkedir. Başkenti Ankara, en büyük şehri İstanbul'dur."
+                        .into(),
+                    url: None,
+                },
+                Belge {
+                    baslik: "İstanbul".into(),
+                    metin: "İstanbul Türkiye'nin en kalabalık şehridir; başkenti değildir.".into(),
+                    url: None,
+                },
+                Belge {
+                    baslik: "Fransa".into(),
+                    metin: "Fransa bir ülkedir. Başkenti Paris'tir.".into(),
+                    url: None,
+                },
             ],
             embeddings: vec![],
             korumali: HashSet::new(),
@@ -523,8 +613,11 @@ mod tests {
         let d = ornek_depo();
         // "Japonya" korpusta yok; yalnız "başkenti" (yaygın) eşleşir → IDF+eşik eler.
         let p = d.ara("Japonya'nın başkenti neresi?", 2, 150, 40);
-        assert!(p.is_empty(), "Japonya kaynaksız olmalı (uydurmaya zorlanmaz), bulunan: {:?}",
-            p.iter().map(|x| &x.baslik).collect::<Vec<_>>());
+        assert!(
+            p.is_empty(),
+            "Japonya kaynaksız olmalı (uydurmaya zorlanmaz), bulunan: {:?}",
+            p.iter().map(|x| &x.baslik).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -532,7 +625,10 @@ mod tests {
         // Kullanıcı Türkçe harf yazmadan sorsa da eşleşmeli.
         let d = ornek_depo();
         let p = d.ara("turkiye baskenti", 2, 150, 40);
-        assert!(!p.is_empty(), "ascii 'baskenti' Türkçe 'başkenti' ile eşleşmeli");
+        assert!(
+            !p.is_empty(),
+            "ascii 'baskenti' Türkçe 'başkenti' ile eşleşmeli"
+        );
     }
 
     #[test]
@@ -544,8 +640,11 @@ mod tests {
         assert!(!p.is_empty());
         // Dönen tüm pasajlar en iyinin %40'ından iyi olmalı (dolgu yok).
         let top = p[0].skor;
-        assert!(p.iter().all(|x| x.skor * 100 >= top * 40), "zayıf dolgu pasaj kaldı: {:?}",
-            p.iter().map(|x| (&x.baslik, x.skor)).collect::<Vec<_>>());
+        assert!(
+            p.iter().all(|x| x.skor * 100 >= top * 40),
+            "zayıf dolgu pasaj kaldı: {:?}",
+            p.iter().map(|x| (&x.baslik, x.skor)).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -560,7 +659,13 @@ pub fn baglam_yap(pasajlar: &[Pasaj], max_metin: usize) -> String {
     let mut out = String::new();
     for (i, p) in pasajlar.iter().enumerate() {
         let metin: String = p.metin.chars().take(max_metin).collect();
-        out.push_str(&format!("[{}] {} ({}): {}\n", i + 1, p.baslik, p.kaynak, metin));
+        out.push_str(&format!(
+            "[{}] {} ({}): {}\n",
+            i + 1,
+            p.baslik,
+            p.kaynak,
+            metin
+        ));
     }
     out
 }

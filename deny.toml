@@ -7,6 +7,8 @@ yanked = "deny"
 [licenses]
 version = 2
 confidence-threshold = 0.9
+# Kendi yayınlanmayan (publish=false) crate'lerimiz (BUSL-1.1) lisans kontrolünden muaf; yalnız bağımlılıklar denetlenir.
+private = { ignore = true }
 # İzin verilen lisanslar (izin verici / uyumlu). Listede olmayan lisans → CI RED.
 allow = [
   "MIT",

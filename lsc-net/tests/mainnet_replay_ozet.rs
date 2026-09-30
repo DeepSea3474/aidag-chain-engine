@@ -61,8 +61,18 @@ fn mainnet_replay_ozet() {
         adresler.insert(k.alici);
     }
 
-    println!("OZET vertex={} yuklenemeyen={} orphan={}", st.vertex_count(), bekleyen.len(), st.orphan_count());
-    println!("OZET tge={} on_satis_sayisi={} on_satis_toplam={}", st.on_satis_tge(), st.on_satis_sayisi(), st.on_satis_toplam_aidag());
+    println!(
+        "OZET vertex={} yuklenemeyen={} orphan={}",
+        st.vertex_count(),
+        bekleyen.len(),
+        st.orphan_count()
+    );
+    println!(
+        "OZET tge={} on_satis_sayisi={} on_satis_toplam={}",
+        st.on_satis_tge(),
+        st.on_satis_sayisi(),
+        st.on_satis_toplam_aidag()
+    );
     for (r, k) in &satislar {
         println!("OZET satis ref={r} {k:?}");
     }
@@ -74,7 +84,10 @@ fn mainnet_replay_ozet() {
     for a in &adresler {
         println!(
             "OZET adres=0x{} aidag={} lsc={} nonce={}",
-            hex::encode(a), st.bakiye(a), st.lsc_bakiye(a), st.beklenen_nonce(a)
+            hex::encode(a),
+            st.bakiye(a),
+            st.lsc_bakiye(a),
+            st.beklenen_nonce(a)
         );
     }
     // BELGE / KURUM KAYITLARI (tek tek): dosyadaki her tip=1 hash'i ve her tip=5
@@ -83,7 +96,9 @@ fn mainnet_replay_ozet() {
     let mut belge_hashleri: BTreeSet<[u8; 32]> = BTreeSet::new();
     let mut kurum_adresleri: BTreeSet<[u8; 20]> = BTreeSet::new();
     for b in &ham {
-        let Ok(v) = lsc_engine::dag::wire::decode(b) else { continue };
+        let Ok(v) = lsc_engine::dag::wire::decode(b) else {
+            continue;
+        };
         match v.payload().first() {
             Some(&lsc_engine::TX_TYPE_RECORD) => {
                 if let Ok(r) = lsc_engine::Record::decode(v.payload()) {
@@ -97,10 +112,18 @@ fn mainnet_replay_ozet() {
         }
     }
     for h in &belge_hashleri {
-        println!("OZET belge hash={} {:?}", hex::encode(h), st.belge_dogrula(h));
+        println!(
+            "OZET belge hash={} {:?}",
+            hex::encode(h),
+            st.belge_dogrula(h)
+        );
     }
     for a in &kurum_adresleri {
-        println!("OZET kurum adres=0x{} {:?}", hex::encode(a), st.kurum_sorgula(a));
+        println!(
+            "OZET kurum adres=0x{} {:?}",
+            hex::encode(a),
+            st.kurum_sorgula(a)
+        );
     }
     // AVM: deploy edilmis kontratlar ve bakiyeleri (precompile/AVM yolu degisikliklerinde).
     let mut kontratlar = st.avm_kontrat_adresleri();
@@ -109,7 +132,9 @@ fn mainnet_replay_ozet() {
     for a in &kontratlar {
         println!(
             "OZET avm_kontrat=0x{} aidag={} lsc={}",
-            hex::encode(a), st.bakiye(a), st.lsc_bakiye(a)
+            hex::encode(a),
+            st.bakiye(a),
+            st.lsc_bakiye(a)
         );
     }
 }

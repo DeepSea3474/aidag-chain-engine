@@ -3069,13 +3069,9 @@ mod tests {
                 let id = *v.id();
                 g.insert_synced(v.clone()).unwrap();
                 gd.update_one(&g, &id);
-                let (yeni_tip, yeni_sira) =
-                    gd.total_order_artimli(&g, onceki_tip, &onceki_sira);
+                let (yeni_tip, yeni_sira) = gd.total_order_artimli(&g, onceki_tip, &onceki_sira);
                 let tam = gd.total_order(&g);
-                assert_eq!(
-                    yeni_sira, tam,
-                    "[{etiket}] artimli != tam (vertex {id:?})"
-                );
+                assert_eq!(yeni_sira, tam, "[{etiket}] artimli != tam (vertex {id:?})");
                 assert_eq!(
                     yeni_tip,
                     gd.selected_tip(&g),
@@ -3112,12 +3108,7 @@ mod tests {
             for kat in 0..8u64 {
                 let mut bu: Vec<VertexId> = Vec::new();
                 for j in 0..3u8 {
-                    let v = signed(
-                        j + 1,
-                        prev.clone(),
-                        ts,
-                        format!("k{kat}n{j}").as_bytes(),
-                    );
+                    let v = signed(j + 1, prev.clone(), ts, format!("k{kat}n{j}").as_bytes());
                     ts += 1;
                     bu.push(*v.id());
                     vs.push(v);

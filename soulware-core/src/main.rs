@@ -12,23 +12,30 @@
 //!
 //! Uçlar:  GET /health · GET / · POST /v1/ask {"prompt","context?"}
 
-mod local_brain; // egemen yerel beyin (candle) = KUBRA
-mod retrieval;   // grounding kaynak katmanı (yerel egemen depo + canlı wiki)
-mod embed;       // semantik gömme (embedding) — anlam-bazlı retrieval
-mod hesap;       // deterministik hesap makinesi aracı (araç-kullanımı)
-mod zincir;      // deterministik zincir sorgu araci (arac-kullanimi)
-mod stream;      // SSE streaming (cevabi harf harf akitir)
-mod resmi;       // AIDAG/KUBRA resmi kaynak katmani (grounding onceligi)
-mod kanit;       // zincir kaniti: etkilesim hash'i (tuzlu v1 + eski tuzsuz dogrulama)
-mod belge_arac;  // belge kayit TALEBI hazirlama (KUBRA imzalamaz)
-mod imza_dosyasi; // zincir imza anahtari: FAIL-CLOSED yukleme (sessiz uretim YOK)
+mod anlamsal_niyet;
+mod belge_arac; // belge kayit TALEBI hazirlama (KUBRA imzalamaz)
+mod embed; // semantik gömme (embedding) — anlam-bazlı retrieval
+mod etiket; // K-06: deterministik cevap etiketi (dogrulanmis/oneri/bilinmiyor)
 mod guvenlik_kapisi; // K-23: tum uretim uclarinda zararli istek kapisi (fail-closed)
-mod etiket;       // K-06: deterministik cevap etiketi (dogrulanmis/oneri/bilinmiyor)
+mod hesap; // deterministik hesap makinesi aracı (araç-kullanımı)
+mod imza_dosyasi; // zincir imza anahtari: FAIL-CLOSED yukleme (sessiz uretim YOK)
+mod kanit; // zincir kaniti: etkilesim hash'i (tuzlu v1 + eski tuzsuz dogrulama)
+mod kayitlar; // KARARLAR.md ve KAYNAKLAR.md (salt okunur)
+mod local_brain; // egemen yerel beyin (candle) = KUBRA
+mod resmi; // AIDAG/KUBRA resmi kaynak katmani (grounding onceligi)
+mod retrieval; // grounding kaynak katmanı (yerel egemen depo + canlı wiki)
+mod stream; // SSE streaming (cevabi harf harf akitir)
 mod yonlendirici; // deterministik niyet yonlendirici (saf, agsiz)
-mod kayitlar;     // KARARLAR.md ve KAYNAKLAR.md (salt okunur)
-mod anlamsal_niyet; // P2: kural eşleşmezse gömme modeliyle niyet (yalnız salt okunur araçlar)
+mod zincir; // deterministik zincir sorgu araci (arac-kullanimi) // P2: kural eşleşmezse gömme modeliyle niyet (yalnız salt okunur araçlar)
 
-use axum::{extract::State, routing::{get, post}, response::{IntoResponse, Sse, sse::Event}, http::{StatusCode, header}, body::Body, Json, Router};
+use axum::{
+    body::Body,
+    extract::State,
+    http::{header, StatusCode},
+    response::{sse::Event, IntoResponse, Sse},
+    routing::{get, post},
+    Json, Router,
+};
 use ed25519_dalek::SigningKey;
 use lsc_engine::dag::wire;
 use lsc_engine::tx::Record;
@@ -53,62 +60,98 @@ struct Config {
     brain_pref: String, // "local" (varsayılan, egemen) | "claude" | "auto"
     max_tokens: usize,  // yerel beyin üretim sınırı (SOULWARE_MAX_TOKENS)
     // ── Grounding / kaynak (RAG) ──
-    ground: bool,            // SOULWARE_GROUND=1 → soru öncesi kaynak getir (varsayılan açık)
-    knowledge_path: String,  // egemen yerel bilgi deposu (JSON)
-    seed_path: String,       // küratörlü seed (ingest ezemez, temiz cevaplar korunur)
-    resmi_path: String,      // AIDAG/KUBRA resmi kaynak belgeleri (genel korpustan ÖNCE)
-    wiki: bool,              // SOULWARE_WIKI=1 → canlı Wikipedia (bu sunucuda bloklu; varsayılan kapalı)
+    ground: bool, // SOULWARE_GROUND=1 → soru öncesi kaynak getir (varsayılan açık)
+    knowledge_path: String, // egemen yerel bilgi deposu (JSON)
+    seed_path: String, // küratörlü seed (ingest ezemez, temiz cevaplar korunur)
+    resmi_path: String, // AIDAG/KUBRA resmi kaynak belgeleri (genel korpustan ÖNCE)
+    wiki: bool,   // SOULWARE_WIKI=1 → canlı Wikipedia (bu sunucuda bloklu; varsayılan kapalı)
     wiki_langs: Vec<String>, // "tr,en"
-    ground_k: usize,         // en fazla kaç pasaj sunulsun
-    ground_snippet: usize,   // pasaj başına maks karakter
-    ground_min: i64,         // min IDF skoru (altı = alakasız, grounding YOK)
-    ground_ratio: i64,       // 2.+ pasaj en iyinin bu %'sinden azsa elenir (dolgu önler)
-    embed_dir: String,       // semantik embedding modeli dizini (config+tokenizer+safetensors)
-    embed_min: i64,          // min kosinüs benzerlik ×1000 (altı = alakasız, abstain)
-    model_registry: String,  // kullanılabilir açık modeller kaydı (JSON)
+    ground_k: usize, // en fazla kaç pasaj sunulsun
+    ground_snippet: usize, // pasaj başına maks karakter
+    ground_min: i64, // min IDF skoru (altı = alakasız, grounding YOK)
+    ground_ratio: i64, // 2.+ pasaj en iyinin bu %'sinden azsa elenir (dolgu önler)
+    embed_dir: String, // semantik embedding modeli dizini (config+tokenizer+safetensors)
+    embed_min: i64, // min kosinüs benzerlik ×1000 (altı = alakasız, abstain)
+    model_registry: String, // kullanılabilir açık modeller kaydı (JSON)
     remote_url: Option<String>, // SOULWARE_REMOTE_URL → uzak GPU beyni (OpenAI-uyumlu /v1/chat/completions)
     remote_model: String,       // SOULWARE_REMOTE_MODEL (görüntü adı)
-    image_url: Option<String>,  // SOULWARE_IMAGE_URL → uzak GPU görsel servisi (POST {prompt} → PNG)
-    video_url: Option<String>,  // SOULWARE_VIDEO_URL → uzak GPU video servisi (POST {prompt} → MP4)
-    kapi_kurallari: String,     // SOULWARE_KAPI_KURALLARI → K-23 kural dosyası (güvenlik ekibi sağlar)
-    kapi_yargic_zorunlu: bool,  // SOULWARE_KAPI_YARGIC_ZORUNLU=1 (varsayılan) → yargıç yoksa da reddet
-    kapi_yargic_gramer: bool,   // SOULWARE_KAPI_YARGIC_GRAMER=1 (varsayılan) → llama.cpp `grammar` ile yalnız etiket üretilir
-    kararlar_path: String,      // SOULWARE_KARARLAR_PATH → KARARLAR.md (karar aracı)
-    kaynaklar_path: String,     // SOULWARE_KAYNAKLAR_PATH → KAYNAKLAR.md (kaynak listesi aracı)
+    image_url: Option<String>, // SOULWARE_IMAGE_URL → uzak GPU görsel servisi (POST {prompt} → PNG)
+    video_url: Option<String>, // SOULWARE_VIDEO_URL → uzak GPU video servisi (POST {prompt} → MP4)
+    kapi_kurallari: String, // SOULWARE_KAPI_KURALLARI → K-23 kural dosyası (güvenlik ekibi sağlar)
+    kapi_yargic_zorunlu: bool, // SOULWARE_KAPI_YARGIC_ZORUNLU=1 (varsayılan) → yargıç yoksa da reddet
+    kapi_yargic_gramer: bool, // SOULWARE_KAPI_YARGIC_GRAMER=1 (varsayılan) → llama.cpp `grammar` ile yalnız etiket üretilir
+    kararlar_path: String,    // SOULWARE_KARARLAR_PATH → KARARLAR.md (karar aracı)
+    kaynaklar_path: String,   // SOULWARE_KAYNAKLAR_PATH → KAYNAKLAR.md (kaynak listesi aracı)
 }
 
 impl Config {
     fn from_env() -> Self {
         let ev = |k: &str, d: &str| std::env::var(k).unwrap_or_else(|_| d.to_string());
         Config {
-            anthropic_key: std::env::var("ANTHROPIC_API_KEY").ok().filter(|s| !s.is_empty()),
+            anthropic_key: std::env::var("ANTHROPIC_API_KEY")
+                .ok()
+                .filter(|s| !s.is_empty()),
             claude_model: ev("CLAUDE_MODEL", "claude-sonnet-4-20250514"),
             chain_rpc: ev("SOULWARE_CHAIN_RPC", "http://127.0.0.1:8645"),
             net_id: ev("SOULWARE_NET_ID", "3474").parse().unwrap_or(3474),
             key_path: ev("SOULWARE_KEY_PATH", "/root/aidag-lsc/.soulware.key"),
             listen: ev("SOULWARE_LISTEN", "127.0.0.1:8646"),
-            local_model: ev("SOULWARE_LOCAL_MODEL", "/root/aidag-lsc/soulware-models/qwen2.5-3b-instruct-q4_k_m.gguf"),
-            local_tokenizer: ev("SOULWARE_LOCAL_TOKENIZER", "/root/aidag-lsc/soulware-models/tokenizer.json"),
+            local_model: ev(
+                "SOULWARE_LOCAL_MODEL",
+                "/root/aidag-lsc/soulware-models/qwen2.5-3b-instruct-q4_k_m.gguf",
+            ),
+            local_tokenizer: ev(
+                "SOULWARE_LOCAL_TOKENIZER",
+                "/root/aidag-lsc/soulware-models/tokenizer.json",
+            ),
             brain_pref: ev("SOULWARE_BRAIN", "local"),
             max_tokens: ev("SOULWARE_MAX_TOKENS", "320").parse().unwrap_or(320),
             ground: ev("SOULWARE_GROUND", "1") == "1",
-            knowledge_path: ev("SOULWARE_KNOWLEDGE_PATH", "/root/aidag-lsc/soulware-knowledge/kb.json"),
-            seed_path: ev("SOULWARE_SEED_PATH", "/root/aidag-lsc/soulware-knowledge/kb.seed.json"),
-            resmi_path: ev("SOULWARE_RESMI_PATH", "/root/aidag-lsc/soulware-knowledge/kb.aidag.json"),
+            knowledge_path: ev(
+                "SOULWARE_KNOWLEDGE_PATH",
+                "/root/aidag-lsc/soulware-knowledge/kb.json",
+            ),
+            seed_path: ev(
+                "SOULWARE_SEED_PATH",
+                "/root/aidag-lsc/soulware-knowledge/kb.seed.json",
+            ),
+            resmi_path: ev(
+                "SOULWARE_RESMI_PATH",
+                "/root/aidag-lsc/soulware-knowledge/kb.aidag.json",
+            ),
             wiki: ev("SOULWARE_WIKI", "0") == "1",
-            wiki_langs: ev("SOULWARE_WIKI_LANGS", "tr,en").split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+            wiki_langs: ev("SOULWARE_WIKI_LANGS", "tr,en")
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
             ground_k: ev("SOULWARE_GROUND_K", "3").parse().unwrap_or(3),
             ground_snippet: ev("SOULWARE_GROUND_SNIPPET", "600").parse().unwrap_or(600),
             ground_min: ev("SOULWARE_GROUND_MIN", "150").parse().unwrap_or(150),
             ground_ratio: ev("SOULWARE_GROUND_RATIO", "40").parse().unwrap_or(40),
-            embed_dir: ev("SOULWARE_EMBED_DIR", "/root/aidag-lsc/soulware-models/embed-minilm"),
+            embed_dir: ev(
+                "SOULWARE_EMBED_DIR",
+                "/root/aidag-lsc/soulware-models/embed-minilm",
+            ),
             embed_min: ev("SOULWARE_EMBED_MIN", "600").parse().unwrap_or(600),
-            model_registry: ev("SOULWARE_MODEL_REGISTRY", "/root/aidag-lsc/soulware-models/registry.json"),
-            remote_url: std::env::var("SOULWARE_REMOTE_URL").ok().filter(|s| !s.is_empty()),
+            model_registry: ev(
+                "SOULWARE_MODEL_REGISTRY",
+                "/root/aidag-lsc/soulware-models/registry.json",
+            ),
+            remote_url: std::env::var("SOULWARE_REMOTE_URL")
+                .ok()
+                .filter(|s| !s.is_empty()),
             remote_model: ev("SOULWARE_REMOTE_MODEL", "qwen2.5-72b"),
-            image_url: std::env::var("SOULWARE_IMAGE_URL").ok().filter(|s| !s.is_empty()),
-            video_url: std::env::var("SOULWARE_VIDEO_URL").ok().filter(|s| !s.is_empty()),
-            kapi_kurallari: ev("SOULWARE_KAPI_KURALLARI", "/root/aidag-lsc/soulware-knowledge/kapi-kurallari.json"),
+            image_url: std::env::var("SOULWARE_IMAGE_URL")
+                .ok()
+                .filter(|s| !s.is_empty()),
+            video_url: std::env::var("SOULWARE_VIDEO_URL")
+                .ok()
+                .filter(|s| !s.is_empty()),
+            kapi_kurallari: ev(
+                "SOULWARE_KAPI_KURALLARI",
+                "/root/aidag-lsc/soulware-knowledge/kapi-kurallari.json",
+            ),
             kapi_yargic_zorunlu: ev("SOULWARE_KAPI_YARGIC_ZORUNLU", "1") != "0",
             kapi_yargic_gramer: ev("SOULWARE_KAPI_YARGIC_GRAMER", "1") != "0",
             kararlar_path: ev("SOULWARE_KARARLAR_PATH", "/root/aidag-lsc/KARARLAR.md"),
@@ -129,7 +172,7 @@ struct AppState {
     resmi: Vec<resmi::ResmiBelge>, // AIDAG/KUBRA resmi kaynakları
     kurallar: guvenlik_kapisi::Kurallar, // K-23 kapı kuralları
     kararlar: Vec<kayitlar::KararMadde>, // KARARLAR.md maddeleri
-    kaynak_ozeti: String,                // KAYNAKLAR.md özeti
+    kaynak_ozeti: String,         // KAYNAKLAR.md özeti
     anlamsal: Option<anlamsal_niyet::AnlamsalNiyet>, // P2: kural eşleşmezse gömme modeliyle niyet
 }
 
@@ -184,13 +227,41 @@ fn kanit_gerektiren_mi(prompt: &str) -> bool {
     let p = retrieval::sade(prompt);
     // Zararsiz sohbet isaretleri: selamlasma, hal-hatir, tesekkur, kendini tanitma.
     let sohbet: &[&str] = &[
-        "selam", "merhaba", "gunaydin", "iyi aksam", "nasilsin", "naber",
-        "tesekkur", "sagol", "adin ne", "kimsin", "kendini tanit", "gorusuruz",
-        "iyi gunler", "iyi geceler", "hosgeldin", "hos geldin", "nasil gidiyor",
+        "selam",
+        "merhaba",
+        "gunaydin",
+        "iyi aksam",
+        "nasilsin",
+        "naber",
+        "tesekkur",
+        "sagol",
+        "adin ne",
+        "kimsin",
+        "kendini tanit",
+        "gorusuruz",
+        "iyi gunler",
+        "iyi geceler",
+        "hosgeldin",
+        "hos geldin",
+        "nasil gidiyor",
         // Duygu/hal paylasimi: kaynak aranmaz, sicak ve dogal karsilanir.
-        "yorgun", "moral", "uzgun", "mutsuz", "mutlu", "sevincli", "canim sikk", "stres",
-        "endise", "kaygi", "yalniz hissed", "sikildim", "keyifsiz", "harika hissed",
-        "dusunebiliyor mu", "hissedebiliyor mu", "duygularin var",
+        "yorgun",
+        "moral",
+        "uzgun",
+        "mutsuz",
+        "mutlu",
+        "sevincli",
+        "canim sikk",
+        "stres",
+        "endise",
+        "kaygi",
+        "yalniz hissed",
+        "sikildim",
+        "keyifsiz",
+        "harika hissed",
+        "dusunebiliyor mu",
+        "hissedebiliyor mu",
+        "duygularin var",
     ];
     // Sohbet -> serbest; aksi halde kanit modu (teknik/olgusal/kod/AIDAG/genel bilgi).
     !sohbet.iter().any(|s| retrieval::anahtar_var(&p, s))
@@ -202,10 +273,21 @@ mod tests {
 
     #[test]
     fn turkce_harfli_sohbet_taninir() {
-        for q in ["Teşekkürler!", "Nasılsın?", "Günaydın KUBRA", "Hoş geldin", "Sağol", "İyi akşamlar"] {
+        for q in [
+            "Teşekkürler!",
+            "Nasılsın?",
+            "Günaydın KUBRA",
+            "Hoş geldin",
+            "Sağol",
+            "İyi akşamlar",
+        ] {
             assert!(!kanit_gerektiren_mi(q), "{q}");
         }
-        for q in ["Bugün çok yorgunum, moralim bozuk", "Canım sıkkın", "Sen hissedebiliyor musun?"] {
+        for q in [
+            "Bugün çok yorgunum, moralim bozuk",
+            "Canım sıkkın",
+            "Sen hissedebiliyor musun?",
+        ] {
             assert!(!kanit_gerektiren_mi(q), "{q}");
         }
         assert!(kanit_gerektiren_mi("Türkiye'nin başkenti neresi"));
@@ -246,7 +328,11 @@ struct BrainOut {
 }
 
 async fn beyin_claude(st: &AppState, user_content: &str) -> Result<BrainOut, String> {
-    let key = st.cfg.anthropic_key.as_ref().ok_or("ANTHROPIC_API_KEY tanımlı değil")?;
+    let key = st
+        .cfg
+        .anthropic_key
+        .as_ref()
+        .ok_or("ANTHROPIC_API_KEY tanımlı değil")?;
     let body = json!({
         "model": st.cfg.claude_model,
         "max_tokens": 1024,
@@ -264,9 +350,16 @@ async fn beyin_claude(st: &AppState, user_content: &str) -> Result<BrainOut, Str
         .await
         .map_err(|e| format!("beyin isteği başarısız: {e}"))?;
     let status = resp.status();
-    let v: Value = resp.json().await.map_err(|e| format!("beyin yanıtı çözülemedi: {e}"))?;
+    let v: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("beyin yanıtı çözülemedi: {e}"))?;
     if !status.is_success() {
-        let msg = v.get("error").and_then(|e| e.get("message")).and_then(|m| m.as_str()).unwrap_or("bilinmeyen");
+        let msg = v
+            .get("error")
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.as_str())
+            .unwrap_or("bilinmeyen");
         return Err(format!("beyin HTTP {status}: {msg}"));
     }
     let text = v
@@ -286,8 +379,14 @@ async fn beyin_claude(st: &AppState, user_content: &str) -> Result<BrainOut, Str
     Ok(BrainOut {
         text,
         model: st.cfg.claude_model.clone(),
-        input_tokens: v.get("usage").and_then(|u| u.get("input_tokens")).and_then(|x| x.as_u64()),
-        output_tokens: v.get("usage").and_then(|u| u.get("output_tokens")).and_then(|x| x.as_u64()),
+        input_tokens: v
+            .get("usage")
+            .and_then(|u| u.get("input_tokens"))
+            .and_then(|x| x.as_u64()),
+        output_tokens: v
+            .get("usage")
+            .and_then(|u| u.get("output_tokens"))
+            .and_then(|x| x.as_u64()),
     })
 }
 
@@ -295,7 +394,11 @@ async fn beyin_claude(st: &AppState, user_content: &str) -> Result<BrainOut, Str
 // Ollama / llama-server gibi bir GPU sunucusunun /v1/chat/completions ucuna bağlanır.
 // CPU'da ~90s olan cevap GPU'da ~1-2s'ye düşer. Başarısız olursa çağıran yerele düşer.
 async fn beyin_remote(st: &AppState, user_content: &str, temp: f64) -> Result<BrainOut, String> {
-    let url = st.cfg.remote_url.as_ref().ok_or("SOULWARE_REMOTE_URL tanımlı değil")?;
+    let url = st
+        .cfg
+        .remote_url
+        .as_ref()
+        .ok_or("SOULWARE_REMOTE_URL tanımlı değil")?;
     let body = json!({
         "model": st.cfg.remote_model,
         "messages": mesajlar(SYSTEM_PROMPT, user_content),
@@ -313,10 +416,19 @@ async fn beyin_remote(st: &AppState, user_content: &str, temp: f64) -> Result<Br
         .await
         .map_err(|e| format!("uzak beyin isteği başarısız: {e}"))?;
     let status = resp.status();
-    let v: Value = resp.json().await.map_err(|e| format!("uzak beyin yanıtı çözülemedi: {e}"))?;
+    let v: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("uzak beyin yanıtı çözülemedi: {e}"))?;
     if !status.is_success() {
-        let msg = v.get("error").and_then(|e| e.as_str())
-            .or_else(|| v.get("error").and_then(|e| e.get("message")).and_then(|m| m.as_str()))
+        let msg = v
+            .get("error")
+            .and_then(|e| e.as_str())
+            .or_else(|| {
+                v.get("error")
+                    .and_then(|e| e.get("message"))
+                    .and_then(|m| m.as_str())
+            })
             .unwrap_or("bilinmeyen");
         return Err(format!("uzak beyin HTTP {status}: {msg}"));
     }
@@ -335,8 +447,14 @@ async fn beyin_remote(st: &AppState, user_content: &str, temp: f64) -> Result<Br
     Ok(BrainOut {
         text,
         model: st.cfg.remote_model.clone(),
-        input_tokens: v.get("usage").and_then(|u| u.get("prompt_tokens")).and_then(|x| x.as_u64()),
-        output_tokens: v.get("usage").and_then(|u| u.get("completion_tokens")).and_then(|x| x.as_u64()),
+        input_tokens: v
+            .get("usage")
+            .and_then(|u| u.get("prompt_tokens"))
+            .and_then(|x| x.as_u64()),
+        output_tokens: v
+            .get("usage")
+            .and_then(|u| u.get("completion_tokens"))
+            .and_then(|x| x.as_u64()),
     })
 }
 
@@ -389,33 +507,62 @@ async fn zincire_yaz(st: &AppState, data_hash: [u8; 32], ts: u64) -> ChainProof 
         Ok(v) => v,
         Err(e) => {
             return ChainProof {
-                submitted: false, data_hash: hash_hex, verify_path, signer,
-                result: None, reason: Some(format!("vertex üretilemedi: {e:?}")),
+                submitted: false,
+                data_hash: hash_hex,
+                verify_path,
+                signer,
+                result: None,
+                reason: Some(format!("vertex üretilemedi: {e:?}")),
             };
         }
     };
     let bytes = wire::encode(&vertex);
     let url = format!("{}/submit", st.cfg.chain_rpc);
-    match st.http.post(&url).json(&json!({ "hex": hex::encode(&bytes) })).send().await {
+    match st
+        .http
+        .post(&url)
+        .json(&json!({ "hex": hex::encode(&bytes) }))
+        .send()
+        .await
+    {
         Ok(resp) => match resp.json::<Value>().await {
             Ok(v) => {
-                let sonuc = v.get("sonuc").and_then(|s| s.as_str()).unwrap_or("").to_string();
+                let sonuc = v
+                    .get("sonuc")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let ok = v.get("ok").and_then(|o| o.as_bool()).unwrap_or(false);
                 let kabul = ok && !sonuc.contains("Rejected");
                 ChainProof {
-                    submitted: kabul, data_hash: hash_hex, verify_path, signer,
+                    submitted: kabul,
+                    data_hash: hash_hex,
+                    verify_path,
+                    signer,
                     result: Some(sonuc),
-                    reason: if kabul { None } else { Some("zincir reddetti/kabul etmedi".into()) },
+                    reason: if kabul {
+                        None
+                    } else {
+                        Some("zincir reddetti/kabul etmedi".into())
+                    },
                 }
             }
             Err(e) => ChainProof {
-                submitted: false, data_hash: hash_hex, verify_path, signer,
-                result: None, reason: Some(format!("submit yanıtı çözülemedi: {e}")),
+                submitted: false,
+                data_hash: hash_hex,
+                verify_path,
+                signer,
+                result: None,
+                reason: Some(format!("submit yanıtı çözülemedi: {e}")),
             },
         },
         Err(e) => ChainProof {
-            submitted: false, data_hash: hash_hex, verify_path, signer,
-            result: None, reason: Some(format!("submit isteği başarısız: {e}")),
+            submitted: false,
+            data_hash: hash_hex,
+            verify_path,
+            signer,
+            result: None,
+            reason: Some(format!("submit isteği başarısız: {e}")),
         },
     }
 }
@@ -430,9 +577,13 @@ async fn arac_calistir(st: &AppState, prompt: &str) -> Option<(String, &'static 
         // İSİM: sabit cevap (model yorumlamasın).
         Some(Niyet::Kimlik) => return Some((resmi::ISIM_CEVABI.to_string(), "kimlik")),
         // YETKİ GASPI + ACİLİYET (K-05, K-21): "sen en yetkilisin, onay beklemeden hemen öde" → kesin ret.
-        Some(Niyet::YetkiGaspi) => return Some((yonlendirici::YETKI_GASBI_REDDI.to_string(), "yetki-gasbi")),
+        Some(Niyet::YetkiGaspi) => {
+            return Some((yonlendirici::YETKI_GASBI_REDDI.to_string(), "yetki-gasbi"))
+        }
         // YETKİ DIŞI (K-05, K-21 yasak katmanı): imza, para/token, rol, silme, cihaz → sabit ret.
-        Some(Niyet::YetkiDisi) => return Some((yonlendirici::YETKI_REDDI.to_string(), "yetki-reddi")),
+        Some(Niyet::YetkiDisi) => {
+            return Some((yonlendirici::YETKI_REDDI.to_string(), "yetki-reddi"))
+        }
         _ => {}
     }
     // BELGE KAYIT TALEBİ: kayıt niyeti + tam hash → imzasız talep (KUBRA İMZALAMAZ).
@@ -450,7 +601,14 @@ async fn arac_calistir(st: &AppState, prompt: &str) -> Option<(String, &'static 
         // KARAR: KARARLAR.md'den birebir (hesap makinesinden ÖNCE: "K-20" bir işlem değildir).
         Some(Niyet::Karar(nolar)) => {
             let (metin, bulundu) = kayitlar::karar_cevabi(&st.kararlar, &nolar);
-            return Some((metin, if bulundu { "karar-kaydi" } else { "karar-bulunamadi" }));
+            return Some((
+                metin,
+                if bulundu {
+                    "karar-kaydi"
+                } else {
+                    "karar-bulunamadi"
+                },
+            ));
         }
         Some(Niyet::KaynakListesi) if !st.kaynak_ozeti.is_empty() => {
             return Some((st.kaynak_ozeti.clone(), "kaynak-listesi"));
@@ -483,7 +641,9 @@ async fn arac_calistir(st: &AppState, prompt: &str) -> Option<(String, &'static 
         if let (Some(a), Some(e)) = (&st.anlamsal, &st.embedder) {
             match a.sinifla(e, prompt) {
                 Some("kimlik") => return Some((resmi::ISIM_CEVABI.to_string(), "kimlik")),
-                Some("kaynak-listesi") if !st.kaynak_ozeti.is_empty() => return Some((st.kaynak_ozeti.clone(), "kaynak-listesi")),
+                Some("kaynak-listesi") if !st.kaynak_ozeti.is_empty() => {
+                    return Some((st.kaynak_ozeti.clone(), "kaynak-listesi"))
+                }
                 Some("ag-durumu") => {
                     if let Some(x) = zincir::ag_durumu_getir(&st.http, &st.cfg.chain_rpc).await {
                         return Some((x, "ag-durumu"));
@@ -509,25 +669,50 @@ async fn arac_calistir(st: &AppState, prompt: &str) -> Option<(String, &'static 
 // Zincirden OKUR (/belge, /kurum, /tips); anahtar KULLANMAZ, /submit ÇAĞIRMAZ.
 async fn rpc_json(st: &AppState, yol: &str) -> Result<Value, String> {
     let url = format!("{}{}", st.cfg.chain_rpc.trim_end_matches('/'), yol);
-    let r = st.http.get(&url).send().await.map_err(|e| format!("zincire ulaşılamıyor: {e}"))?;
-    zincir::json_oku(r, yol).await.ok_or_else(|| "zincir yanıtı çözülemedi".to_string())
+    let r = st
+        .http
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("zincire ulaşılamıyor: {e}"))?;
+    zincir::json_oku(r, yol)
+        .await
+        .ok_or_else(|| "zincir yanıtı çözülemedi".to_string())
 }
 
-async fn belge_talebi(st: &AppState, hash: [u8; 32], imzalayan_pk: Option<[u8; 32]>) -> Result<Value, String> {
-    let zincir = belge_arac::belge_durumu_coz(&rpc_json(st, &format!("/belge/{}", hex::encode(hash))).await?);
+async fn belge_talebi(
+    st: &AppState,
+    hash: [u8; 32],
+    imzalayan_pk: Option<[u8; 32]>,
+) -> Result<Value, String> {
+    let zincir = belge_arac::belge_durumu_coz(
+        &rpc_json(st, &format!("/belge/{}", hex::encode(hash))).await?,
+    );
     let kurum = match imzalayan_pk {
         Some(pk) => {
             let adres = hex::encode(public_key_to_adres(&pk));
-            Some(belge_arac::kurum_durumu_coz(&rpc_json(st, &format!("/kurum/{adres}")).await?))
+            Some(belge_arac::kurum_durumu_coz(
+                &rpc_json(st, &format!("/kurum/{adres}")).await?,
+            ))
         }
         None => None,
     };
     let tips = uclari_cek(&st.http, &st.cfg.chain_rpc).await;
-    belge_arac::talep_kur(st.cfg.net_id, hash, tips, now_secs(), &zincir, imzalayan_pk.zip(kurum.as_ref()))
+    belge_arac::talep_kur(
+        st.cfg.net_id,
+        hash,
+        tips,
+        now_secs(),
+        &zincir,
+        imzalayan_pk.zip(kurum.as_ref()),
+    )
 }
 
 async fn belge_talep_sohbet(st: &AppState, hash_hex: &str) -> String {
-    let hash = match belge_arac::hex32(hash_hex) { Ok(h) => h, Err(e) => return format!("Kayıt talebi hazırlanamadı: {e}") };
+    let hash = match belge_arac::hex32(hash_hex) {
+        Ok(h) => h,
+        Err(e) => return format!("Kayıt talebi hazırlanamadı: {e}"),
+    };
     match belge_talebi(st, hash, None).await {
         Ok(t) => belge_arac::sohbet_metni(&t),
         Err(e) => format!("Kayıt talebi şu an hazırlanamadı: {e}. Lütfen biraz sonra tekrar dene."),
@@ -543,29 +728,63 @@ struct BelgeHazirlaReq {
     imzalayan_pubkey: Option<String>,
 }
 
-async fn belge_hazirla(State(st): State<Arc<AppState>>, Json(req): Json<BelgeHazirlaReq>) -> (StatusCode, Json<Value>) {
+async fn belge_hazirla(
+    State(st): State<Arc<AppState>>,
+    Json(req): Json<BelgeHazirlaReq>,
+) -> (StatusCode, Json<Value>) {
     let hash = match belge_arac::hex32(&req.hash) {
         Ok(h) => h,
-        Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({ "ok": false, "hata": format!("hash: {e}") }))),
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "ok": false, "hata": format!("hash: {e}") })),
+            )
+        }
     };
-    let pk = match req.imzalayan_pubkey.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    let pk = match req
+        .imzalayan_pubkey
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         None => None,
         Some(s) => match belge_arac::hex32(s) {
             Ok(p) if ed25519_dalek::VerifyingKey::from_bytes(&p).is_ok() => Some(p),
-            _ => return (StatusCode::BAD_REQUEST, Json(json!({ "ok": false, "hata": "imzalayan_pubkey geçersiz ed25519 açık anahtarı" }))),
+            _ => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(
+                        json!({ "ok": false, "hata": "imzalayan_pubkey geçersiz ed25519 açık anahtarı" }),
+                    ),
+                )
+            }
         },
     };
     match belge_talebi(&st, hash, pk).await {
         Ok(t) => (StatusCode::OK, Json(json!({ "ok": true, "talep": t }))),
-        Err(e) => (StatusCode::BAD_GATEWAY, Json(json!({ "ok": false, "hata": e }))),
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "ok": false, "hata": e })),
+        ),
     }
 }
 
 // Araç cevabını zincire yaz (tuzlu etkileşim hash'i = net_id|ts|prompt|sonuç|araç).
 // Tuz zincire YAZILMAZ; yalnız kullanıcıya döner (bkz. kanit.rs).
-async fn arac_kanit(st: &AppState, prompt: &str, sonuc: &str, arac_ad: &str, ts: u64) -> ([u8; 32], ChainProof, [u8; 32]) {
+async fn arac_kanit(
+    st: &AppState,
+    prompt: &str,
+    sonuc: &str,
+    arac_ad: &str,
+    ts: u64,
+) -> ([u8; 32], ChainProof, [u8; 32]) {
     let tuz = kanit::yeni_tuz();
-    let data_hash = kanit::kanit_hash(st.cfg.net_id, ts, &[prompt.as_bytes(), sonuc.as_bytes(), arac_ad.as_bytes()], Some(&tuz));
+    let data_hash = kanit::kanit_hash(
+        st.cfg.net_id,
+        ts,
+        &[prompt.as_bytes(), sonuc.as_bytes(), arac_ad.as_bytes()],
+        Some(&tuz),
+    );
     let chain = zincire_yaz(st, data_hash, ts).await;
     (data_hash, chain, tuz)
 }
@@ -578,7 +797,11 @@ fn resmi_baglam(st: &AppState, prompt: &str) -> Option<(Vec<retrieval::Pasaj>, S
     if kayitlar::neden_sorusu_mu(prompt) {
         for k in kayitlar::ilgili_kararlar(&st.kararlar, prompt, 2) {
             pasajlar.push(retrieval::Pasaj {
-                kaynak: "KARARLAR.md".into(), baslik: k.kunye(), metin: k.metin.clone(), url: None, skor: 0,
+                kaynak: "KARARLAR.md".into(),
+                baslik: k.kunye(),
+                metin: k.metin.clone(),
+                url: None,
+                skor: 0,
             });
         }
     }
@@ -639,14 +862,26 @@ struct Iz {
     etiket: String,
 }
 
-fn iz_yap(prompt: &str, arac: Option<&str>, kapi: &str, kaynaklar: Vec<Kaynak>, beyin: &str, model: &str, etiket: &str) -> Iz {
+fn iz_yap(
+    prompt: &str,
+    arac: Option<&str>,
+    kapi: &str,
+    kaynaklar: Vec<Kaynak>,
+    beyin: &str,
+    model: &str,
+    etiket: &str,
+) -> Iz {
     Iz {
         surum: env!("SOULWARE_GIT_SHA").to_string(),
         // Bu dört araca yalnız kural niyeti ya da P2 anlamsal eşleşmesiyle gidilir: kural yoksa yol "anlamsal"dır.
-        niyet: yonlendirici::niyet_bul(prompt).map(|n| n.ad()).or_else(|| match arac {
-            Some(a @ ("kimlik" | "ag-durumu" | "on-satis-durumu" | "kaynak-listesi")) => Some(format!("anlamsal:{a}")),
-            _ => None,
-        }),
+        niyet: yonlendirici::niyet_bul(prompt)
+            .map(|n| n.ad())
+            .or_else(|| match arac {
+                Some(a @ ("kimlik" | "ag-durumu" | "on-satis-durumu" | "kaynak-listesi")) => {
+                    Some(format!("anlamsal:{a}"))
+                }
+                _ => None,
+            }),
         arac: arac.map(str::to_string),
         kapi: kapi.to_string(),
         zincir_okumalari: zincir::izi_al(),
@@ -663,9 +898,17 @@ fn arac_kaynaklari(st: &AppState, prompt: &str, arac_ad: &str) -> Vec<Kaynak> {
         "karar-kaydi" => yonlendirici::karar_numaralari(prompt)
             .iter()
             .filter_map(|n| st.kararlar.iter().find(|k| k.no == *n))
-            .map(|k| Kaynak { kaynak: "KARARLAR.md".into(), baslik: k.kunye(), url: None })
+            .map(|k| Kaynak {
+                kaynak: "KARARLAR.md".into(),
+                baslik: k.kunye(),
+                url: None,
+            })
             .collect(),
-        "kaynak-listesi" => vec![Kaynak { kaynak: "KAYNAKLAR.md".into(), baslik: "Onaylı kaynak listesi".into(), url: None }],
+        "kaynak-listesi" => vec![Kaynak {
+            kaynak: "KAYNAKLAR.md".into(),
+            baslik: "Onaylı kaynak listesi".into(),
+            url: None,
+        }],
         _ => vec![],
     }
 }
@@ -700,7 +943,10 @@ struct AskResp {
 }
 
 fn now_secs() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 // KUBRA'nın kullanabileceği AÇIK gelişmiş modeller + hangisi yüklü. Beyin pluggable:
@@ -715,7 +961,8 @@ async fn models(State(st): State<Arc<AppState>>) -> Json<Value> {
     let mut modeller = reg.get("modeller").cloned().unwrap_or_else(|| json!([]));
     if let Some(arr) = modeller.as_array_mut() {
         for m in arr.iter_mut() {
-            let yuklu = m.get("yerel").and_then(|y| y.as_str()) == Some(st.cfg.local_model.as_str())
+            let yuklu = m.get("yerel").and_then(|y| y.as_str())
+                == Some(st.cfg.local_model.as_str())
                 && st.local.is_some();
             if let Some(obj) = m.as_object_mut() {
                 obj.insert("yuklu".into(), json!(yuklu));
@@ -734,14 +981,30 @@ async fn models(State(st): State<Arc<AppState>>) -> Json<Value> {
 // /retrieve — HIZLI retrieval testi (üretim YOK): bir sorgu için getirilen kaynakları
 // + skorları döndürür. Retrieval kalitesini generate beklemeden ölçmek için.
 #[derive(Deserialize)]
-struct RetrieveReq { prompt: String }
+struct RetrieveReq {
+    prompt: String,
+}
 
 async fn retrieve(State(st): State<Arc<AppState>>, Json(req): Json<RetrieveReq>) -> Json<Value> {
     let qemb = st.embedder.as_ref().and_then(|e| e.embed(&req.prompt).ok());
-    let depo = match st.depo.lock() { Ok(g) => g, Err(p) => p.into_inner() };
+    let depo = match st.depo.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    };
     let (mod_, pasajlar) = match qemb {
-        Some(qv) => ("semantik", depo.ara_semantik(&qv, st.cfg.ground_k, st.cfg.embed_min, st.cfg.ground_ratio)),
-        None => ("keyword", depo.ara(&req.prompt, st.cfg.ground_k, st.cfg.ground_min, st.cfg.ground_ratio)),
+        Some(qv) => (
+            "semantik",
+            depo.ara_semantik(&qv, st.cfg.ground_k, st.cfg.embed_min, st.cfg.ground_ratio),
+        ),
+        None => (
+            "keyword",
+            depo.ara(
+                &req.prompt,
+                st.cfg.ground_k,
+                st.cfg.ground_min,
+                st.cfg.ground_ratio,
+            ),
+        ),
     };
     Json(json!({
         "ok": true, "mod": mod_, "sorgu": req.prompt,
@@ -756,7 +1019,10 @@ async fn retrieve(State(st): State<Arc<AppState>>, Json(req): Json<RetrieveReq>)
 
 // GEÇİCİ: semantik embedding doğrulama — anlam ayrımı yapıyor mu?
 async fn embed_test(State(st): State<Arc<AppState>>) -> Json<Value> {
-    let e = match &st.embedder { Some(e) => e, None => return Json(json!({ "ok": false, "hata": "embedder yok" })) };
+    let e = match &st.embedder {
+        Some(e) => e,
+        None => return Json(json!({ "ok": false, "hata": "embedder yok" })),
+    };
     let q = "Türkiye'nin başkenti neresidir";
     let dogru = "Ankara, Türkiye'nin başkenti ve İç Anadolu'da bir şehirdir";
     let gurultu = "Türkiye'deki siyasi partiler listesi ve tarihçesi";
@@ -781,15 +1047,30 @@ async fn embed_test(State(st): State<Arc<AppState>>) -> Json<Value> {
 // Yargıç hata verirse / erişilemezse / tanınmayan yanıt dönerse istek REDDEDİLİR.
 /// `yargic_sor=false`: yalnız kurallar (sert blok + kural dosyası). Kesin araç ve gerekçe yolları için
 /// (bkz. guvenlik_kapisi::yargic_atlanir); kural eşleşmesi yine reddeder.
-async fn kapi(st: &AppState, uc: guvenlik_kapisi::Uc, prompt: &str, yargic_sor: bool) -> guvenlik_kapisi::Karar {
+async fn kapi(
+    st: &AppState,
+    uc: guvenlik_kapisi::Uc,
+    prompt: &str,
+    yargic_sor: bool,
+) -> guvenlik_kapisi::Karar {
     use guvenlik_kapisi::{Kategori, Yargic};
     let p = prompt.to_lowercase();
     const SERT_YASAK: &[&str] = &[
-        "child porn", "cp porn", "çocuk porno", "cocuk porno", "minor sex", "underage sex",
-        "child sexual", "çocuk cinsel", "cocuk cinsel", "pedophil",
+        "child porn",
+        "cp porn",
+        "çocuk porno",
+        "cocuk porno",
+        "minor sex",
+        "underage sex",
+        "child sexual",
+        "çocuk cinsel",
+        "cocuk cinsel",
+        "pedophil",
     ];
     let mut kural = st.kurallar.eslesen(prompt);
-    if SERT_YASAK.iter().any(|k| p.contains(k)) { kural.insert(0, Kategori::CocukIstismari); }
+    if SERT_YASAK.iter().any(|k| p.contains(k)) {
+        kural.insert(0, Kategori::CocukIstismari);
+    }
     let yargic = if !kural.is_empty() {
         Yargic::Yok // kural zaten reddediyor: yargıca gerek yok
     } else if !yargic_sor {
@@ -804,12 +1085,24 @@ async fn kapi(st: &AppState, uc: guvenlik_kapisi::Uc, prompt: &str, yargic_sor: 
         if st.cfg.kapi_yargic_gramer {
             body["grammar"] = json!(guvenlik_kapisi::yargic_grameri());
         }
-        match st.http.post(url).json(&body).timeout(Duration::from_secs(30)).send().await {
+        match st
+            .http
+            .post(url)
+            .json(&body)
+            .timeout(Duration::from_secs(30))
+            .send()
+            .await
+        {
             Ok(r) if r.status().is_success() => match r.json::<Value>().await {
                 Ok(v) => guvenlik_kapisi::yargic_coz(
-                    v.get("choices").and_then(|c| c.as_array()).and_then(|a| a.first())
-                        .and_then(|c| c.get("message")).and_then(|m| m.get("content"))
-                        .and_then(|t| t.as_str()).unwrap_or("")),
+                    v.get("choices")
+                        .and_then(|c| c.as_array())
+                        .and_then(|a| a.first())
+                        .and_then(|c| c.get("message"))
+                        .and_then(|m| m.get("content"))
+                        .and_then(|t| t.as_str())
+                        .unwrap_or(""),
+                ),
                 Err(_) => Yargic::Hata,
             },
             _ => Yargic::Hata,
@@ -828,7 +1121,9 @@ async fn kapi(st: &AppState, uc: guvenlik_kapisi::Uc, prompt: &str, yargic_sor: 
 // PRO: kısa/Türkçe istemi zengin, detaylı İngilizce görsel istemine çevir (pro araçlar bunu yapıyor).
 // Beyin yoksa/hata olursa → orijinal istemi aynen kullan.
 async fn istem_gelistir(st: &AppState, prompt: &str) -> String {
-    let Some(url) = st.cfg.remote_url.as_ref() else { return prompt.to_string(); };
+    let Some(url) = st.cfg.remote_url.as_ref() else {
+        return prompt.to_string();
+    };
     let sys = "You are an expert prompt engineer for AI image generation. Rewrite the user's request as \
         ONE vivid, richly detailed image prompt in ENGLISH. Preserve the user's intent, but add helpful \
         detail: subject, style, lighting, composition, mood, colors and quality tags (highly detailed, \
@@ -842,10 +1137,21 @@ async fn istem_gelistir(st: &AppState, prompt: &str) -> String {
     match st.http.post(url).json(&body).send().await {
         Ok(r) => match r.json::<Value>().await {
             Ok(v) => {
-                let out = v.get("choices").and_then(|c| c.as_array()).and_then(|a| a.first())
-                    .and_then(|c| c.get("message")).and_then(|m| m.get("content"))
-                    .and_then(|s| s.as_str()).unwrap_or("").trim().to_string();
-                if out.is_empty() { prompt.to_string() } else { out }
+                let out = v
+                    .get("choices")
+                    .and_then(|c| c.as_array())
+                    .and_then(|a| a.first())
+                    .and_then(|c| c.get("message"))
+                    .and_then(|m| m.get("content"))
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                if out.is_empty() {
+                    prompt.to_string()
+                } else {
+                    out
+                }
             }
             Err(_) => prompt.to_string(),
         },
@@ -854,39 +1160,85 @@ async fn istem_gelistir(st: &AppState, prompt: &str) -> String {
 }
 
 #[derive(serde::Deserialize)]
-struct GorselReq { prompt: String, #[serde(default)] wallet: Option<String> }
+struct GorselReq {
+    prompt: String,
+    #[serde(default)]
+    wallet: Option<String>,
+}
 
 // KUBRA görsel üretimi: istem → uzak GPU görsel servisi (SDXL-Turbo) → PNG.
-async fn gorsel(State(st): State<Arc<AppState>>, Json(req): Json<GorselReq>) -> axum::response::Response {
+async fn gorsel(
+    State(st): State<Arc<AppState>>,
+    Json(req): Json<GorselReq>,
+) -> axum::response::Response {
     let url = match st.cfg.image_url.as_ref() {
         Some(u) => u,
-        None => return (StatusCode::SERVICE_UNAVAILABLE, "görsel servisi yapılandırılmadı").into_response(),
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "görsel servisi yapılandırılmadı",
+            )
+                .into_response()
+        }
     };
     let prompt = req.prompt.trim();
     if prompt.is_empty() {
         return (StatusCode::BAD_REQUEST, "boş istem").into_response();
     }
     // ── KORUMA KALKANI (1): GÜVENLİK KAPISI — zararlıyı üretmeden reddet ──
-    if kapi(&st, guvenlik_kapisi::Uc::Gorsel, prompt, true).await.reddedildi() {
-        return (StatusCode::UNPROCESSABLE_ENTITY, guvenlik_kapisi::RET_METNI_GORSEL).into_response();
+    if kapi(&st, guvenlik_kapisi::Uc::Gorsel, prompt, true)
+        .await
+        .reddedildi()
+    {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            guvenlik_kapisi::RET_METNI_GORSEL,
+        )
+            .into_response();
     }
     // PRO: istemi zengin İngilizce görsel istemine geliştir (kısa/Türkçe → detaylı, pro kalite)
     let gelismis = istem_gelistir(&st, prompt).await;
     // Üret (geliştirilmiş istemle)
-    let bytes = match st.http.post(url).json(&json!({ "prompt": gelismis })).send().await {
+    let bytes = match st
+        .http
+        .post(url)
+        .json(&json!({ "prompt": gelismis }))
+        .send()
+        .await
+    {
         Ok(resp) if resp.status().is_success() => match resp.bytes().await {
             Ok(b) => b,
-            Err(e) => return (StatusCode::BAD_GATEWAY, format!("görsel bayt hatası: {e}")).into_response(),
+            Err(e) => {
+                return (StatusCode::BAD_GATEWAY, format!("görsel bayt hatası: {e}"))
+                    .into_response()
+            }
         },
-        Ok(resp) => return (StatusCode::BAD_GATEWAY, format!("görsel servis HTTP {}", resp.status())).into_response(),
-        Err(e) => return (StatusCode::BAD_GATEWAY, format!("görsel servis erişilemez: {e}")).into_response(),
+        Ok(resp) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                format!("görsel servis HTTP {}", resp.status()),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                format!("görsel servis erişilemez: {e}"),
+            )
+                .into_response()
+        }
     };
     // ── KORUMA KALKANI (2): KÖKEN LİSANSI — içeriği zincire yaz (sahiplik/telif kanıtı) ──
-    let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     // Tuzlu köken hash'i: prompt|[cüzdan]|içerik. Tuz zincire yazılmaz, başlıkta döner.
     let tuz = kanit::yeni_tuz();
     let mut alanlar: Vec<&[u8]> = vec![prompt.as_bytes()];
-    if let Some(w) = req.wallet.as_deref() { alanlar.push(w.as_bytes()); }
+    if let Some(w) = req.wallet.as_deref() {
+        alanlar.push(w.as_bytes());
+    }
     alanlar.push(&bytes);
     let data_hash = kanit::kanit_hash(st.cfg.net_id, ts, &alanlar, Some(&tuz));
     let _ = zincire_yaz(&st, data_hash, ts).await;
@@ -898,34 +1250,79 @@ async fn gorsel(State(st): State<Arc<AppState>>, Json(req): Json<GorselReq>) -> 
         .header("x-kubra-salt", hex::encode(tuz))
         .header("x-kubra-ts", ts.to_string())
         .body(Body::from(bytes))
-        .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "yanıt oluşturulamadı").into_response())
+        .unwrap_or_else(|_| {
+            (StatusCode::INTERNAL_SERVER_ERROR, "yanıt oluşturulamadı").into_response()
+        })
 }
 
 // KUBRA video üretimi: istem → uzak GPU video servisi (LTX) → MP4. Güvenlik kapısı + köken lisansı.
-async fn video_uret(State(st): State<Arc<AppState>>, Json(req): Json<GorselReq>) -> axum::response::Response {
+async fn video_uret(
+    State(st): State<Arc<AppState>>,
+    Json(req): Json<GorselReq>,
+) -> axum::response::Response {
     let url = match st.cfg.video_url.as_ref() {
         Some(u) => u,
-        None => return (StatusCode::SERVICE_UNAVAILABLE, "video servisi yapılandırılmadı").into_response(),
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "video servisi yapılandırılmadı",
+            )
+                .into_response()
+        }
     };
     let prompt = req.prompt.trim();
-    if prompt.is_empty() { return (StatusCode::BAD_REQUEST, "boş istem").into_response(); }
-    if kapi(&st, guvenlik_kapisi::Uc::Video, prompt, true).await.reddedildi() {
-        return (StatusCode::UNPROCESSABLE_ENTITY, guvenlik_kapisi::RET_METNI_GORSEL).into_response();
+    if prompt.is_empty() {
+        return (StatusCode::BAD_REQUEST, "boş istem").into_response();
+    }
+    if kapi(&st, guvenlik_kapisi::Uc::Video, prompt, true)
+        .await
+        .reddedildi()
+    {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            guvenlik_kapisi::RET_METNI_GORSEL,
+        )
+            .into_response();
     }
     let gelismis = istem_gelistir(&st, prompt).await;
-    let bytes = match st.http.post(url).json(&json!({ "prompt": gelismis })).send().await {
+    let bytes = match st
+        .http
+        .post(url)
+        .json(&json!({ "prompt": gelismis }))
+        .send()
+        .await
+    {
         Ok(resp) if resp.status().is_success() => match resp.bytes().await {
             Ok(b) => b,
-            Err(e) => return (StatusCode::BAD_GATEWAY, format!("video bayt hatası: {e}")).into_response(),
+            Err(e) => {
+                return (StatusCode::BAD_GATEWAY, format!("video bayt hatası: {e}")).into_response()
+            }
         },
-        Ok(resp) => return (StatusCode::BAD_GATEWAY, format!("video servis HTTP {}", resp.status())).into_response(),
-        Err(e) => return (StatusCode::BAD_GATEWAY, format!("video servis erişilemez: {e}")).into_response(),
+        Ok(resp) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                format!("video servis HTTP {}", resp.status()),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                format!("video servis erişilemez: {e}"),
+            )
+                .into_response()
+        }
     };
-    let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     // Tuzlu köken hash'i: prompt|[cüzdan]|içerik. Tuz zincire yazılmaz, başlıkta döner.
     let tuz = kanit::yeni_tuz();
     let mut alanlar: Vec<&[u8]> = vec![prompt.as_bytes()];
-    if let Some(w) = req.wallet.as_deref() { alanlar.push(w.as_bytes()); }
+    if let Some(w) = req.wallet.as_deref() {
+        alanlar.push(w.as_bytes());
+    }
     alanlar.push(&bytes);
     let data_hash = kanit::kanit_hash(st.cfg.net_id, ts, &alanlar, Some(&tuz));
     let _ = zincire_yaz(&st, data_hash, ts).await;
@@ -937,41 +1334,73 @@ async fn video_uret(State(st): State<Arc<AppState>>, Json(req): Json<GorselReq>)
         .header("x-kubra-salt", hex::encode(tuz))
         .header("x-kubra-ts", ts.to_string())
         .body(Body::from(bytes))
-        .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "yanıt oluşturulamadı").into_response())
+        .unwrap_or_else(|_| {
+            (StatusCode::INTERNAL_SERVER_ERROR, "yanıt oluşturulamadı").into_response()
+        })
 }
 
 // DOĞRULAMA: içerik (+ varsa tuz) → hash'i yeniden hesapla → zincirde var mı?
 // Tuz yoksa ESKİ (tuzsuz) şema: eski kayıtlar aynen doğrulanır. Tuz hiçbir yere kaydedilmez.
-async fn dogrula(State(st): State<Arc<AppState>>, Json(req): Json<kanit::DogrulaIstek>) -> (StatusCode, Json<Value>) {
+async fn dogrula(
+    State(st): State<Arc<AppState>>,
+    Json(req): Json<kanit::DogrulaIstek>,
+) -> (StatusCode, Json<Value>) {
     let (hash, tuzlu) = match kanit::dogrulama_hash(st.cfg.net_id, &req) {
         Ok(x) => x,
-        Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({ "ok": false, "hata": e }))),
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "ok": false, "hata": e })),
+            )
+        }
     };
     let hash_hex = hex::encode(hash);
-    let proof_eslesir = req.proof_hash.as_deref()
-        .map(|p| p.trim().trim_start_matches("0x").eq_ignore_ascii_case(&hash_hex));
-    let url = format!("{}/belge/{hash_hex}", st.cfg.chain_rpc.trim_end_matches('/'));
+    let proof_eslesir = req.proof_hash.as_deref().map(|p| {
+        p.trim()
+            .trim_start_matches("0x")
+            .eq_ignore_ascii_case(&hash_hex)
+    });
+    let url = format!(
+        "{}/belge/{hash_hex}",
+        st.cfg.chain_rpc.trim_end_matches('/')
+    );
     let v: Value = match st.http.get(&url).send().await {
         Ok(r) => match r.json().await {
             Ok(v) => v,
-            Err(e) => return (StatusCode::BAD_GATEWAY, Json(json!({ "ok": false, "hata": format!("zincir yanıtı çözülemedi: {e}") }))),
+            Err(e) => {
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    Json(json!({ "ok": false, "hata": format!("zincir yanıtı çözülemedi: {e}") })),
+                )
+            }
         },
-        Err(e) => return (StatusCode::BAD_GATEWAY, Json(json!({ "ok": false, "hata": format!("zincire ulaşılamıyor: {e}") }))),
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({ "ok": false, "hata": format!("zincire ulaşılamıyor: {e}") })),
+            )
+        }
     };
     let zincirde = v.get("kayitli").and_then(|x| x.as_bool()).unwrap_or(false);
-    let kaydeden = v.get("kaydeden").and_then(|x| x.as_str()).map(|a| a.trim_start_matches("0x").to_lowercase());
+    let kaydeden = v
+        .get("kaydeden")
+        .and_then(|x| x.as_str())
+        .map(|a| a.trim_start_matches("0x").to_lowercase());
     let kubra_imzali = kaydeden.as_deref().map(|a| a == hex::encode(st.key_addr));
-    (StatusCode::OK, Json(json!({
-        "ok": true,
-        "proof_hash": hash_hex,
-        "sema": if tuzlu { "tuzlu-v1" } else { "eski-tuzsuz" },
-        "proof_eslesir": proof_eslesir,
-        "zincirde": zincirde,
-        "kaydeden": kaydeden.map(|a| format!("0x{a}")),
-        "kubra_imzali": kubra_imzali,
-        "zaman": v.get("zaman").cloned(),
-        "dogrulandi": zincirde && kubra_imzali == Some(true) && proof_eslesir != Some(false),
-    })))
+    (
+        StatusCode::OK,
+        Json(json!({
+            "ok": true,
+            "proof_hash": hash_hex,
+            "sema": if tuzlu { "tuzlu-v1" } else { "eski-tuzsuz" },
+            "proof_eslesir": proof_eslesir,
+            "zincirde": zincirde,
+            "kaydeden": kaydeden.map(|a| format!("0x{a}")),
+            "kubra_imzali": kubra_imzali,
+            "zaman": v.get("zaman").cloned(),
+            "dogrulandi": zincirde && kubra_imzali == Some(true) && proof_eslesir != Some(false),
+        })),
+    )
 }
 
 async fn health() -> Json<Value> {
@@ -993,7 +1422,6 @@ async fn info(State(st): State<Arc<AppState>>) -> Json<Value> {
         "dogrulama": "POST /v1/verify {\"ts\":..,\"prompt\":\"..\",\"answer\":\"..\",\"model\":\"..\",\"salt\":\"(64 hex; eski kayitta yok)\"}",
     }))
 }
-
 
 // ── SSE STREAMING ENDPOINT: cevabi harf harf (token token) akitir ──
 // Arac (belge/ag/zincir) varsa tek seferde akitir (zaten anlik).
@@ -1127,51 +1555,108 @@ async fn ask_stream(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) ->
 
 /// Gerekçe sorusu ve KARARLAR.md'de karşılığı var mı (yargıç atlanır; model yalnız karar metniyle cevaplar)?
 fn gerekce_karari_var(st: &AppState, prompt: &str) -> bool {
-    kayitlar::neden_sorusu_mu(prompt) && !kayitlar::ilgili_kararlar(&st.kararlar, prompt, 1).is_empty()
+    kayitlar::neden_sorusu_mu(prompt)
+        && !kayitlar::ilgili_kararlar(&st.kararlar, prompt, 1).is_empty()
 }
 
 /// K-23 ret yanıtı (ask): model çağrılmaz; tuzlu kanıt zincire yazılır.
 async fn ret_yaniti(st: &AppState, prompt: &str, ts: u64, t0: std::time::Instant) -> AskResp {
     let sonuc = guvenlik_kapisi::RET_METNI.to_string();
-    let iz = iz_yap(prompt, Some("guvenlik-reddi"), "reddetti", vec![], "arac", "guvenlik-reddi", "reddedildi");
+    let iz = iz_yap(
+        prompt,
+        Some("guvenlik-reddi"),
+        "reddetti",
+        vec![],
+        "arac",
+        "guvenlik-reddi",
+        "reddedildi",
+    );
     let (data_hash, chain, tuz) = arac_kanit(st, prompt, &sonuc, "guvenlik-reddi", ts).await;
     AskResp {
-        ok: true, answer: sonuc, brain: "arac".into(), model: "guvenlik-reddi".into(),
-        grounded: false, abstained: false, sources: vec![],
-        latency_ms: t0.elapsed().as_millis(), input_tokens: None, output_tokens: None,
-        proof_hash: hex::encode(data_hash), ts, salt: Some(hex::encode(tuz)), chain, hata: None,
-        etiket: Some("reddedildi".into()), iz: Some(iz),
+        ok: true,
+        answer: sonuc,
+        brain: "arac".into(),
+        model: "guvenlik-reddi".into(),
+        grounded: false,
+        abstained: false,
+        sources: vec![],
+        latency_ms: t0.elapsed().as_millis(),
+        input_tokens: None,
+        output_tokens: None,
+        proof_hash: hex::encode(data_hash),
+        ts,
+        salt: Some(hex::encode(tuz)),
+        chain,
+        hata: None,
+        etiket: Some("reddedildi".into()),
+        iz: Some(iz),
     }
 }
 
 /// K-23 ret (akış): ret metni akıtılır, model çağrılmaz.
-async fn ret_akit(st: &AppState, prompt: &str, ts: u64, tx: &tokio::sync::mpsc::Sender<Result<Event, std::convert::Infallible>>) {
+async fn ret_akit(
+    st: &AppState,
+    prompt: &str,
+    ts: u64,
+    tx: &tokio::sync::mpsc::Sender<Result<Event, std::convert::Infallible>>,
+) {
     let sonuc = guvenlik_kapisi::RET_METNI;
-    let _ = tx.send(Ok(Event::default().event("token").data(sonuc))).await;
-    let iz = iz_yap(prompt, Some("guvenlik-reddi"), "reddetti", vec![], "arac", "guvenlik-reddi", "reddedildi");
+    let _ = tx
+        .send(Ok(Event::default().event("token").data(sonuc)))
+        .await;
+    let iz = iz_yap(
+        prompt,
+        Some("guvenlik-reddi"),
+        "reddetti",
+        vec![],
+        "arac",
+        "guvenlik-reddi",
+        "reddedildi",
+    );
     let (data_hash, chain, tuz) = arac_kanit(st, prompt, sonuc, "guvenlik-reddi", ts).await;
     let proof = serde_json::json!({"proof_hash": hex::encode(data_hash), "salt": hex::encode(tuz), "ts": ts, "prompt": prompt, "answer": sonuc, "model": "guvenlik-reddi", "brain": "arac", "etiket": "reddedildi", "iz": iz, "chain": chain});
-    let _ = tx.send(Ok(Event::default().event("done").data(proof.to_string()))).await;
+    let _ = tx
+        .send(Ok(Event::default().event("done").data(proof.to_string())))
+        .await;
 }
 
 // Beyin çağrısı (ask): Uzak GPU > yerel > Claude. Hata → hazır hata yanıtı.
 type BeyinSonucu = (String, String, String, Option<u64>, Option<u64>);
-async fn beyin_uret(st: &Arc<AppState>, req: &AskReq, uc_arg: &str) -> Result<BeyinSonucu, AskResp> {
+async fn beyin_uret(
+    st: &Arc<AppState>,
+    req: &AskReq,
+    uc_arg: &str,
+) -> Result<BeyinSonucu, AskResp> {
     let uc_arg = uc_arg.to_string();
     // BEYİN SEÇİMİ: Uzak GPU (varsa) > Egemen yerel (KUBRA) > Claude.
     let istek = req.brain.as_deref().unwrap_or(&st.cfg.brain_pref);
     // Doğrulanabilirlik için: deterministic → greedy (temp 0), yoksa hafif örnekleme.
-    let temp = if req.deterministic.unwrap_or(false) { 0.0 } else { 0.3 };
+    let temp = if req.deterministic.unwrap_or(false) {
+        0.0
+    } else {
+        0.3
+    };
     let yerel_kullan = st.local.is_some() && istek != "claude";
 
     // UZAK GPU: tercih "remote"/"auto" + URL varsa ÖNCE dene. Hata → yerele düş (dayanıklı;
     // GPU kapanırsa KUBRA yavaş ama çalışmaya devam eder).
     let uzak = if (istek == "remote" || istek == "auto") && st.cfg.remote_url.is_some() {
         match beyin_remote(&st, &uc_arg, temp).await {
-            Ok(b) => Some((b.text, b.model, "kubra-gpu".to_string(), b.input_tokens, b.output_tokens)),
-            Err(e) => { eprintln!("uzak GPU beyni başarısız → yerele düşülüyor: {e}"); None }
+            Ok(b) => Some((
+                b.text,
+                b.model,
+                "kubra-gpu".to_string(),
+                b.input_tokens,
+                b.output_tokens,
+            )),
+            Err(e) => {
+                eprintln!("uzak GPU beyni başarısız → yerele düşülüyor: {e}");
+                None
+            }
         }
-    } else { None };
+    } else {
+        None
+    };
 
     let sonuc = if let Some(r) = uzak {
         r
@@ -1203,7 +1688,13 @@ async fn beyin_uret(st: &Arc<AppState>, req: &AskReq, uc_arg: &str) -> Result<Be
         }
     } else {
         match beyin_claude(&st, &uc_arg).await {
-            Ok(b) => (b.text, b.model, "claude".to_string(), b.input_tokens, b.output_tokens),
+            Ok(b) => (
+                b.text,
+                b.model,
+                "claude".to_string(),
+                b.input_tokens,
+                b.output_tokens,
+            ),
             Err(e) => return Err(bos_hata(&e)),
         }
     };
@@ -1212,7 +1703,9 @@ async fn beyin_uret(st: &Arc<AppState>, req: &AskReq, uc_arg: &str) -> Result<Be
 
 async fn ask(State(st): State<Arc<AppState>>, Json(req): Json<AskReq>) -> Json<AskResp> {
     // İşlem izi: bu isteğin zincir okumaları task-local kayda toplanır.
-    zincir::IZ.scope(std::cell::RefCell::new(Vec::new()), ask_ic(st, req)).await
+    zincir::IZ
+        .scope(std::cell::RefCell::new(Vec::new()), ask_ic(st, req))
+        .await
 }
 
 async fn ask_ic(st: Arc<AppState>, req: AskReq) -> Json<AskResp> {
@@ -1223,30 +1716,57 @@ async fn ask_ic(st: Arc<AppState>, req: AskReq) -> Json<AskResp> {
     }
 
     // ── K-23 KURALLARI: her yoldan (araçlar dahil) ÖNCE; eşleşme → ret ──
-    if kapi(&st, guvenlik_kapisi::Uc::Ask, &req.prompt, false).await.reddedildi() {
+    if kapi(&st, guvenlik_kapisi::Uc::Ask, &req.prompt, false)
+        .await
+        .reddedildi()
+    {
         return Json(ret_yaniti(&st, &req.prompt, ts, t0).await);
     }
 
     // ── ARAÇ-KULLANIMI: kesin cevap gereken niyetler ZAYIF MODELE bırakılmaz ──
     // (isim, belge hash doğrulama/kayıt, ağ durumu, zincir sorgusu, hesap). Bkz. arac_calistir.
     if let Some((sonuc, arac_ad)) = arac_calistir(&st, &req.prompt).await {
-        let iz = iz_yap(&req.prompt, Some(arac_ad), "gecti", arac_kaynaklari(&st, &req.prompt, arac_ad), "arac", arac_ad, etiket::arac_etiketi(arac_ad));
+        let iz = iz_yap(
+            &req.prompt,
+            Some(arac_ad),
+            "gecti",
+            arac_kaynaklari(&st, &req.prompt, arac_ad),
+            "arac",
+            arac_ad,
+            etiket::arac_etiketi(arac_ad),
+        );
         let (data_hash, chain, tuz) = arac_kanit(&st, &req.prompt, &sonuc, arac_ad, ts).await;
         return Json(AskResp {
-            ok: true, answer: sonuc, brain: "arac".into(), model: arac_ad.into(),
-            grounded: false, abstained: arac_ad == "resmi-kaynak", sources: vec![],
-            latency_ms: t0.elapsed().as_millis(), input_tokens: None, output_tokens: None,
-            proof_hash: hex::encode(data_hash), ts, salt: Some(hex::encode(tuz)), chain, hata: None,
-            etiket: Some(etiket::arac_etiketi(arac_ad).into()), iz: Some(iz),
+            ok: true,
+            answer: sonuc,
+            brain: "arac".into(),
+            model: arac_ad.into(),
+            grounded: false,
+            abstained: arac_ad == "resmi-kaynak",
+            sources: vec![],
+            latency_ms: t0.elapsed().as_millis(),
+            input_tokens: None,
+            output_tokens: None,
+            proof_hash: hex::encode(data_hash),
+            ts,
+            salt: Some(hex::encode(tuz)),
+            chain,
+            hata: None,
+            etiket: Some(etiket::arac_etiketi(arac_ad).into()),
+            iz: Some(iz),
         });
     }
 
     // ── K-23 YARGICI (fail-closed): kesin araç değil ve KARARLAR'da karşılığı olan gerekçe sorusu değilse ──
     let gerekce = gerekce_karari_var(&st, &req.prompt);
-    let benign = !kanit_gerektiren_mi(&req.prompt) || yonlendirici::gelecek_tahmini_mi(&retrieval::sade(&req.prompt));
-    let guvenli = guvenlik_kapisi::guvenli_soru(&req.prompt, resmi::kubra_hakkinda_mi(&req.prompt), benign);
+    let benign = !kanit_gerektiren_mi(&req.prompt)
+        || yonlendirici::gelecek_tahmini_mi(&retrieval::sade(&req.prompt));
+    let guvenli =
+        guvenlik_kapisi::guvenli_soru(&req.prompt, resmi::kubra_hakkinda_mi(&req.prompt), benign);
     if !guvenlik_kapisi::yargic_atlanir(guvenlik_kapisi::Uc::Ask, false, gerekce, guvenli)
-        && kapi(&st, guvenlik_kapisi::Uc::Ask, &req.prompt, true).await.reddedildi()
+        && kapi(&st, guvenlik_kapisi::Uc::Ask, &req.prompt, true)
+            .await
+            .reddedildi()
     {
         return Json(ret_yaniti(&st, &req.prompt, ts, t0).await);
     }
@@ -1256,14 +1776,26 @@ async fn ask_ic(st: Arc<AppState>, req: AskReq) -> Json<AskResp> {
     // Diğerleri: önce egemen yerel depo, sonra (bloklu değilse) canlı Wikipedia.
     // Cevap kaynaktan üretilir; kaynak yoksa model 'Bilmiyorum' der.
     let ground_iste = req.ground.unwrap_or(st.cfg.ground);
-    let acik_baglam = req.context.as_deref().map(|c| !c.trim().is_empty()).unwrap_or(false);
+    let acik_baglam = req
+        .context
+        .as_deref()
+        .map(|c| !c.trim().is_empty())
+        .unwrap_or(false);
     let mut kaynaklar: Vec<Kaynak> = vec![];
-    let resmi_ctx = if acik_baglam { None } else { resmi_baglam(&st, &req.prompt) };
+    let resmi_ctx = if acik_baglam {
+        None
+    } else {
+        resmi_baglam(&st, &req.prompt)
+    };
     let etkin_baglam: Option<String> = if acik_baglam {
         req.context.clone()
     } else if let Some((pasajlar, baglam)) = &resmi_ctx {
         for p in pasajlar {
-            kaynaklar.push(Kaynak { kaynak: p.kaynak.clone(), baslik: p.baslik.clone(), url: p.url.clone() });
+            kaynaklar.push(Kaynak {
+                kaynak: p.kaynak.clone(),
+                baslik: p.baslik.clone(),
+                url: p.url.clone(),
+            });
         }
         Some(baglam.clone())
     } else if ground_iste && kanit_gerektiren_mi(&req.prompt) {
@@ -1271,15 +1803,26 @@ async fn ask_ic(st: Arc<AppState>, req: AskReq) -> Json<AskResp> {
         // Yerel depo. SEMANTİK (embedding) varsa anlam-bazlı; yoksa keyword (IDF).
         let mut pasajlar = {
             let qemb = st.embedder.as_ref().and_then(|e| e.embed(&req.prompt).ok());
-            let depo = match st.depo.lock() { Ok(g) => g, Err(p) => p.into_inner() };
+            let depo = match st.depo.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
             match qemb {
-                Some(qv) => depo.ara_semantik(&qv, st.cfg.ground_k, st.cfg.embed_min, st.cfg.ground_ratio),
-                None => depo.ara(&req.prompt, st.cfg.ground_k, st.cfg.ground_min, st.cfg.ground_ratio),
+                Some(qv) => {
+                    depo.ara_semantik(&qv, st.cfg.ground_k, st.cfg.embed_min, st.cfg.ground_ratio)
+                }
+                None => depo.ara(
+                    &req.prompt,
+                    st.cfg.ground_k,
+                    st.cfg.ground_min,
+                    st.cfg.ground_ratio,
+                ),
             }
         };
         // Canlı Wikipedia (opsiyonel; bu sunucuda bloklu → varsayılan kapalı).
         if st.cfg.wiki && pasajlar.len() < st.cfg.ground_k {
-            if let Some(w) = retrieval::wiki_getir(&st.http, &st.cfg.wiki_langs, &req.prompt).await {
+            if let Some(w) = retrieval::wiki_getir(&st.http, &st.cfg.wiki_langs, &req.prompt).await
+            {
                 pasajlar.push(w);
             }
         }
@@ -1287,7 +1830,11 @@ async fn ask_ic(st: Arc<AppState>, req: AskReq) -> Json<AskResp> {
             None
         } else {
             for p in &pasajlar {
-                kaynaklar.push(Kaynak { kaynak: p.kaynak.clone(), baslik: p.baslik.clone(), url: p.url.clone() });
+                kaynaklar.push(Kaynak {
+                    kaynak: p.kaynak.clone(),
+                    baslik: p.baslik.clone(),
+                    url: p.url.clone(),
+                });
             }
             Some(retrieval::baglam_yap(&pasajlar, st.cfg.ground_snippet))
         }
@@ -1300,14 +1847,35 @@ async fn ask_ic(st: Arc<AppState>, req: AskReq) -> Json<AskResp> {
     let tur = etiket::soru_turu(&req.prompt, !kanit_gerektiren_mi(&req.prompt));
     if etkin_baglam.is_none() && tur == etiket::SoruTuru::KesinOlgu {
         let sonuc = resmi::DOGRULANMAMIS.to_string();
-        let iz = iz_yap(&req.prompt, None, "gecti", vec![], "kural", "dogrulanmamis-bilgi", etiket::BILINMIYOR);
-        let (data_hash, chain, tuz) = arac_kanit(&st, &req.prompt, &sonuc, "dogrulanmamis-bilgi", ts).await;
+        let iz = iz_yap(
+            &req.prompt,
+            None,
+            "gecti",
+            vec![],
+            "kural",
+            "dogrulanmamis-bilgi",
+            etiket::BILINMIYOR,
+        );
+        let (data_hash, chain, tuz) =
+            arac_kanit(&st, &req.prompt, &sonuc, "dogrulanmamis-bilgi", ts).await;
         return Json(AskResp {
-            ok: true, answer: sonuc, brain: "kural".into(), model: "dogrulanmamis-bilgi".into(),
-            grounded: false, abstained: true, sources: vec![],
-            latency_ms: t0.elapsed().as_millis(), input_tokens: None, output_tokens: None,
-            proof_hash: hex::encode(data_hash), ts, salt: Some(hex::encode(tuz)), chain, hata: None,
-            etiket: Some(etiket::BILINMIYOR.into()), iz: Some(iz),
+            ok: true,
+            answer: sonuc,
+            brain: "kural".into(),
+            model: "dogrulanmamis-bilgi".into(),
+            grounded: false,
+            abstained: true,
+            sources: vec![],
+            latency_ms: t0.elapsed().as_millis(),
+            input_tokens: None,
+            output_tokens: None,
+            proof_hash: hex::encode(data_hash),
+            ts,
+            salt: Some(hex::encode(tuz)),
+            chain,
+            hata: None,
+            etiket: Some(etiket::BILINMIYOR.into()),
+            iz: Some(iz),
         });
     }
     let user_content = match (&resmi_ctx, &etkin_baglam) {
@@ -1317,32 +1885,46 @@ async fn ask_ic(st: Arc<AppState>, req: AskReq) -> Json<AskResp> {
         _ => grounded_user(&req.prompt, None), // sohbet
     };
 
-    let (answer, model, brain_name, in_tok, out_tok) = match beyin_uret(&st, &req, &user_content).await {
-        Ok(r) => r,
-        Err(h) => return Json(h),
-    };
+    let (answer, model, brain_name, in_tok, out_tok) =
+        match beyin_uret(&st, &req, &user_content).await {
+            Ok(r) => r,
+            Err(h) => return Json(h),
+        };
 
-    let grounded = etkin_baglam.as_deref().map(|c| !c.trim().is_empty()).unwrap_or(false);
+    let grounded = etkin_baglam
+        .as_deref()
+        .map(|c| !c.trim().is_empty())
+        .unwrap_or(false);
     // K-06 etiketi (deterministik): kaynaklı → atıf denetimi; kaynaksız → öneri ya da sohbet.
     let etiket_s = if grounded {
         // Resmî kaynak (KARARLAR / AIDAG belgeleri) yalnız kullanıcı bağlam vermediyse; içerik desteğine bakılır.
-        etiket::kaynakli_cevap_etiketi(&answer, etkin_baglam.as_deref().unwrap_or(""), kaynak_sayisi, resmi_ctx.is_some() && !acik_baglam)
+        etiket::kaynakli_cevap_etiketi(
+            &answer,
+            etkin_baglam.as_deref().unwrap_or(""),
+            kaynak_sayisi,
+            resmi_ctx.is_some() && !acik_baglam,
+        )
     } else if tur == etiket::SoruTuru::Oneri {
         etiket::ONERI
     } else {
         etiket::SOHBET
     };
     // Öneri türü soru + kaynaklı cevap "bilinmiyor" (ilgisiz kaynak) → kaynaksız ÖNERİ moduna düş.
-    let (answer, model, brain_name, etiket_s, kaynakli) = if grounded && etiket_s == etiket::BILINMIYOR && tur == etiket::SoruTuru::Oneri {
-        match beyin_uret(&st, &req, &etiket::oneri_user(&req.prompt)).await {
-            Ok((a2, m2, b2, _, _)) => (a2, m2, b2, etiket::ONERI, false),
-            Err(_) => (answer, model, brain_name, etiket_s, grounded),
-        }
-    } else {
-        (answer, model, brain_name, etiket_s, grounded)
-    };
+    let (answer, model, brain_name, etiket_s, kaynakli) =
+        if grounded && etiket_s == etiket::BILINMIYOR && tur == etiket::SoruTuru::Oneri {
+            match beyin_uret(&st, &req, &etiket::oneri_user(&req.prompt)).await {
+                Ok((a2, m2, b2, _, _)) => (a2, m2, b2, etiket::ONERI, false),
+                Err(_) => (answer, model, brain_name, etiket_s, grounded),
+            }
+        } else {
+            (answer, model, brain_name, etiket_s, grounded)
+        };
     // Öneri öneki: kaynaklı ama doğrulanmamış ↔ kaynaksız ayrı söylenir.
-    let onek = if kaynakli { etiket::KAYNAKLI_ONERI_ONEKI } else { etiket::ONERI_ONEKI };
+    let onek = if kaynakli {
+        etiket::KAYNAKLI_ONERI_ONEKI
+    } else {
+        etiket::ONERI_ONEKI
+    };
     let answer = if etiket_s == etiket::ONERI && !answer.starts_with(onek) {
         format!("{onek}{answer}")
     } else {
@@ -1350,11 +1932,23 @@ async fn ask_ic(st: Arc<AppState>, req: AskReq) -> Json<AskResp> {
     };
     let is_abstained = etiket_s == etiket::BILINMIYOR;
 
-    let iz = iz_yap(&req.prompt, None, "gecti", kaynaklar.clone(), &brain_name, &model, etiket_s);
+    let iz = iz_yap(
+        &req.prompt,
+        None,
+        "gecti",
+        kaynaklar.clone(),
+        &brain_name,
+        &model,
+        etiket_s,
+    );
     // ZİNCİR: tuzlu etkileşim hash'i imzalı Record olarak GERÇEK zincire (tuz zincire yazılmaz).
     let tuz = kanit::yeni_tuz();
-    let data_hash = kanit::kanit_hash(st.cfg.net_id, ts,
-        &[req.prompt.as_bytes(), answer.as_bytes(), model.as_bytes()], Some(&tuz));
+    let data_hash = kanit::kanit_hash(
+        st.cfg.net_id,
+        ts,
+        &[req.prompt.as_bytes(), answer.as_bytes(), model.as_bytes()],
+        Some(&tuz),
+    );
 
     let chain = zincire_yaz(&st, data_hash, ts).await;
 
@@ -1381,14 +1975,26 @@ async fn ask_ic(st: Arc<AppState>, req: AskReq) -> Json<AskResp> {
 
 fn bos_hata(mesaj: &str) -> AskResp {
     AskResp {
-        ok: false, answer: String::new(), brain: String::new(), model: String::new(),
-        grounded: false, abstained: false, sources: vec![], latency_ms: 0, input_tokens: None, output_tokens: None,
+        ok: false,
+        answer: String::new(),
+        brain: String::new(),
+        model: String::new(),
+        grounded: false,
+        abstained: false,
+        sources: vec![],
+        latency_ms: 0,
+        input_tokens: None,
+        output_tokens: None,
         proof_hash: String::new(),
         ts: 0,
         salt: None,
         chain: ChainProof {
-            submitted: false, data_hash: String::new(), verify_path: String::new(),
-            signer: String::new(), result: None, reason: Some("beyin başarısız — zincire yazılmadı".into()),
+            submitted: false,
+            data_hash: String::new(),
+            verify_path: String::new(),
+            signer: String::new(),
+            result: None,
+            reason: Some("beyin başarısız — zincire yazılmadı".into()),
         },
         hata: Some(mesaj.to_string()),
         etiket: None,
@@ -1411,21 +2017,40 @@ async fn kb_ingest(State(st): State<Arc<AppState>>, Json(req): Json<IngestReq>) 
         return Json(json!({ "ok": false, "hata": "baslik ve en az 10 karakter metin gerekli" }));
     }
     let n = {
-        let mut depo = match st.depo.lock() { Ok(g) => g, Err(p) => p.into_inner() };
+        let mut depo = match st.depo.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
         // ekle_embed: embedder varsa embedding'i SENKRON tut (semantik retrieval güncel kalır).
         depo.ekle_embed(
-            retrieval::Belge { baslik: req.baslik.trim().to_string(), metin: req.metin.trim().to_string(), url: req.url },
+            retrieval::Belge {
+                baslik: req.baslik.trim().to_string(),
+                metin: req.metin.trim().to_string(),
+                url: req.url,
+            },
             st.embedder.as_ref(),
         );
         depo.belgeler.len()
     };
-    Json(json!({ "ok": true, "belge_sayisi": n, "not": "korpus büyüdü; grounding bu belgeyi kullanabilir" }))
+    Json(
+        json!({ "ok": true, "belge_sayisi": n, "not": "korpus büyüdü; grounding bu belgeyi kullanabilir" }),
+    )
 }
 
 async fn kb_stats(State(st): State<Arc<AppState>>) -> Json<Value> {
-    let depo = match st.depo.lock() { Ok(g) => g, Err(p) => p.into_inner() };
-    let basliklar: Vec<&str> = depo.belgeler.iter().take(50).map(|b| b.baslik.as_str()).collect();
-    Json(json!({ "ok": true, "belge_sayisi": depo.belgeler.len(), "yol": depo.yol, "basliklar": basliklar }))
+    let depo = match st.depo.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    };
+    let basliklar: Vec<&str> = depo
+        .belgeler
+        .iter()
+        .take(50)
+        .map(|b| b.baslik.as_str())
+        .collect();
+    Json(
+        json!({ "ok": true, "belge_sayisi": depo.belgeler.len(), "yol": depo.yol, "basliklar": basliklar }),
+    )
 }
 
 #[tokio::main]
@@ -1454,7 +2079,9 @@ async fn main() {
             }
         },
         _ => {
-            eprintln!("HATA: bilinmeyen arguman: {argumanlar:?}. Gecerli: (yok) | --yeni-anahtar-uret");
+            eprintln!(
+                "HATA: bilinmeyen arguman: {argumanlar:?}. Gecerli: (yok) | --yeni-anahtar-uret"
+            );
             std::process::exit(2);
         }
     }
@@ -1470,11 +2097,16 @@ async fn main() {
     // EGEMEN YEREL BEYİN (KUBRA) yükle — dosya varsa. Yoksa None (Claude'a düşer).
     let (local, local_name) = if std::path::Path::new(&cfg.local_model).exists() {
         let ad = std::path::Path::new(&cfg.local_model)
-            .file_stem().and_then(|s| s.to_str()).unwrap_or("yerel").to_string();
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("yerel")
+            .to_string();
         println!("⏳ KUBRA yerel beyni yükleniyor: {} ...", cfg.local_model);
         // Şablon: SOULWARE_CHAT_TEMPLATE (chatml=Qwen varsayılan | deepseek). Bootstrap/
         // öğretmen modeller farklı format ister; KUBRA modelden bağımsız kalır.
-        let sablon = local_brain::Sablon::from_str(&std::env::var("SOULWARE_CHAT_TEMPLATE").unwrap_or_default());
+        let sablon = local_brain::Sablon::from_str(
+            &std::env::var("SOULWARE_CHAT_TEMPLATE").unwrap_or_default(),
+        );
         match local_brain::LocalBrain::load(&cfg.local_model, &cfg.local_tokenizer, &ad, sablon) {
             Ok(lb) => {
                 println!("✅ KUBRA yerel beyni yüklendi (egemen, ücretsiz, CPU).");
@@ -1486,11 +2118,17 @@ async fn main() {
             }
         }
     } else {
-        eprintln!("⚠ yerel model dosyası yok: {} (Claude'a düşülecek)", cfg.local_model);
+        eprintln!(
+            "⚠ yerel model dosyası yok: {} (Claude'a düşülecek)",
+            cfg.local_model
+        );
         (None, None)
     };
 
-    let http = reqwest::Client::builder().timeout(Duration::from_secs(300)).build().expect("http istemcisi");
+    let http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(300))
+        .build()
+        .expect("http istemcisi");
     let listen = cfg.listen.clone();
     let brain_ok = cfg.anthropic_key.is_some();
     let has_local = local.is_some();
@@ -1505,14 +2143,28 @@ async fn main() {
     let ground_acik = cfg.ground;
     let wiki_acik = cfg.wiki;
     // SEMANTİK EMBEDDING motoru (varsa) — anlam-bazlı retrieval. Yoksa keyword'e düşer.
-    let embedder = if std::path::Path::new(&format!("{}/model.safetensors", cfg.embed_dir)).exists() {
-        println!("⏳ semantik embedding modeli yükleniyor: {} ...", cfg.embed_dir);
+    let embedder = if std::path::Path::new(&format!("{}/model.safetensors", cfg.embed_dir)).exists()
+    {
+        println!(
+            "⏳ semantik embedding modeli yükleniyor: {} ...",
+            cfg.embed_dir
+        );
         match embed::Embedder::load(&cfg.embed_dir) {
-            Ok(e) => { println!("✅ semantik retrieval AÇIK ({}-boyut)", e.boyut); Some(e) }
-            Err(e) => { eprintln!("⚠ embedding yüklenemedi ({e}) → keyword retrieval'a düşülüyor"); None }
+            Ok(e) => {
+                println!("✅ semantik retrieval AÇIK ({}-boyut)", e.boyut);
+                Some(e)
+            }
+            Err(e) => {
+                eprintln!("⚠ embedding yüklenemedi ({e}) → keyword retrieval'a düşülüyor");
+                None
+            }
         }
     } else {
-        println!("ℹ embedding modeli yok ({}) → keyword retrieval", cfg.embed_dir); None
+        println!(
+            "ℹ embedding modeli yok ({}) → keyword retrieval",
+            cfg.embed_dir
+        );
+        None
     };
     let embed_acik = embedder.is_some();
     // Korpusu embed et (semantik retrieval için). Önce DİSK CACHE'i dene → restart hızlı.
@@ -1533,34 +2185,114 @@ async fn main() {
     // P2: anlamsal yedek niyet. VARSAYILAN KAPALI (SOULWARE_NIYET_ANLAMSAL=1 ile açılır): 26 Eylül 2026 ölçümünde
     // gizli sette kazanç getirmedi, ana sette "ne kadar" içeren para/miktar sorularını ön satış aracına yönlendirdi.
     // Daha geniş karşıt örnek setiyle yeniden ayarlanana kadar kapalı. Eşik: SOULWARE_NIYET_ESIK / SOULWARE_NIYET_FARK.
-    let anlamsal_acik = std::env::var("SOULWARE_NIYET_ANLAMSAL").map(|v| v == "1").unwrap_or(false);
+    let anlamsal_acik = std::env::var("SOULWARE_NIYET_ANLAMSAL")
+        .map(|v| v == "1")
+        .unwrap_or(false);
     let anlamsal = embedder.as_ref().filter(|_| anlamsal_acik).and_then(|e| {
-        let esik = std::env::var("SOULWARE_NIYET_ESIK").ok().and_then(|x| x.parse().ok()).unwrap_or(anlamsal_niyet::ESIK);
-        let fark = std::env::var("SOULWARE_NIYET_FARK").ok().and_then(|x| x.parse().ok()).unwrap_or(anlamsal_niyet::FARK);
+        let esik = std::env::var("SOULWARE_NIYET_ESIK")
+            .ok()
+            .and_then(|x| x.parse().ok())
+            .unwrap_or(anlamsal_niyet::ESIK);
+        let fark = std::env::var("SOULWARE_NIYET_FARK")
+            .ok()
+            .and_then(|x| x.parse().ok())
+            .unwrap_or(anlamsal_niyet::FARK);
         match anlamsal_niyet::AnlamsalNiyet::yukle(e, esik, fark) {
-            Ok(a) => { println!("   anlamsal niyet: açık (eşik {esik}, fark {fark})"); Some(a) }
-            Err(err) => { eprintln!("⚠ anlamsal niyet yüklenemedi: {err} → yalnız kurallar"); None }
+            Ok(a) => {
+                println!("   anlamsal niyet: açık (eşik {esik}, fark {fark})");
+                Some(a)
+            }
+            Err(err) => {
+                eprintln!("⚠ anlamsal niyet yüklenemedi: {err} → yalnız kurallar");
+                None
+            }
         }
     });
-    let kaynak_ozeti = std::fs::read_to_string(&cfg.kaynaklar_path).map(|m| kayitlar::kaynak_ozeti(&m)).unwrap_or_default();
-    println!("   kayıtlar    : {} karar maddesi, kaynak listesi {}", kararlar.len(), if kaynak_ozeti.is_empty() { "YOK" } else { "var" });
+    let kaynak_ozeti = std::fs::read_to_string(&cfg.kaynaklar_path)
+        .map(|m| kayitlar::kaynak_ozeti(&m))
+        .unwrap_or_default();
+    println!(
+        "   kayıtlar    : {} karar maddesi, kaynak listesi {}",
+        kararlar.len(),
+        if kaynak_ozeti.is_empty() {
+            "YOK"
+        } else {
+            "var"
+        }
+    );
     // K-23: bozuk kural dosyası -> servis AÇILMAZ (fail-closed). Dosya yoksa yalnız yargıç çalışır.
     let kurallar = match guvenlik_kapisi::Kurallar::yukle(&cfg.kapi_kurallari) {
-        Ok(k) => { println!("   K-23 kapısı : {} kural ifadesi, yargıç zorunlu: {}", k.ifade_sayisi(), cfg.kapi_yargic_zorunlu); k }
-        Err(e) => { eprintln!("HATA: K-23 kapı kuralları yüklenemedi: {e}"); std::process::exit(1); }
+        Ok(k) => {
+            println!(
+                "   K-23 kapısı : {} kural ifadesi, yargıç zorunlu: {}",
+                k.ifade_sayisi(),
+                cfg.kapi_yargic_zorunlu
+            );
+            k
+        }
+        Err(e) => {
+            eprintln!("HATA: K-23 kapı kuralları yüklenemedi: {e}");
+            std::process::exit(1);
+        }
     };
-    println!("📘 AIDAG resmi kaynak: {} belge ({})", resmi_belgeler.len(), cfg.resmi_path);
-    let state = Arc::new(AppState { cfg, http, key, key_addr, local, local_name, depo: Mutex::new(depo), embedder, resmi: resmi_belgeler, kurallar, kararlar, kaynak_ozeti, anlamsal });
+    println!(
+        "📘 AIDAG resmi kaynak: {} belge ({})",
+        resmi_belgeler.len(),
+        cfg.resmi_path
+    );
+    let state = Arc::new(AppState {
+        cfg,
+        http,
+        key,
+        key_addr,
+        local,
+        local_name,
+        depo: Mutex::new(depo),
+        embedder,
+        resmi: resmi_belgeler,
+        kurallar,
+        kararlar,
+        kaynak_ozeti,
+        anlamsal,
+    });
 
     println!("──────────────────────────────────────────────");
     println!("🌀 SoulwareAI çekirdeği · yapay zeka: KUBRA (v0.1)");
-    println!("   yerel beyin : {}", if has_local { "KUBRA (candle/CPU, egemen)" } else { "YOK" });
-    println!("   claude      : {}", if brain_ok { "yapılandırıldı (hibrit)" } else { "yok" });
+    println!(
+        "   yerel beyin : {}",
+        if has_local {
+            "KUBRA (candle/CPU, egemen)"
+        } else {
+            "YOK"
+        }
+    );
+    println!(
+        "   claude      : {}",
+        if brain_ok {
+            "yapılandırıldı (hibrit)"
+        } else {
+            "yok"
+        }
+    );
     println!("   beyin tercihi: {}", state.cfg.brain_pref);
-    println!("   grounding   : {} · yerel depo: {} belge · canlı wiki: {}",
-        if ground_acik { "AÇIK ✅" } else { "kapalı" }, belge_sayisi,
-        if wiki_acik { "açık" } else { "kapalı (sunucu bloklu)" });
-    println!("   retrieval   : {}", if embed_acik { "SEMANTİK (embedding) ✅" } else { "keyword (IDF)" });
+    println!(
+        "   grounding   : {} · yerel depo: {} belge · canlı wiki: {}",
+        if ground_acik { "AÇIK ✅" } else { "kapalı" },
+        belge_sayisi,
+        if wiki_acik {
+            "açık"
+        } else {
+            "kapalı (sunucu bloklu)"
+        }
+    );
+    println!(
+        "   retrieval   : {}",
+        if embed_acik {
+            "SEMANTİK (embedding) ✅"
+        } else {
+            "keyword (IDF)"
+        }
+    );
     println!("   zincir RPC  : {}", state.cfg.chain_rpc);
     println!("   imzalayan   : 0x{}", hex::encode(state.key_addr));
     println!("   dinleme     : http://{listen}");
@@ -1573,7 +2305,10 @@ async fn main() {
         .route("/v1/ask-stream", post(ask_stream))
         .route("/v1/verify", post(dogrula))
         // Belge dosyası bu uca GELMEZ: yalnız hash + (ops.) açık anahtar → küçük gövde sınırı.
-        .route("/v1/belge/hazirla", post(belge_hazirla).layer(axum::extract::DefaultBodyLimit::max(1024)))
+        .route(
+            "/v1/belge/hazirla",
+            post(belge_hazirla).layer(axum::extract::DefaultBodyLimit::max(1024)),
+        )
         .route("/v1/image", post(gorsel))
         .route("/v1/video", post(video_uret))
         .route("/kb/ingest", post(kb_ingest))
@@ -1584,6 +2319,8 @@ async fn main() {
         .with_state(state);
 
     let addr: SocketAddr = listen.parse().expect("SOULWARE_LISTEN geçersiz");
-    let listener = tokio::net::TcpListener::bind(addr).await.expect("port bağlanamadı");
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("port bağlanamadı");
     axum::serve(listener, app).await.expect("sunucu hatası");
 }

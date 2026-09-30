@@ -15,7 +15,9 @@ use lsc_engine::public_key_to_adres;
 use serde_json::{json, Value};
 use std::time::Duration;
 
-fn ev(k: &str, d: &str) -> String { std::env::var(k).unwrap_or_else(|_| d.to_string()) }
+fn ev(k: &str, d: &str) -> String {
+    std::env::var(k).unwrap_or_else(|_| d.to_string())
+}
 
 fn anahtar_yukle_veya_uret(path: &str) -> SigningKey {
     if let Ok(data) = std::fs::read(path) {
@@ -44,13 +46,19 @@ fn anahtar_yukle_veya_uret(path: &str) -> SigningKey {
 async fn main() {
     let coord = ev("SOULWARE_COORD_URL", "http://127.0.0.1:8647");
     let brain = ev("SOULWARE_BRAIN_URL", "http://127.0.0.1:8646");
-    let key_path = ev("SOULWARE_WORKER_KEY", "/root/aidag-lsc/.soulware-worker.key");
+    let key_path = ev(
+        "SOULWARE_WORKER_KEY",
+        "/root/aidag-lsc/.soulware-worker.key",
+    );
     let poll_sec: u64 = ev("SOULWARE_POLL_SEC", "3").parse().unwrap_or(3);
     let consent = ev("SOULWARE_CONSENT", "no").to_lowercase();
 
     // Cüzdan (AIDAG adresi) = worker kimliği + ödül alıcısı.
     let key = anahtar_yukle_veya_uret(&key_path);
-    let wallet = format!("0x{}", hex::encode(public_key_to_adres(&key.verifying_key().to_bytes())));
+    let wallet = format!(
+        "0x{}",
+        hex::encode(public_key_to_adres(&key.verifying_key().to_bytes()))
+    );
 
     println!("──────────────────────────────────────────────");
     println!("💻 SoulwareAI Worker (KUBRA istemcisi) v0.1");
@@ -62,53 +70,103 @@ async fn main() {
     // RIZA KAPISI: açık onay yoksa katkı YAPMA (GPU/CPU kullanılmaz).
     if consent != "yes" && consent != "evet" && consent != "true" {
         println!("⛔ Katkı için AÇIK İZİN gerekli. Boştaki gücünü ağa vermek istiyorsan:");
-        println!("   SOULWARE_CONSENT=yes ile başlat (uygulamada: 'boştaki GPU'mu ağa ver' kutusu).");
+        println!(
+            "   SOULWARE_CONSENT=yes ile başlat (uygulamada: 'boştaki GPU'mu ağa ver' kutusu)."
+        );
         println!("   İzin olmadan hiçbir kaynak kullanılmaz. KUBRA'yı kullanmak yine ÜCRETSİZ.");
         return;
     }
     println!("✅ İzin verildi — boştaki güç ağa katkı sağlayacak (istediğin an durdurabilirsin).");
 
-    let http = reqwest::Client::builder().timeout(Duration::from_secs(180)).build().expect("http");
+    let http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(180))
+        .build()
+        .expect("http");
 
     // Kaydol.
-    match http.post(format!("{coord}/worker/register")).json(&json!({ "wallet": wallet })).send().await {
+    match http
+        .post(format!("{coord}/worker/register"))
+        .json(&json!({ "wallet": wallet }))
+        .send()
+        .await
+    {
         Ok(r) => match r.json::<Value>().await {
-            Ok(v) if v.get("ok").and_then(|o| o.as_bool()).unwrap_or(false) => println!("📝 kaydolundu."),
-            _ => { eprintln!("kayıt reddedildi"); return; }
+            Ok(v) if v.get("ok").and_then(|o| o.as_bool()).unwrap_or(false) => {
+                println!("📝 kaydolundu.")
+            }
+            _ => {
+                eprintln!("kayıt reddedildi");
+                return;
+            }
         },
-        Err(e) => { eprintln!("koordinatöre ulaşılamadı: {e}"); return; }
+        Err(e) => {
+            eprintln!("koordinatöre ulaşılamadı: {e}");
+            return;
+        }
     }
 
     // ── ÖZ-KIYASLAMA: seviye (tier) belirle → iş yeteneğe göre dağıtılsın ──
     // Worker altın soruları kendi beyniyle (KUBRA) yanıtlar; koordinatör puanlar.
     // Büyük-GPU worker yüksek tier alır → zor işleri o alır (küçük model zayıf halka olmaz).
     if ev("SOULWARE_BENCHMARK", "yes") != "no" {
-        if let Ok(r) = http.get(format!("{coord}/worker/benchmark/{wallet}")).send().await {
+        if let Ok(r) = http
+            .get(format!("{coord}/worker/benchmark/{wallet}"))
+            .send()
+            .await
+        {
             if let Ok(v) = r.json::<Value>().await {
                 if let Some(sorular) = v.get("sorular").and_then(|s| s.as_array()) {
-                    println!("🎓 öz-kıyaslama: {} altın soru yanıtlanıyor...", sorular.len());
+                    println!(
+                        "🎓 öz-kıyaslama: {} altın soru yanıtlanıyor...",
+                        sorular.len()
+                    );
                     let mut cevaplar = Vec::new();
                     for q in sorular {
-                        let (Some(id), Some(soru)) = (q.get("id").and_then(|x| x.as_u64()), q.get("soru").and_then(|x| x.as_str())) else { continue };
+                        let (Some(id), Some(soru)) = (
+                            q.get("id").and_then(|x| x.as_u64()),
+                            q.get("soru").and_then(|x| x.as_str()),
+                        ) else {
+                            continue;
+                        };
                         let t0 = std::time::Instant::now();
-                        let cevap = match http.post(format!("{brain}/v1/ask"))
-                            .json(&json!({ "prompt": soru, "deterministic": true, "brain": "auto" }))
-                            .send().await {
-                            Ok(r) => r.json::<Value>().await.ok()
-                                .and_then(|v| v.get("answer").and_then(|a| a.as_str()).map(|s| s.to_string()))
+                        let cevap = match http
+                            .post(format!("{brain}/v1/ask"))
+                            .json(
+                                &json!({ "prompt": soru, "deterministic": true, "brain": "auto" }),
+                            )
+                            .send()
+                            .await
+                        {
+                            Ok(r) => r
+                                .json::<Value>()
+                                .await
+                                .ok()
+                                .and_then(|v| {
+                                    v.get("answer")
+                                        .and_then(|a| a.as_str())
+                                        .map(|s| s.to_string())
+                                })
                                 .unwrap_or_default(),
                             Err(_) => String::new(),
                         };
                         cevaplar.push(json!({ "id": id, "cevap": cevap, "ms": t0.elapsed().as_millis() as u64 }));
                     }
-                    if let Ok(r) = http.post(format!("{coord}/worker/benchmark"))
-                        .json(&json!({ "wallet": wallet, "cevaplar": cevaplar })).send().await {
+                    if let Ok(r) = http
+                        .post(format!("{coord}/worker/benchmark"))
+                        .json(&json!({ "wallet": wallet, "cevaplar": cevaplar }))
+                        .send()
+                        .await
+                    {
                         if let Ok(v) = r.json::<Value>().await {
-                            println!("🎓 seviye belirlendi: tier={} (doğru {}/{} · {}ms ort.)",
+                            println!(
+                                "🎓 seviye belirlendi: tier={} (doğru {}/{} · {}ms ort.)",
                                 v.get("tier").and_then(|x| x.as_u64()).unwrap_or(0),
                                 v.get("dogru").and_then(|x| x.as_u64()).unwrap_or(0),
                                 v.get("toplam").and_then(|x| x.as_u64()).unwrap_or(0),
-                                v.get("ort_gecikme_ms").and_then(|x| x.as_f64()).unwrap_or(0.0) as u64);
+                                v.get("ort_gecikme_ms")
+                                    .and_then(|x| x.as_f64())
+                                    .unwrap_or(0.0) as u64
+                            );
                         }
                     }
                 }
@@ -118,7 +176,11 @@ async fn main() {
 
     // Ana döngü: iş çek → KUBRA çalıştır → gönder.
     loop {
-        let is: Option<Value> = match http.get(format!("{coord}/worker/poll/{wallet}")).send().await {
+        let is: Option<Value> = match http
+            .get(format!("{coord}/worker/poll/{wallet}"))
+            .send()
+            .await
+        {
             Ok(r) => r.json::<Value>().await.ok(),
             Err(_) => None,
         };
@@ -129,40 +191,81 @@ async fn main() {
             }
             Some(v) => {
                 let id = v.get("job_id").and_then(|x| x.as_u64());
-                let p = v.get("prompt").and_then(|x| x.as_str()).map(|s| s.to_string());
-                let d = v.get("deterministic").and_then(|x| x.as_bool()).unwrap_or(true);
-                match (id, p) { (Some(id), Some(p)) => (id, p, d), _ => { tokio::time::sleep(Duration::from_secs(poll_sec)).await; continue; } }
+                let p = v
+                    .get("prompt")
+                    .and_then(|x| x.as_str())
+                    .map(|s| s.to_string());
+                let d = v
+                    .get("deterministic")
+                    .and_then(|x| x.as_bool())
+                    .unwrap_or(true);
+                match (id, p) {
+                    (Some(id), Some(p)) => (id, p, d),
+                    _ => {
+                        tokio::time::sleep(Duration::from_secs(poll_sec)).await;
+                        continue;
+                    }
+                }
             }
-            None => { tokio::time::sleep(Duration::from_secs(poll_sec)).await; continue; }
+            None => {
+                tokio::time::sleep(Duration::from_secs(poll_sec)).await;
+                continue;
+            }
         };
 
         println!("⚙  iş #{job_id} alındı → KUBRA çalıştırılıyor...");
         // KUBRA'yı çağır (deterministic → doğrulanabilir birebir çıktı).
-        let cevap = match http.post(format!("{brain}/v1/ask"))
+        let cevap = match http
+            .post(format!("{brain}/v1/ask"))
             .json(&json!({ "prompt": prompt, "deterministic": det, "brain": "auto" }))
-            .send().await {
+            .send()
+            .await
+        {
             Ok(r) => match r.json::<Value>().await {
-                Ok(v) if v.get("ok").and_then(|o| o.as_bool()).unwrap_or(false) =>
-                    v.get("answer").and_then(|a| a.as_str()).unwrap_or("").to_string(),
-                Ok(v) => { eprintln!("beyin hata: {}", v.get("hata").and_then(|h| h.as_str()).unwrap_or("?")); continue; }
-                Err(e) => { eprintln!("beyin yanıtı: {e}"); continue; }
-            },
-            Err(e) => { eprintln!("beyin isteği: {e}"); continue; }
-        };
-        if cevap.trim().is_empty() { eprintln!("boş cevap, atlanıyor"); continue; }
-
-        // Sonucu gönder.
-        match http.post(format!("{coord}/worker/submit"))
-            .json(&json!({ "wallet": wallet, "job_id": job_id, "answer": cevap }))
-            .send().await {
-            Ok(r) => if let Ok(v) = r.json::<Value>().await {
-                let durum = v.get("durum").and_then(|d| d.as_str()).unwrap_or("?");
-                if let Some(od) = v.get("oduller") {
-                    println!("💰 iş #{job_id}: {durum} — ödül: {od}");
-                } else {
-                    println!("📤 iş #{job_id}: {durum}");
+                Ok(v) if v.get("ok").and_then(|o| o.as_bool()).unwrap_or(false) => v
+                    .get("answer")
+                    .and_then(|a| a.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                Ok(v) => {
+                    eprintln!(
+                        "beyin hata: {}",
+                        v.get("hata").and_then(|h| h.as_str()).unwrap_or("?")
+                    );
+                    continue;
+                }
+                Err(e) => {
+                    eprintln!("beyin yanıtı: {e}");
+                    continue;
                 }
             },
+            Err(e) => {
+                eprintln!("beyin isteği: {e}");
+                continue;
+            }
+        };
+        if cevap.trim().is_empty() {
+            eprintln!("boş cevap, atlanıyor");
+            continue;
+        }
+
+        // Sonucu gönder.
+        match http
+            .post(format!("{coord}/worker/submit"))
+            .json(&json!({ "wallet": wallet, "job_id": job_id, "answer": cevap }))
+            .send()
+            .await
+        {
+            Ok(r) => {
+                if let Ok(v) = r.json::<Value>().await {
+                    let durum = v.get("durum").and_then(|d| d.as_str()).unwrap_or("?");
+                    if let Some(od) = v.get("oduller") {
+                        println!("💰 iş #{job_id}: {durum} — ödül: {od}");
+                    } else {
+                        println!("📤 iş #{job_id}: {durum}");
+                    }
+                }
+            }
             Err(e) => eprintln!("gönderim hata: {e}"),
         }
     }

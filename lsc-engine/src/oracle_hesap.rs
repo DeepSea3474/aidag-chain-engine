@@ -16,8 +16,8 @@ fn carp_256(a: u128, b: u16) -> (u128, u128) {
     let b = b as u128;
     let dusuk = (a & M64) * b; // < 2^80
     let yuksek = (a >> 64) * b; // < 2^80
-    // sonuc = yuksek * 2^64 + dusuk
-    // (yuksek << 64) u128'de yalniz DUSUK 128 biti tutar; ust bitler (yuksek >> 64).
+                                // sonuc = yuksek * 2^64 + dusuk
+                                // (yuksek << 64) u128'de yalniz DUSUK 128 biti tutar; ust bitler (yuksek >> 64).
     let (toplam, tasma) = dusuk.overflowing_add(yuksek << 64);
     ((yuksek >> 64) + u128::from(tasma), toplam) // < 2^16 + 1: tasmaz
 }
@@ -113,7 +113,11 @@ mod tests {
         assert_eq!(alt_medyan(&[]), None);
         assert_eq!(alt_medyan(&[5]), Some(5));
         assert_eq!(alt_medyan(&[1, 2, 3]), Some(2));
-        assert_eq!(alt_medyan(&[1, 2, 3, 4]), Some(2), "cift N: alt medyan, ortalama yok");
+        assert_eq!(
+            alt_medyan(&[1, 2, 3, 4]),
+            Some(2),
+            "cift N: alt medyan, ortalama yok"
+        );
         assert_eq!(alt_medyan(&[-9, -3, 0, 7]), Some(-3));
     }
 
@@ -143,7 +147,12 @@ mod tests {
         assert!(!sapma_asiyor(0, i128::MAX, 10_000));
         assert!(sapma_asiyor(-1, i128::MAX, 10_000));
         // carp_256 tutarliligi: kucuk sayilarda u128 carpimiyla ayni
-        for (x, b) in [(0u128, 0u16), (1, 1), (123_456_789, 10_000), (u64::MAX as u128, 65_535)] {
+        for (x, b) in [
+            (0u128, 0u16),
+            (1, 1),
+            (123_456_789, 10_000),
+            (u64::MAX as u128, 65_535),
+        ] {
             assert_eq!(carp_256(x, b), (0, x * b as u128));
         }
         assert_eq!(carp_256(u128::MAX, 2), (1, u128::MAX - 1));
@@ -173,7 +182,14 @@ mod tests {
 
     #[test]
     fn topla_girdi_sirasindan_bagimsiz() {
-        let temel = vec![(a(9), 7), (a(1), 7), (a(5), 3), (a(3), 12), (a(7), 7), (a(2), -4)];
+        let temel = vec![
+            (a(9), 7),
+            (a(1), 7),
+            (a(5), 3),
+            (a(3), 12),
+            (a(7), 7),
+            (a(2), -4),
+        ];
         let beklenen = topla(&temel, 3, 10_000).unwrap();
         // Deterministik permutasyonlar (rastgelelik yok): tum donusumler + ters.
         for k in 0..temel.len() {
@@ -195,7 +211,10 @@ mod tests {
 
     #[test]
     fn kesici_ve_bayatlik() {
-        assert!(!kesici_tetiklenir(None, 1_000_000, 1_000), "ilk tur tetiklemez");
+        assert!(
+            !kesici_tetiklenir(None, 1_000_000, 1_000),
+            "ilk tur tetiklemez"
+        );
         assert!(!kesici_tetiklenir(Some(1000), 1100, 1_000), "%10 sinirda");
         assert!(kesici_tetiklenir(Some(1000), 1101, 1_000));
         assert!(kesici_tetiklenir(Some(1000), 899, 1_000));

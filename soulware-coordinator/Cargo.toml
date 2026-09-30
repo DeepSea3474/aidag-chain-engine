@@ -2,6 +2,8 @@
 name = "soulware-coordinator"
 version = "0.1.0"
 edition = "2021"
+license = "BUSL-1.1"
+publish = false
 description = "SoulwareAI hesaplama & odul koordinatoru — is dagit, yedekli dogrula, zincire imzali odul yaz."
 
 [[bin]]

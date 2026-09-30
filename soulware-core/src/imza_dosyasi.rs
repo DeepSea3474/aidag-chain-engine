@@ -51,7 +51,9 @@ impl std::fmt::Display for AnahtarHatasi {
                 "anahtar dosyasi ZATEN VAR: {y}. Uzerine yazilmaz; rotasyon icin yeni bir \
                  SOULWARE_KEY_PATH kullanin."
             ),
-            AnahtarHatasi::Io { yol, hata } => write!(f, "anahtar dosyasi okunamadi/yazilamadi: {yol}: {hata}"),
+            AnahtarHatasi::Io { yol, hata } => {
+                write!(f, "anahtar dosyasi okunamadi/yazilamadi: {yol}: {hata}")
+            }
         }
     }
 }
@@ -63,13 +65,24 @@ pub fn yukle(yol: &str) -> Result<SigningKey, AnahtarHatasi> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return Err(AnahtarHatasi::Yok(yol.to_string()))
         }
-        Err(e) => return Err(AnahtarHatasi::Io { yol: yol.to_string(), hata: e.to_string() }),
+        Err(e) => {
+            return Err(AnahtarHatasi::Io {
+                yol: yol.to_string(),
+                hata: e.to_string(),
+            })
+        }
     };
     if veri.len() != DOSYA_LEN {
-        return Err(AnahtarHatasi::Bozuk { yol: yol.to_string(), sebep: "uzunluk 33 bayt degil" });
+        return Err(AnahtarHatasi::Bozuk {
+            yol: yol.to_string(),
+            sebep: "uzunluk 33 bayt degil",
+        });
     }
     if veri[0] != SURUM {
-        return Err(AnahtarHatasi::Bozuk { yol: yol.to_string(), sebep: "surum bayti gecersiz" });
+        return Err(AnahtarHatasi::Bozuk {
+            yol: yol.to_string(),
+            sebep: "surum bayti gecersiz",
+        });
     }
     let mut seed = [0u8; 32];
     seed.copy_from_slice(&veri[1..DOSYA_LEN]);
@@ -92,7 +105,12 @@ pub fn uret(yol: &str) -> Result<SigningKey, AnahtarHatasi> {
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
             return Err(AnahtarHatasi::ZatenVar(yol.to_string()))
         }
-        Err(e) => return Err(AnahtarHatasi::Io { yol: yol.to_string(), hata: e.to_string() }),
+        Err(e) => {
+            return Err(AnahtarHatasi::Io {
+                yol: yol.to_string(),
+                hata: e.to_string(),
+            })
+        }
     };
     let mut seed = [0u8; 32];
     rand::rngs::OsRng.fill_bytes(&mut seed);
@@ -102,7 +120,10 @@ pub fn uret(yol: &str) -> Result<SigningKey, AnahtarHatasi> {
     dosya
         .write_all(&icerik)
         .and_then(|_| dosya.sync_all())
-        .map_err(|e| AnahtarHatasi::Io { yol: yol.to_string(), hata: e.to_string() })?;
+        .map_err(|e| AnahtarHatasi::Io {
+            yol: yol.to_string(),
+            hata: e.to_string(),
+        })?;
     Ok(SigningKey::from_bytes(&seed))
 }
 
@@ -112,7 +133,8 @@ mod tests {
 
     /// Surece ozel gecici dizin (tempfile bagimliligi olmadan).
     fn gecici(ad: &str) -> String {
-        let d = std::env::temp_dir().join(format!("soulware-imza-dosyasi-test-{}", std::process::id()));
+        let d =
+            std::env::temp_dir().join(format!("soulware-imza-dosyasi-test-{}", std::process::id()));
         std::fs::create_dir_all(&d).unwrap();
         let p = d.join(ad);
         let _ = std::fs::remove_file(&p);
@@ -123,7 +145,10 @@ mod tests {
     fn dosya_yoksa_hata_ve_dosya_olusmaz() {
         let p = gecici("yok.key");
         assert_eq!(yukle(&p).err(), Some(AnahtarHatasi::Yok(p.clone())));
-        assert!(!std::path::Path::new(&p).exists(), "yukle ASLA dosya olusturmaz");
+        assert!(
+            !std::path::Path::new(&p).exists(),
+            "yukle ASLA dosya olusturmaz"
+        );
     }
 
     #[test]
@@ -140,8 +165,15 @@ mod tests {
         ] {
             let p = gecici(ad);
             std::fs::write(&p, &icerik).unwrap();
-            assert!(matches!(yukle(&p), Err(AnahtarHatasi::Bozuk { .. })), "{ad}");
-            assert_eq!(std::fs::read(&p).unwrap(), icerik, "{ad}: dosya degismemeli");
+            assert!(
+                matches!(yukle(&p), Err(AnahtarHatasi::Bozuk { .. })),
+                "{ad}"
+            );
+            assert_eq!(
+                std::fs::read(&p).unwrap(),
+                icerik,
+                "{ad}: dosya degismemeli"
+            );
         }
     }
 

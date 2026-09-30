@@ -18,7 +18,8 @@ use serde_json::{json, Value};
 pub const ARAC_AD: &str = "belge-kayit-hazirla";
 pub const TALEP_TUR: &str = "aidag-belge-kayit-talebi";
 pub const TALEP_SURUM: u32 = 1;
-pub const KURUM_UYARI: &str = "Kurum kaydı zincirde beyana dayanır; kurum kimliği henüz bağımsız olarak doğrulanmamıştır.";
+pub const KURUM_UYARI: &str =
+    "Kurum kaydı zincirde beyana dayanır; kurum kimliği henüz bağımsız olarak doğrulanmamıştır.";
 
 /// Zincirdeki belge durumu (/belge/:hash).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,7 +52,10 @@ pub fn hex32(s: &str) -> Result<[u8; 32], String> {
 pub fn belge_durumu_coz(v: &Value) -> BelgeDurumu {
     BelgeDurumu {
         kayitli: v.get("kayitli").and_then(|x| x.as_bool()).unwrap_or(false),
-        kaydeden: v.get("kaydeden").and_then(|x| x.as_str()).map(|a| format!("0x{}", a.trim_start_matches("0x").to_lowercase())),
+        kaydeden: v
+            .get("kaydeden")
+            .and_then(|x| x.as_str())
+            .map(|a| format!("0x{}", a.trim_start_matches("0x").to_lowercase())),
         zaman: v.get("zaman").and_then(|x| x.as_u64()),
     }
 }
@@ -89,11 +93,14 @@ pub fn talep_kur(
         Some((pk, k)) => {
             let adres = format!("0x{}", hex::encode(public_key_to_adres(&pk)));
             let id = (durum == "imza-bekliyor").then(|| hex::encode(t.imzalanacak_id(&pk)));
-            (json!({
-                "pubkey": hex::encode(pk),
-                "adres": adres,
-                "kurum": { "kayitli": k.kayitli, "ad": k.ad, "kategori": k.kategori, "dogrulanmis": k.dogrulanmis },
-            }), id)
+            (
+                json!({
+                    "pubkey": hex::encode(pk),
+                    "adres": adres,
+                    "kurum": { "kayitli": k.kayitli, "ad": k.ad, "kategori": k.kategori, "dogrulanmis": k.dogrulanmis },
+                }),
+                id,
+            )
         }
         None => (Value::Null, None),
     };
@@ -128,7 +135,10 @@ pub fn talep_kur(
 pub fn sohbet_metni(talep: &Value) -> String {
     let hash = talep["belge_hash"].as_str().unwrap_or("");
     let zincir = if talep["zincir"]["kayitli"].as_bool() == Some(true) {
-        format!("kayıtlı (kaydeden {})", talep["zincir"]["kaydeden"].as_str().unwrap_or("?"))
+        format!(
+            "kayıtlı (kaydeden {})",
+            talep["zincir"]["kaydeden"].as_str().unwrap_or("?")
+        )
     } else {
         "kayıtlı değil".to_string()
     };
@@ -152,9 +162,20 @@ mod tests {
     use ed25519_dalek::{Signer, SigningKey};
 
     const H: &str = "0dcce43d9a705bcd6f3b3a8a1b2c3d4e5f60718293a4b5c6d7e8f90112233445";
-    fn kayitsiz() -> BelgeDurumu { BelgeDurumu { kayitli: false, kaydeden: None, zaman: None } }
+    fn kayitsiz() -> BelgeDurumu {
+        BelgeDurumu {
+            kayitli: false,
+            kaydeden: None,
+            zaman: None,
+        }
+    }
     fn kurum(kayitli: bool) -> KurumDurumu {
-        KurumDurumu { kayitli, ad: kayitli.then(|| "Ornek Tapu Mudurlugu".into()), kategori: kayitli.then(|| "devlet".into()), dogrulanmis: None }
+        KurumDurumu {
+            kayitli,
+            ad: kayitli.then(|| "Ornek Tapu Mudurlugu".into()),
+            kategori: kayitli.then(|| "devlet".into()),
+            dogrulanmis: None,
+        }
     }
 
     #[test]
@@ -169,7 +190,15 @@ mod tests {
 
     #[test]
     fn talep_imzasiz_ve_kanonik() {
-        let t = talep_kur(3474, hex32(H).unwrap(), vec![[5u8; 32], [1u8; 32]], 100, &kayitsiz(), None).unwrap();
+        let t = talep_kur(
+            3474,
+            hex32(H).unwrap(),
+            vec![[5u8; 32], [1u8; 32]],
+            100,
+            &kayitsiz(),
+            None,
+        )
+        .unwrap();
         assert_eq!(t["arac"], ARAC_AD);
         assert_eq!(t["kubra_imzalamaz"], true);
         assert_eq!(t["payload_hex"], format!("01{H}"));
@@ -192,8 +221,15 @@ mod tests {
         assert!(t["imzalanacak_id"].is_null());
         let t = talep_kur(3474, h, vec![], 1, &kayitsiz(), Some((pk, &kurum(true)))).unwrap();
         assert_eq!(t["durum"], "imza-bekliyor");
-        assert_eq!(t["imzalayan"]["adres"], format!("0x{}", hex::encode(public_key_to_adres(&pk))));
-        let kayitli = BelgeDurumu { kayitli: true, kaydeden: Some("0xab".into()), zaman: Some(9) };
+        assert_eq!(
+            t["imzalayan"]["adres"],
+            format!("0x{}", hex::encode(public_key_to_adres(&pk)))
+        );
+        let kayitli = BelgeDurumu {
+            kayitli: true,
+            kaydeden: Some("0xab".into()),
+            zaman: Some(9),
+        };
         let t = talep_kur(3474, h, vec![], 1, &kayitli, Some((pk, &kurum(true)))).unwrap();
         assert_eq!(t["durum"], "zaten-kayitli");
         assert!(t["imzalanacak_id"].is_null());
@@ -204,7 +240,15 @@ mod tests {
         let k = SigningKey::from_bytes(&[3; 32]);
         let pk = k.verifying_key().to_bytes();
         let h = hex32(H).unwrap();
-        let t = talep_kur(3474, h, vec![[1u8; 32]], 77, &kayitsiz(), Some((pk, &kurum(true)))).unwrap();
+        let t = talep_kur(
+            3474,
+            h,
+            vec![[1u8; 32]],
+            77,
+            &kayitsiz(),
+            Some((pk, &kurum(true))),
+        )
+        .unwrap();
         let id = hex32(t["imzalanacak_id"].as_str().unwrap()).unwrap();
         let sig = k.sign(&id).to_bytes();
         let kt = KayitTalebi::yeni(3474, h, vec![[1u8; 32]], 77).unwrap();

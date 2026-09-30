@@ -485,7 +485,8 @@ impl NodeState {
 
     /// RWA: kurum bu rolde SU AN (zincir saati) aktif mi?
     pub fn kurum_rol_aktif_mi(&self, adres: &[u8; 20], rol: u8, kapsam: u32) -> bool {
-        self.kurum_registry.rol_aktif_mi(adres, rol, kapsam, self.zincir_saati)
+        self.kurum_registry
+            .rol_aktif_mi(adres, rol, kapsam, self.zincir_saati)
     }
 
     /// RWA: oracle akisinin tum durumu.
@@ -1042,7 +1043,9 @@ impl NodeState {
         // PoA: mainnet'te komite-agirlikli guncelle (komite disi blok -> agirlik 0,
         // blue-work sisirme engellenir). Devnet'te (weigher=None) UniformWeight.
         match &self.weigher {
-            Some(w) => self.ghostdag.update_one_with_weight(&self.graph, &yeni_id, w),
+            Some(w) => self
+                .ghostdag
+                .update_one_with_weight(&self.graph, &yeni_id, w),
             None => self.ghostdag.update_one(&self.graph, &yeni_id),
         }
 
@@ -1184,8 +1187,7 @@ impl NodeState {
                     // owner (faucet_owner) tahsisi tutan taraf; ondan alici'ya
                     if let Some(owner) = self.faucet_owner {
                         let aidag_ok = matches!(
-                            self.bakiye_registry
-                                .transfer(&owner, &cagiran, cekilebilir),
+                            self.bakiye_registry.transfer(&owner, &cagiran, cekilebilir),
                             crate::registry::TransferSonuc::Basarili { .. }
                         );
                         if aidag_ok {
@@ -1784,7 +1786,8 @@ impl NodeState {
                 if let Ok(islem) = crate::tx::YonetimIslemi::decode(payload) {
                     let yetkili = self.rwa_aktif()
                         && self.rwa_yonetim.as_ref().is_some_and(|y| {
-                            y.yetkilendir(&islem, self.network_id, self.zincir_saati).is_ok()
+                            y.yetkilendir(&islem, self.network_id, self.zincir_saati)
+                                .is_ok()
                         });
                     if yetkili {
                         match &islem.eylem {
@@ -1828,7 +1831,9 @@ impl NodeState {
                     let rol = crate::tx::ROL_ORACLE_RAPORLAYICI;
                     if self.rwa_aktif()
                         && !self.rwa_yasakli_mi(&kurum)
-                        && self.kurum_registry.rol_aktif_mi(&kurum, rol, r.akis_no, simdi)
+                        && self
+                            .kurum_registry
+                            .rol_aktif_mi(&kurum, rol, r.akis_no, simdi)
                     {
                         let kurumlar = &self.kurum_registry;
                         let _ = self.oracle_registry.rapor_isle(kurum, &r, simdi, |k| {
@@ -1852,7 +1857,8 @@ impl NodeState {
                             simdi,
                         )
                     {
-                        self.kyc_registry.isle(k.adres, kurum, k.onay, k.kanit_hash, simdi);
+                        self.kyc_registry
+                            .isle(k.adres, kurum, k.onay, k.kanit_hash, simdi);
                     }
                 }
             }
@@ -1891,7 +1897,12 @@ fn rwa_gorunum<'a>(
     kyc: &'a crate::rwa::KycRegistry,
     zincir_saati: u64,
 ) -> Option<crate::rwa_precompile::RwaGorunum<'a>> {
-    aktif.then_some(crate::rwa_precompile::RwaGorunum { oracle, kurumlar, kyc, zincir_saati })
+    aktif.then_some(crate::rwa_precompile::RwaGorunum {
+        oracle,
+        kurumlar,
+        kyc,
+        zincir_saati,
+    })
 }
 
 /// `ingest_networked` sonucu. Her durum acikca ayrilir (sahte/sessiz yok).
@@ -3467,7 +3478,7 @@ mod tests {
     // YETERSIZ. AIDAG dagitilir; ama kayit GERCEKTEN gonderilen hediyeyi (0) saklar,
     // istenen (buyuk) tutari DEGIL. "Gonderildi" yalani zincire yazilmaz.
     #[test]
-#[test]
+    #[test]
     fn gunluk_cap_asilinca_reddedilir() {
         use crate::registry::public_key_to_adres;
         use crate::tx::OnSatisDagitim;
@@ -3495,30 +3506,47 @@ mod tests {
         let v1 = Vertex::new_signed(NET, vec![son], d1, satis, &osk).expect("d1");
         node.ingest_networked(&wire::encode(&v1), satis);
         son = *v1.id();
-        assert_eq!(node.on_satis_toplam_aidag(), islem, "1. dagitim gecti (50k)");
+        assert_eq!(
+            node.on_satis_toplam_aidag(),
+            islem,
+            "1. dagitim gecti (50k)"
+        );
 
         let d2 = OnSatisDagitim::new(alici, alici, islem, 0, 602).encode();
         let v2 = Vertex::new_signed(NET, vec![son], d2, satis, &osk).expect("d2");
         node.ingest_networked(&wire::encode(&v2), satis);
         son = *v2.id();
-        assert_eq!(node.on_satis_toplam_aidag(), 2 * islem, "2. dagitim gecti (toplam 100k = cap)");
+        assert_eq!(
+            node.on_satis_toplam_aidag(),
+            2 * islem,
+            "2. dagitim gecti (toplam 100k = cap)"
+        );
 
         // 3. dagitim AYNI GUN -> gunluk cap asilir (150k > 100k), REDDEDILMELI
         let d3 = OnSatisDagitim::new(alici, alici, islem, 0, 603).encode();
         let v3 = Vertex::new_signed(NET, vec![son], d3, satis, &osk).expect("d3");
         node.ingest_networked(&wire::encode(&v3), satis);
         son = *v3.id();
-        assert_eq!(node.on_satis_toplam_aidag(), 2 * islem,
-            "3. dagitim gunluk cap'i asti -> REDDEDILMELI (toplam hala 100k)");
-        assert!(node.on_satis_sorgula(603).is_none(), "cap asan tahsis kaydedilmemeli");
+        assert_eq!(
+            node.on_satis_toplam_aidag(),
+            2 * islem,
+            "3. dagitim gunluk cap'i asti -> REDDEDILMELI (toplam hala 100k)"
+        );
+        assert!(
+            node.on_satis_sorgula(603).is_none(),
+            "cap asan tahsis kaydedilmemeli"
+        );
 
         // ERTESI GUN (zaman + 86400) -> gunluk sayac sifirlanir, tekrar gecer
         let ertesi = satis + gun;
         let d4 = OnSatisDagitim::new(alici, alici, islem, 0, 604).encode();
         let v4 = Vertex::new_signed(NET, vec![son], d4, ertesi, &osk).expect("d4");
         node.ingest_networked(&wire::encode(&v4), ertesi);
-        assert_eq!(node.on_satis_toplam_aidag(), 3 * islem,
-            "ertesi gun sayac sifirlandi -> 4. dagitim gecti (toplam 150k)");
+        assert_eq!(
+            node.on_satis_toplam_aidag(),
+            3 * islem,
+            "ertesi gun sayac sifirlandi -> 4. dagitim gecti (toplam 150k)"
+        );
     }
 
     #[test]
@@ -3561,7 +3589,11 @@ mod tests {
         let cs = ClaimTalebi::new(500).encode();
         let vcs = Vertex::new_signed(NET, vec![*vs.id()], cs, satis, &ask).expect("cs");
         node.ingest_networked(&wire::encode(&vcs), satis);
-        assert_eq!(node.bakiye(&alici), 0, "satis aninda claim = 0 (TGE gelmedi)");
+        assert_eq!(
+            node.bakiye(&alici),
+            0,
+            "satis aninda claim = 0 (TGE gelmedi)"
+        );
 
         // 2b) TGE'ye YAKIN AMA ONCE CLAIM -> 0 (hak edilmemis)
         let c0 = ClaimTalebi::new(500).encode();
@@ -3576,14 +3608,26 @@ mod tests {
         node.ingest_networked(&wire::encode(&vc1), tge);
         assert_eq!(node.bakiye(&alici), 200 * od, "TGE claim: %20 = 200");
         // LSC hediye ILK claim'de verildi
-        assert_eq!(node.lsc_bakiye(&alici), 5 * od, "ilk claim: 5 LSC hediye verildi");
+        assert_eq!(
+            node.lsc_bakiye(&alici),
+            5 * od,
+            "ilk claim: 5 LSC hediye verildi"
+        );
 
         // 4) AYNI ANDA TEKRAR CLAIM -> fazladan 0 (cifte-claim engeli)
         let c2 = ClaimTalebi::new(500).encode();
         let vc2 = Vertex::new_signed(NET, vec![*vc1.id()], c2, tge, &ask).expect("c2");
         node.ingest_networked(&wire::encode(&vc2), tge);
-        assert_eq!(node.bakiye(&alici), 200 * od, "ayni anda tekrar claim: fazladan 0");
-        assert_eq!(node.lsc_bakiye(&alici), 5 * od, "LSC hediye TEKRAR verilmez");
+        assert_eq!(
+            node.bakiye(&alici),
+            200 * od,
+            "ayni anda tekrar claim: fazladan 0"
+        );
+        assert_eq!(
+            node.lsc_bakiye(&alici),
+            5 * od,
+            "LSC hediye TEKRAR verilmez"
+        );
 
         // 5) 6 AY SONRA CLAIM -> %60'a tamamlar (200 -> 600, yani +400)
         let c3 = ClaimTalebi::new(500).encode();
@@ -3609,7 +3653,11 @@ mod tests {
         let vkotu = Vertex::new_signed(NET, vec![*vs2.id()], kotu, tge, &ask).expect("kotu");
         let alici_once = node.bakiye(&alici);
         node.ingest_networked(&wire::encode(&vkotu), tge);
-        assert_eq!(node.bakiye(&alici), alici_once, "baskasinin tahsisi claim EDILEMEZ");
+        assert_eq!(
+            node.bakiye(&alici),
+            alici_once,
+            "baskasinin tahsisi claim EDILEMEZ"
+        );
         assert_eq!(node.bakiye(&baska), 0, "gercek sahibi henuz claim etmedi");
     }
 
@@ -3710,8 +3758,15 @@ mod tests {
                 faz1_asildi = true;
             }
         }
-        assert!(faz1_asildi, "Faz-1 (630k) dolunca satis KESILMEDEN Faz-2'ye devam etmeli");
-        assert_eq!(node.on_satis_toplam_aidag(), tavan, "tam 1.680.000'e kadar KABUL");
+        assert!(
+            faz1_asildi,
+            "Faz-1 (630k) dolunca satis KESILMEDEN Faz-2'ye devam etmeli"
+        );
+        assert_eq!(
+            node.on_satis_toplam_aidag(),
+            tavan,
+            "tam 1.680.000'e kadar KABUL"
+        );
 
         // Toplam tavan dolu: 1 AIDAG bile RED (tahsis kaydi olusmaz).
         let t_son = t0 + adet * 86400;
@@ -3725,7 +3780,7 @@ mod tests {
     // FAZ2 KANIT (on-satis vesting): dagitilan AIDAG %20 TGE hemen + kalan %80 12 ay
     // kilitli; birden cok dagitim BIRIKIR; 12 ay sonra tam acik.
     #[test]
-#[test]
+    #[test]
     fn on_satis_replay_ile_kalici() {
         use crate::registry::public_key_to_adres;
         use crate::tx::OnSatisDagitim;
@@ -3771,7 +3826,11 @@ mod tests {
 
         // 5) KANIT (replay): YENI MODEL — tahsis kaydi replay ile kuruluyor (transfer yok)
         assert_eq!(dst.bakiye(&alici), 0, "dst: satista transfer yok, bakiye 0");
-        assert_eq!(dst.on_satis_toplam_aidag(), 5000, "dst: 5000 tahsis replay ile kuruldu");
+        assert_eq!(
+            dst.on_satis_toplam_aidag(),
+            5000,
+            "dst: 5000 tahsis replay ile kuruldu"
+        );
         assert_eq!(
             dst.on_satis_sayisi(),
             1,
@@ -3858,7 +3917,11 @@ mod tests {
         // 0 olsa bile tahsis kaydi tutulur -> alici zincirde "bana ayrildi" gorur.
         // AIDAG owner'da bekler; asil bakiye kontrolu CLAIM aninda yapilir (Adim 4).
         assert_eq!(node.bakiye(&alici), 0, "satista transfer yok, bakiye 0");
-        assert_eq!(node.on_satis_sayisi(), 1, "tahsis kaydi TUTULUR (bakiyeye bakmaz)");
+        assert_eq!(
+            node.on_satis_sayisi(),
+            1,
+            "tahsis kaydi TUTULUR (bakiyeye bakmaz)"
+        );
         assert!(
             node.on_satis_sorgula(31337).is_some(),
             "tahsis kaydi olusturulur"
@@ -3915,7 +3978,11 @@ mod tests {
                 "tahsis toplami aninda dogru (gecikme yok)"
             );
         }
-        assert_eq!(node.on_satis_toplam_aidag(), 320_000 * od, "8x40k = 320k tahsis");
+        assert_eq!(
+            node.on_satis_toplam_aidag(),
+            320_000 * od,
+            "8x40k = 320k tahsis"
+        );
     }
 
     // KOPRU 5 (canli CALL): node yolundan kontrat CAGIRMA.
@@ -4069,24 +4136,56 @@ mod tests {
         // 1) OWNER imzali tip=16 -> worker'a LSC basilir.
         let p = ComputeReward::new(worker, odul, 1).encode();
         let v = Vertex::new_signed(NET, vec![gid], p, now, &sk_owner).expect("cr vertex");
-        assert!(matches!(node.ingest_networked(&wire::encode(&v), now), NetworkIngestOutcome::Integrated(_)));
+        assert!(matches!(
+            node.ingest_networked(&wire::encode(&v), now),
+            NetworkIngestOutcome::Integrated(_)
+        ));
         assert_eq!(node.lsc_bakiye(&worker), odul, "owner odulu: LSC basildi");
 
         // 2) CIFTE-BASIM: ayni reward_id tekrar -> bakiye DEGISMEZ.
-        let v2 = Vertex::new_signed(NET, vec![*v.id()], ComputeReward::new(worker, odul, 1).encode(), now + 1, &sk_owner).expect("v2");
+        let v2 = Vertex::new_signed(
+            NET,
+            vec![*v.id()],
+            ComputeReward::new(worker, odul, 1).encode(),
+            now + 1,
+            &sk_owner,
+        )
+        .expect("v2");
         node.ingest_networked(&wire::encode(&v2), now + 1);
-        assert_eq!(node.lsc_bakiye(&worker), odul, "ayni reward_id ikinci kez basmaz");
+        assert_eq!(
+            node.lsc_bakiye(&worker),
+            odul,
+            "ayni reward_id ikinci kez basmaz"
+        );
 
         // 3) OWNER-DISI imza -> SESSIZ RED (bakiye degismez).
         let sk_sahte = SigningKey::from_bytes(&[8u8; 32]);
-        let v3 = Vertex::new_signed(NET, vec![*v2.id()], ComputeReward::new(worker, odul, 2).encode(), now + 2, &sk_sahte).expect("v3");
+        let v3 = Vertex::new_signed(
+            NET,
+            vec![*v2.id()],
+            ComputeReward::new(worker, odul, 2).encode(),
+            now + 2,
+            &sk_sahte,
+        )
+        .expect("v3");
         node.ingest_networked(&wire::encode(&v3), now + 2);
         assert_eq!(node.lsc_bakiye(&worker), odul, "owner-disi odul basamaz");
 
         // 4) FARKLI reward_id, OWNER -> kumulatif emisyon.
-        let v4 = Vertex::new_signed(NET, vec![*v3.id()], ComputeReward::new(worker, odul, 3).encode(), now + 3, &sk_owner).expect("v4");
+        let v4 = Vertex::new_signed(
+            NET,
+            vec![*v3.id()],
+            ComputeReward::new(worker, odul, 3).encode(),
+            now + 3,
+            &sk_owner,
+        )
+        .expect("v4");
         node.ingest_networked(&wire::encode(&v4), now + 3);
-        assert_eq!(node.lsc_bakiye(&worker), odul * 2, "farkli reward_id -> kumulatif LSC");
+        assert_eq!(
+            node.lsc_bakiye(&worker),
+            odul * 2,
+            "farkli reward_id -> kumulatif LSC"
+        );
     }
 
     // ===== GERCEK DUNYA: belge dogrulama ingest entegrasyonu =====
@@ -4578,8 +4677,14 @@ mod tests {
 
         // 4) BASKA MetaMask cuzdani ayni tahsisi claim etmeye calisir -> RED
         let baska_sk = K256Sk::from_slice(&[0x55u8; 32]).expect("k256");
-        let vkotu = Vertex::new_signed(NET, vec![*vc.id()], mk_claim(&baska_sk).encode(), tge, &relay)
-            .expect("kotu vertex");
+        let vkotu = Vertex::new_signed(
+            NET,
+            vec![*vc.id()],
+            mk_claim(&baska_sk).encode(),
+            tge,
+            &relay,
+        )
+        .expect("kotu vertex");
         let alici_once = node.bakiye(&alici);
         node.ingest_networked(&wire::encode(&vkotu), tge);
         assert_eq!(
@@ -4598,7 +4703,11 @@ mod tests {
         )
         .expect("claim3");
         node.ingest_networked(&wire::encode(&vc3), tge + 360 * gun);
-        assert_eq!(node.bakiye(&alici), 1000 * od, "12 ay sonra tamami: %100 = 1000");
+        assert_eq!(
+            node.bakiye(&alici),
+            1000 * od,
+            "12 ay sonra tamami: %100 = 1000"
+        );
     }
 
     // tip=15: ON-SATIS TGE owner tarafindan ZINCIRDEN ayarlanir; claim yeni TGE'yi
@@ -4622,33 +4731,76 @@ mod tests {
         let v1 = Vertex::new_signed(NET, vec![gid], TgeAyarla::new(ileri).encode(), satis, &osk)
             .expect("v1");
         node.ingest_networked(&wire::encode(&v1), satis);
-        assert_eq!(node.on_satis_tge(), ileri, "owner TGE'yi ileriye ayarlayabilir");
+        assert_eq!(
+            node.on_satis_tge(),
+            ileri,
+            "owner TGE'yi ileriye ayarlayabilir"
+        );
 
         // 2) OWNER GECMISE ayarlamaya calisir (satis - 10) -> RED (deger DEGISMEZ)
         //    Ele gecen anahtar "TGE dun oldu" deyip kilitleri erkenden acamaz.
         let gecmis = satis - 10;
-        let v2 = Vertex::new_signed(NET, vec![*v1.id()], TgeAyarla::new(gecmis).encode(), satis, &osk)
-            .expect("v2");
+        let v2 = Vertex::new_signed(
+            NET,
+            vec![*v1.id()],
+            TgeAyarla::new(gecmis).encode(),
+            satis,
+            &osk,
+        )
+        .expect("v2");
         node.ingest_networked(&wire::encode(&v2), satis);
-        assert_eq!(node.on_satis_tge(), ileri,
-            "gecmise-ayar REDDEDILDI: TGE hala ileri degerde, degismedi");
+        assert_eq!(
+            node.on_satis_tge(),
+            ileri,
+            "gecmise-ayar REDDEDILDI: TGE hala ileri degerde, degismedi"
+        );
 
         // 3) BUGUNE ("hemen ac") ayar -> RED: TGE bildirim suresi kadar once ilan edilmeli.
-        let v3 = Vertex::new_signed(NET, vec![*v2.id()], TgeAyarla::new(satis).encode(), satis, &osk)
-            .expect("v3");
+        let v3 = Vertex::new_signed(
+            NET,
+            vec![*v2.id()],
+            TgeAyarla::new(satis).encode(),
+            satis,
+            &osk,
+        )
+        .expect("v3");
         node.ingest_networked(&wire::encode(&v3), satis);
-        assert_eq!(node.on_satis_tge(), ileri, "bildirim suresiz (hemen) TGE REDDEDILDI");
+        assert_eq!(
+            node.on_satis_tge(),
+            ileri,
+            "bildirim suresiz (hemen) TGE REDDEDILDI"
+        );
 
         // 4) Tam bildirim suresi sonrasi -> KABUL (sinirda); 1 sn eksik -> RED.
         let bildirim = crate::mainnet::TGE_MIN_BILDIRIM_SURESI;
-        let v4 = Vertex::new_signed(NET, vec![*v3.id()], TgeAyarla::new(satis + bildirim - 1).encode(), satis, &osk)
-            .expect("v4");
+        let v4 = Vertex::new_signed(
+            NET,
+            vec![*v3.id()],
+            TgeAyarla::new(satis + bildirim - 1).encode(),
+            satis,
+            &osk,
+        )
+        .expect("v4");
         node.ingest_networked(&wire::encode(&v4), satis);
-        assert_eq!(node.on_satis_tge(), ileri, "bildirim suresinden kisa REDDEDILDI");
-        let v5 = Vertex::new_signed(NET, vec![*v4.id()], TgeAyarla::new(satis + bildirim).encode(), satis, &osk)
-            .expect("v5");
+        assert_eq!(
+            node.on_satis_tge(),
+            ileri,
+            "bildirim suresinden kisa REDDEDILDI"
+        );
+        let v5 = Vertex::new_signed(
+            NET,
+            vec![*v4.id()],
+            TgeAyarla::new(satis + bildirim).encode(),
+            satis,
+            &osk,
+        )
+        .expect("v5");
         node.ingest_networked(&wire::encode(&v5), satis);
-        assert_eq!(node.on_satis_tge(), satis + bildirim, "tam bildirim suresiyle KABUL");
+        assert_eq!(
+            node.on_satis_tge(),
+            satis + bildirim,
+            "tam bildirim suresiyle KABUL"
+        );
     }
 
     #[test]
@@ -4665,14 +4817,21 @@ mod tests {
         node.faucet_owner_ayarla(public_key_to_adres(&osk.verifying_key().to_bytes()));
 
         let tge = satis + bildirim;
-        let v1 = Vertex::new_signed(NET, vec![gid], TgeAyarla::new(tge).encode(), satis, &osk).unwrap();
+        let v1 =
+            Vertex::new_signed(NET, vec![gid], TgeAyarla::new(tge).encode(), satis, &osk).unwrap();
         node.ingest_networked(&wire::encode(&v1), satis);
         assert_eq!(node.on_satis_tge(), tge);
 
         // TGE gunu geldi (zincir saati >= TGE). Ertelemek artik MUMKUN DEGIL:
         // acilmis kilitler geri kilitlenemez.
-        let v2 = Vertex::new_signed(NET, vec![*v1.id()], TgeAyarla::new(tge + 60 * 86400).encode(), tge, &osk)
-            .unwrap();
+        let v2 = Vertex::new_signed(
+            NET,
+            vec![*v1.id()],
+            TgeAyarla::new(tge + 60 * 86400).encode(),
+            tge,
+            &osk,
+        )
+        .unwrap();
         node.ingest_networked(&wire::encode(&v2), tge);
         assert_eq!(node.on_satis_tge(), tge, "TGE gunu gelince TGE KESINLESIR");
     }
@@ -4724,8 +4883,14 @@ mod tests {
         // Bugun 2 x 50k = gunluk cap (100k) doldu.
         let mut son = gid;
         for r in [701u64, 702] {
-            let v = Vertex::new_signed(NET, vec![son], OnSatisDagitim::new(alici, alici, islem, 0, r).encode(), t, &osk)
-                .expect("satis");
+            let v = Vertex::new_signed(
+                NET,
+                vec![son],
+                OnSatisDagitim::new(alici, alici, islem, 0, r).encode(),
+                t,
+                &osk,
+            )
+            .expect("satis");
             node.ingest_networked(&wire::encode(&v), t);
             son = *v.id();
         }
@@ -4737,8 +4902,10 @@ mod tests {
             let p = OnSatisDagitim::new(alici, alici, islem, 0, r).encode();
             son = eski_tarihli_birlestir(&mut node, gid, son, p, t - geri * 86400, t, &osk);
         }
-        assert!(node.on_satis_sorgula(703).is_none() && node.on_satis_sorgula(704).is_none(),
-            "eski tarihli satislar gunluk cap'i ASAMAZ (zincir saati = bugun)");
+        assert!(
+            node.on_satis_sorgula(703).is_none() && node.on_satis_sorgula(704).is_none(),
+            "eski tarihli satislar gunluk cap'i ASAMAZ (zincir saati = bugun)"
+        );
         assert_eq!(node.on_satis_toplam_aidag(), 2 * islem, "toplam hala 100k");
     }
 
@@ -4756,7 +4923,8 @@ mod tests {
         node.faucet_owner_ayarla(public_key_to_adres(&osk.verifying_key().to_bytes()));
 
         let ileri = t + 30 * 86400;
-        let v1 = Vertex::new_signed(NET, vec![gid], TgeAyarla::new(ileri).encode(), t, &osk).expect("v1");
+        let v1 = Vertex::new_signed(NET, vec![gid], TgeAyarla::new(ileri).encode(), t, &osk)
+            .expect("v1");
         node.ingest_networked(&wire::encode(&v1), t);
         assert_eq!(node.on_satis_tge(), ileri);
 
@@ -4768,9 +4936,20 @@ mod tests {
 
         // SALDIRI: vertex zamani = TGE = 5 gun once (t.tge >= vertex zamani saglanir).
         let gecmis = t - 5 * 86400;
-        eski_tarihli_birlestir(&mut node, gid, *f.id(), TgeAyarla::new(gecmis).encode(), gecmis, t, &osk);
-        assert_eq!(node.on_satis_tge(), ileri,
-            "eski tarihli vertex TGE'yi gecmise CEKEMEZ (zincir saati = bugun)");
+        eski_tarihli_birlestir(
+            &mut node,
+            gid,
+            *f.id(),
+            TgeAyarla::new(gecmis).encode(),
+            gecmis,
+            t,
+            &osk,
+        );
+        assert_eq!(
+            node.on_satis_tge(),
+            ileri,
+            "eski tarihli vertex TGE'yi gecmise CEKEMEZ (zincir saati = bugun)"
+        );
     }
 
     #[test]
@@ -4791,9 +4970,23 @@ mod tests {
         let alici = [0x44u8; 20];
 
         // A dali: ayni gun 2 x 50k (cap tam dolu).
-        let a1 = Vertex::new_signed(NET, vec![gid], OnSatisDagitim::new(alici, alici, islem, 0, 801).encode(), satis, &osk).unwrap();
+        let a1 = Vertex::new_signed(
+            NET,
+            vec![gid],
+            OnSatisDagitim::new(alici, alici, islem, 0, 801).encode(),
+            satis,
+            &osk,
+        )
+        .unwrap();
         node.ingest_networked(&wire::encode(&a1), satis);
-        let a2 = Vertex::new_signed(NET, vec![*a1.id()], OnSatisDagitim::new(alici, alici, islem, 0, 802).encode(), satis, &osk).unwrap();
+        let a2 = Vertex::new_signed(
+            NET,
+            vec![*a1.id()],
+            OnSatisDagitim::new(alici, alici, islem, 0, 802).encode(),
+            satis,
+            &osk,
+        )
+        .unwrap();
         node.ingest_networked(&wire::encode(&a2), satis);
         assert_eq!(node.on_satis_toplam_aidag(), 2 * islem);
 
@@ -4811,8 +5004,10 @@ mod tests {
         node.ingest_networked(&wire::encode(&m), satis);
 
         // Yeniden oynatmada ayni satislar TEKRAR sayilmamali: ikisi de kayitli kalmali.
-        assert!(node.on_satis_sorgula(801).is_some() && node.on_satis_sorgula(802).is_some(),
-            "reorg sonrasi gecerli satislar REDDEDILMEMELI");
+        assert!(
+            node.on_satis_sorgula(801).is_some() && node.on_satis_sorgula(802).is_some(),
+            "reorg sonrasi gecerli satislar REDDEDILMEMELI"
+        );
         assert_eq!(node.on_satis_toplam_aidag(), 2 * islem);
 
         // Ayni vertex'leri sifirdan yukleyen dugum AYNI duruma ulasmali (ayrisma yok).
@@ -4840,8 +5035,14 @@ mod tests {
             .ingest(&crate::mainnet::genesis_wire(), simdi)
             .expect("pinli genesis yuklenmeli");
         let sk = SigningKey::from_bytes(&[0x33u8; 32]);
-        let v = Vertex::new_signed(crate::mainnet::MAINNET_NETWORK_ID, vec![gid], b"ilk".to_vec(), simdi, &sk)
-            .unwrap();
+        let v = Vertex::new_signed(
+            crate::mainnet::MAINNET_NETWORK_ID,
+            vec![gid],
+            b"ilk".to_vec(),
+            simdi,
+            &sk,
+        )
+        .unwrap();
         assert!(matches!(
             node.ingest_networked(&wire::encode(&v), simdi),
             NetworkIngestOutcome::Integrated(_)
@@ -4856,11 +5057,15 @@ mod tests {
         let (gen, gid) = genesis_bytes(1, simdi - 10 * 86400);
         node.ingest_networked(&gen, simdi);
         let sk = SigningKey::from_bytes(&[0x33u8; 32]);
-        let gelecek = Vertex::new_signed(NET, vec![gid], b"g".to_vec(), simdi + 30 * 86400, &sk).unwrap();
-        assert!(matches!(
-            node.ingest_synced_es(&wire::encode(&gelecek), simdi),
-            NetworkIngestOutcome::Rejected(_)
-        ), "esten gelen gelecek tarihli vertex reddedilmeli");
+        let gelecek =
+            Vertex::new_signed(NET, vec![gid], b"g".to_vec(), simdi + 30 * 86400, &sk).unwrap();
+        assert!(
+            matches!(
+                node.ingest_synced_es(&wire::encode(&gelecek), simdi),
+                NetworkIngestOutcome::Rejected(_)
+            ),
+            "esten gelen gelecek tarihli vertex reddedilmeli"
+        );
         // Eski tarihli durust gecmis kabul edilir (replay serbest).
         let eski = Vertex::new_signed(NET, vec![gid], b"e".to_vec(), simdi - 86400, &sk).unwrap();
         assert!(matches!(
@@ -4881,7 +5086,10 @@ mod tests {
         let (gen, gid) = genesis_bytes(1, satis);
         node.ingest_networked(&gen, satis);
         // varsayilan: pinli sabit
-        assert_eq!(node.on_satis_tge(), crate::mainnet::MAINNET_VESTING_BASLANGIC);
+        assert_eq!(
+            node.on_satis_tge(),
+            crate::mainnet::MAINNET_VESTING_BASLANGIC
+        );
 
         let osk = SigningKey::from_bytes(&[0x91u8; 32]);
         let owner = public_key_to_adres(&osk.verifying_key().to_bytes());
@@ -4900,8 +5108,14 @@ mod tests {
         );
 
         // OWNER TGE ayarlar -> deger degisir
-        let vt = Vertex::new_signed(NET, vec![*vb.id()], TgeAyarla::new(yeni_tge).encode(), satis, &osk)
-            .expect("vt");
+        let vt = Vertex::new_signed(
+            NET,
+            vec![*vb.id()],
+            TgeAyarla::new(yeni_tge).encode(),
+            satis,
+            &osk,
+        )
+        .expect("vt");
         node.ingest_networked(&wire::encode(&vt), satis);
         assert_eq!(node.on_satis_tge(), yeni_tge, "owner TGE ayarladi");
 
@@ -4913,14 +5127,26 @@ mod tests {
         node.ingest_networked(&wire::encode(&vs), satis);
 
         // yeni_tge ONCESI claim -> 0
-        let vc0 = Vertex::new_signed(NET, vec![*vs.id()], ClaimTalebi::new(500).encode(), yeni_tge - 10, &ask)
-            .expect("c0");
+        let vc0 = Vertex::new_signed(
+            NET,
+            vec![*vs.id()],
+            ClaimTalebi::new(500).encode(),
+            yeni_tge - 10,
+            &ask,
+        )
+        .expect("c0");
         node.ingest_networked(&wire::encode(&vc0), yeni_tge - 10);
         assert_eq!(node.bakiye(&alici), 0, "yeni TGE oncesi claim=0");
 
         // yeni_tge'de claim -> %20 = 200
-        let vc1 = Vertex::new_signed(NET, vec![*vc0.id()], ClaimTalebi::new(500).encode(), yeni_tge, &ask)
-            .expect("c1");
+        let vc1 = Vertex::new_signed(
+            NET,
+            vec![*vc0.id()],
+            ClaimTalebi::new(500).encode(),
+            yeni_tge,
+            &ask,
+        )
+        .expect("c1");
         node.ingest_networked(&wire::encode(&vc1), yeni_tge);
         assert_eq!(node.bakiye(&alici), 200 * od, "yeni TGE'de %20=200");
     }
@@ -5341,12 +5567,16 @@ mod tests {
             let all = peer.export_vertices();
             let total = all.len();
             let parca: Vec<Vec<u8>> = all.into_iter().skip(offset).take(CHUNK).collect();
-            if parca.is_empty() { break; }
+            if parca.is_empty() {
+                break;
+            }
             for byt in &parca {
                 taze.ingest_synced(byt);
             }
             offset += parca.len();
-            if offset >= total { break; }
+            if offset >= total {
+                break;
+            }
         }
 
         // Orphan kalmissa cozdur (sirasizlik guvencesi)
@@ -5355,11 +5585,23 @@ mod tests {
         }
 
         // --- KANIT: STATE birebir yakinsadi ---
-        assert_eq!(taze.vertex_count(), peer.vertex_count(), "vertex sayisi ayni");
+        assert_eq!(
+            taze.vertex_count(),
+            peer.vertex_count(),
+            "vertex sayisi ayni"
+        );
         assert_eq!(taze.orphan_count(), 0, "orphan kalmadi");
-        assert_eq!(taze.bakiye(&gonderen), peer_gonderen, "YAKINSAMA: gonderen bakiye");
+        assert_eq!(
+            taze.bakiye(&gonderen),
+            peer_gonderen,
+            "YAKINSAMA: gonderen bakiye"
+        );
         assert_eq!(taze.bakiye(&alici), peer_alici, "YAKINSAMA: alici bakiye");
-        assert_eq!(taze.beklenen_nonce(&gonderen), peer_nonce, "YAKINSAMA: nonce");
+        assert_eq!(
+            taze.beklenen_nonce(&gonderen),
+            peer_nonce,
+            "YAKINSAMA: nonce"
+        );
         assert_eq!(taze.toplam_bakiye_arzi(), peer_arz, "YAKINSAMA: toplam arz");
     }
 
@@ -5403,15 +5645,33 @@ mod tests {
             for byt in &karisik {
                 taze.ingest_synced(byt);
             }
-            if taze.vertex_count() == before { break; }
+            if taze.vertex_count() == before {
+                break;
+            }
         }
 
-        assert_eq!(taze.vertex_count(), peer.vertex_count(), "vertex sayisi ayni");
+        assert_eq!(
+            taze.vertex_count(),
+            peer.vertex_count(),
+            "vertex sayisi ayni"
+        );
         assert_eq!(taze.orphan_count(), 0, "orphan cozuldu");
-        assert_eq!(taze.bakiye(&gonderen), peer.bakiye(&gonderen), "YAKINSAMA: gonderen");
+        assert_eq!(
+            taze.bakiye(&gonderen),
+            peer.bakiye(&gonderen),
+            "YAKINSAMA: gonderen"
+        );
         assert_eq!(taze.bakiye(&alici), peer.bakiye(&alici), "YAKINSAMA: alici");
-        assert_eq!(taze.beklenen_nonce(&gonderen), peer.beklenen_nonce(&gonderen), "YAKINSAMA: nonce");
-        assert_eq!(taze.toplam_bakiye_arzi(), peer.toplam_bakiye_arzi(), "YAKINSAMA: arz");
+        assert_eq!(
+            taze.beklenen_nonce(&gonderen),
+            peer.beklenen_nonce(&gonderen),
+            "YAKINSAMA: nonce"
+        );
+        assert_eq!(
+            taze.toplam_bakiye_arzi(),
+            peer.toplam_bakiye_arzi(),
+            "YAKINSAMA: arz"
+        );
     }
 
     // ===============================================================
@@ -5442,8 +5702,16 @@ mod tests {
             }
             _ => {}
         }
-        assert_eq!(n1.orphan_count(), 0, "ingest_networked: orphan havuzuna girdi!");
-        assert_eq!(n1.vertex_count(), v_once, "ingest_networked: DAG'a eklendi!");
+        assert_eq!(
+            n1.orphan_count(),
+            0,
+            "ingest_networked: orphan havuzuna girdi!"
+        );
+        assert_eq!(
+            n1.vertex_count(),
+            v_once,
+            "ingest_networked: DAG'a eklendi!"
+        );
 
         // --- Yol 2: ingest_synced ---
         let mut n2 = NodeState::new_devnet(NET);
@@ -5454,7 +5722,11 @@ mod tests {
             }
             _ => {}
         }
-        assert_eq!(n2.orphan_count(), 0, "ingest_synced: orphan havuzuna girdi!");
+        assert_eq!(
+            n2.orphan_count(),
+            0,
+            "ingest_synced: orphan havuzuna girdi!"
+        );
         assert_eq!(n2.vertex_count(), v_once2, "ingest_synced: DAG'a eklendi!");
 
         // --- Yol 3: ingest_synced_preverified ---
@@ -5471,8 +5743,8 @@ mod tests {
 
         // Kendi agindan gelen ayni yapidaki vertex KABUL edilmeli (kapi
         // her seyi reddetmiyor, sadece yabanci agi reddediyor).
-        let kendi_v = Vertex::new_signed(NET, vec![], b"kendi".to_vec(), now, &sk)
-            .expect("kendi vertex");
+        let kendi_v =
+            Vertex::new_signed(NET, vec![], b"kendi".to_vec(), now, &sk).expect("kendi vertex");
         let mut n4 = NodeState::new_devnet(NET);
         match n4.ingest_networked(&wire::encode(&kendi_v), now) {
             NetworkIngestOutcome::Integrated(_) | NetworkIngestOutcome::Duplicate(_) => {}
@@ -5524,8 +5796,14 @@ mod rwa_tests {
     }
 
     fn rapor_olcum(tur: u64, deger: i128, olcum: u64) -> Vec<u8> {
-        OracleRapor { akis_no: AKIS, tur_no: tur, deger, olcum_zamani: olcum, veri_hash: [7; 32] }
-            .encode()
+        OracleRapor {
+            akis_no: AKIS,
+            tur_no: tur,
+            deger,
+            olcum_zamani: olcum,
+            veri_hash: [7; 32],
+        }
+        .encode()
     }
 
     /// Dogrusal zincir kuran test dugumu.
@@ -5539,8 +5817,18 @@ mod rwa_tests {
     }
 
     /// Cevrimdisi imzalanmis yonetim islemi uret.
-    fn imzali(eylem: YonetimEylemi, nonce: u64, son: u64, imzacilar: &[&SigningKey]) -> YonetimIslemi {
-        let mut y = YonetimIslemi { nonce, son_gecerlilik: son, eylem, imzalar: vec![] };
+    fn imzali(
+        eylem: YonetimEylemi,
+        nonce: u64,
+        son: u64,
+        imzacilar: &[&SigningKey],
+    ) -> YonetimIslemi {
+        let mut y = YonetimIslemi {
+            nonce,
+            son_gecerlilik: son,
+            eylem,
+            imzalar: vec![],
+        };
         let m = y.imza_mesaji(NET);
         y.imzalar = imzacilar
             .iter()
@@ -5570,7 +5858,15 @@ mod rwa_tests {
             let ys = yonetim_anahtarlari();
             let pks: Vec<[u8; 32]> = ys.iter().map(yonetim_pk).collect();
             node.rwa_yonetim_kur(&pks, 2).expect("2-of-3 kurulum");
-            Kurulum { node, osk, ys, gid, son: gid, t: T0, dolgu: 0 }
+            Kurulum {
+                node,
+                osk,
+                ys,
+                gid,
+                son: gid,
+                t: T0,
+                dolgu: 0,
+            }
         }
 
         /// Rapor: olcum zamani = zincirin su anki zamani (gecerli pencere).
@@ -5642,20 +5938,37 @@ mod rwa_tests {
         k.owner(akis_tanimi(1).encode());
         let r = anahtar(0x21);
         k.kurum_kaydet(&r, "Rafineri A");
-        k.rol(KurumYetki::new(adres(&r), ROL_ORACLE_RAPORLAYICI, AKIS, true));
+        k.rol(KurumYetki::new(
+            adres(&r),
+            ROL_ORACLE_RAPORLAYICI,
+            AKIS,
+            true,
+        ));
         let verilis = k.t;
-        assert!(!k.node.kurum_rol_aktif_mi(&adres(&r), ROL_ORACLE_RAPORLAYICI, AKIS));
+        assert!(!k
+            .node
+            .kurum_rol_aktif_mi(&adres(&r), ROL_ORACLE_RAPORLAYICI, AKIS));
         // Bildirim suresinden 1 sn once: rapor YOK SAYILIR.
         k.ilerle(BILDIRIM - 1);
         k.gonder(&r, k.rapor(1, 1000));
-        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::VeriYok);
+        assert_eq!(
+            k.node.oracle_son_veri(AKIS).unwrap_err(),
+            OkumaHatasi::VeriYok
+        );
         // Tam sinirda: rol etkin, rapor kabul.
         k.ilerle(1);
         k.gonder(&r, k.rapor(1, 1000));
         assert_eq!(k.node.oracle_son_veri(AKIS).unwrap().deger, 1000);
         assert_eq!(
             k.node.kurum_rolleri(&adres(&r)),
-            vec![(ROL_ORACLE_RAPORLAYICI, AKIS, RolKaydi { etkin: verilis + BILDIRIM, iptal: None })]
+            vec![(
+                ROL_ORACLE_RAPORLAYICI,
+                AKIS,
+                RolKaydi {
+                    etkin: verilis + BILDIRIM,
+                    iptal: None
+                }
+            )]
         );
     }
 
@@ -5665,11 +5978,25 @@ mod rwa_tests {
         k.owner(akis_tanimi(1).encode());
         let sahte = anahtar(0x22);
         // Herkes kendini "Devlet" diye kaydedebilir; bu RAPOR HAKKI VERMEZ.
-        k.gonder(&sahte, KurumKaydiTx::new(0, "Sahte Bakanlik".into()).encode());
+        k.gonder(
+            &sahte,
+            KurumKaydiTx::new(0, "Sahte Bakanlik".into()).encode(),
+        );
         k.ilerle(BILDIRIM);
         k.gonder(&sahte, k.rapor(1, 1));
-        k.gonder(&sahte, KycKayit { adres: [9; 20], onay: true, kanit_hash: [0; 32] }.encode());
-        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::VeriYok);
+        k.gonder(
+            &sahte,
+            KycKayit {
+                adres: [9; 20],
+                onay: true,
+                kanit_hash: [0; 32],
+            }
+            .encode(),
+        );
+        assert_eq!(
+            k.node.oracle_son_veri(AKIS).unwrap_err(),
+            OkumaHatasi::VeriYok
+        );
         assert!(!k.node.kyc_onayli_mi(&[9; 20]));
     }
 
@@ -5680,7 +6007,15 @@ mod rwa_tests {
         k.rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true));
         k.ilerle(BILDIRIM);
         assert!(k.node.kurum_rolleri(&adres(&r)).is_empty());
-        k.gonder(&r, KycKayit { adres: [9; 20], onay: true, kanit_hash: [0; 32] }.encode());
+        k.gonder(
+            &r,
+            KycKayit {
+                adres: [9; 20],
+                onay: true,
+                kanit_hash: [0; 32],
+            }
+            .encode(),
+        );
         assert!(!k.node.kyc_onayli_mi(&[9; 20]));
     }
 
@@ -5698,8 +6033,14 @@ mod rwa_tests {
         k.gonder(&r, sahte.encode());
         k.gonder(&r, akis_tanimi(1).encode());
         k.ilerle(BILDIRIM);
-        assert!(k.node.kurum_rolleri(&adres(&r)).is_empty(), "kurum kendine rol veremez");
-        assert!(k.node.oracle_akis(AKIS).is_none(), "owner-disi akis tanimlayamaz");
+        assert!(
+            k.node.kurum_rolleri(&adres(&r)).is_empty(),
+            "kurum kendine rol veremez"
+        );
+        assert!(
+            k.node.oracle_akis(AKIS).is_none(),
+            "owner-disi akis tanimlayamaz"
+        );
     }
 
     #[test]
@@ -5707,14 +6048,31 @@ mod rwa_tests {
         let mut k = Kurulum::yeni();
         let r = anahtar(0x25);
         k.kurum_kaydet(&r, "Kurum");
-        k.rol(KurumYetki::new(adres(&r), ROL_ORACLE_RAPORLAYICI, AKIS, true));
-        assert!(k.node.kurum_rolleri(&adres(&r)).is_empty(), "akis 1 tanimsiz");
+        k.rol(KurumYetki::new(
+            adres(&r),
+            ROL_ORACLE_RAPORLAYICI,
+            AKIS,
+            true,
+        ));
+        assert!(
+            k.node.kurum_rolleri(&adres(&r)).is_empty(),
+            "akis 1 tanimsiz"
+        );
         // Akis 1 ve 2 tanimli; kurum yalniz akis 2'ye yetkili.
         k.owner(akis_tanimi(1).encode());
-        k.owner(OracleAkisTanim { akis_no: 2, ..akis_tanimi(1) }.encode());
+        k.owner(
+            OracleAkisTanim {
+                akis_no: 2,
+                ..akis_tanimi(1)
+            }
+            .encode(),
+        );
         k.yetkili_kurum(&r, ROL_ORACLE_RAPORLAYICI, 2);
         k.gonder(&r, k.rapor(1, 1000)); // akis 1 -> yetkisiz
-        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::VeriYok);
+        assert_eq!(
+            k.node.oracle_son_veri(AKIS).unwrap_err(),
+            OkumaHatasi::VeriYok
+        );
     }
 
     #[test]
@@ -5726,10 +6084,23 @@ mod rwa_tests {
         k.rol(KurumYetki::new(owner, ROL_ORACLE_RAPORLAYICI, AKIS, true));
         k.rol(KurumYetki::new(owner, ROL_KYC_ONAYLAYICI, 0, true));
         k.ilerle(BILDIRIM);
-        assert!(k.node.kurum_rolleri(&owner).is_empty(), "owner'a rol verilemez");
+        assert!(
+            k.node.kurum_rolleri(&owner).is_empty(),
+            "owner'a rol verilemez"
+        );
         k.owner(k.rapor(1, 1000));
-        k.owner(KycKayit { adres: [9; 20], onay: true, kanit_hash: [0; 32] }.encode());
-        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::VeriYok);
+        k.owner(
+            KycKayit {
+                adres: [9; 20],
+                onay: true,
+                kanit_hash: [0; 32],
+            }
+            .encode(),
+        );
+        assert_eq!(
+            k.node.oracle_son_veri(AKIS).unwrap_err(),
+            OkumaHatasi::VeriYok
+        );
         assert!(!k.node.kyc_onayli_mi(&[9; 20]));
     }
 
@@ -5741,13 +6112,29 @@ mod rwa_tests {
         k.node.rwa_test_yasakli_ekle(adres(&kubra));
         k.owner(akis_tanimi(1).encode());
         k.kurum_kaydet(&kubra, "KUBRA");
-        k.rol(KurumYetki::new(adres(&kubra), ROL_ORACLE_RAPORLAYICI, AKIS, true));
+        k.rol(KurumYetki::new(
+            adres(&kubra),
+            ROL_ORACLE_RAPORLAYICI,
+            AKIS,
+            true,
+        ));
         k.rol(KurumYetki::new(adres(&kubra), ROL_KYC_ONAYLAYICI, 0, true));
         k.ilerle(BILDIRIM);
         assert!(k.node.kurum_rolleri(&adres(&kubra)).is_empty());
         k.gonder(&kubra, k.rapor(1, 1000));
-        k.gonder(&kubra, KycKayit { adres: [9; 20], onay: true, kanit_hash: [0; 32] }.encode());
-        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::VeriYok);
+        k.gonder(
+            &kubra,
+            KycKayit {
+                adres: [9; 20],
+                onay: true,
+                kanit_hash: [0; 32],
+            }
+            .encode(),
+        );
+        assert_eq!(
+            k.node.oracle_son_veri(AKIS).unwrap_err(),
+            OkumaHatasi::VeriYok
+        );
         assert!(!k.node.kyc_onayli_mi(&[9; 20]));
     }
 
@@ -5758,7 +6145,12 @@ mod rwa_tests {
         let ks: Vec<SigningKey> = (0x31..=0x34).map(anahtar).collect();
         for sk in &ks {
             k.kurum_kaydet(sk, "Rafineri");
-            k.rol(KurumYetki::new(adres(sk), ROL_ORACLE_RAPORLAYICI, AKIS, true));
+            k.rol(KurumYetki::new(
+                adres(sk),
+                ROL_ORACLE_RAPORLAYICI,
+                AKIS,
+                true,
+            ));
         }
         k.ilerle(BILDIRIM);
         assert_eq!(k.node.oracle_raporlayici_sayisi(AKIS), 4, "N = 4");
@@ -5766,7 +6158,10 @@ mod rwa_tests {
         k.gonder(&ks[0], k.rapor(1, 1000));
         k.gonder(&ks[0], k.rapor(1, 1000));
         k.gonder(&ks[1], k.rapor(1, 5000)); // asiri sapan
-        assert!(k.node.oracle_son_veri(AKIS).is_err(), "3 rapor ama 1 elenir -> kalan 2 < M");
+        assert!(
+            k.node.oracle_son_veri(AKIS).is_err(),
+            "3 rapor ama 1 elenir -> kalan 2 < M"
+        );
         k.gonder(&ks[2], k.rapor(1, 1004));
         k.gonder(&ks[3], k.rapor(1, 1002));
         let t = k.node.oracle_son_veri(AKIS).unwrap();
@@ -5775,8 +6170,15 @@ mod rwa_tests {
         assert_eq!(k.node.oracle_akis(AKIS).unwrap().acik_tur, 2);
         // Zincir saati ilerleyince veri bayatlar.
         k.ilerle(3_601);
-        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::Bayat);
-        assert_eq!(k.node.oracle_tur(AKIS, 1).unwrap().deger, 1002, "gecmis tur okunur");
+        assert_eq!(
+            k.node.oracle_son_veri(AKIS).unwrap_err(),
+            OkumaHatasi::Bayat
+        );
+        assert_eq!(
+            k.node.oracle_tur(AKIS, 1).unwrap().deger,
+            1002,
+            "gecmis tur okunur"
+        );
     }
 
     #[test]
@@ -5788,19 +6190,38 @@ mod rwa_tests {
         k.yetkili_kurum(&kyc, ROL_KYC_ONAYLAYICI, 0);
         k.yetkili_kurum(&orc, ROL_ORACLE_RAPORLAYICI, AKIS);
         let musteri = [0xC1; 20];
-        k.gonder(&kyc, KycKayit { adres: musteri, onay: true, kanit_hash: [1; 32] }.encode());
+        k.gonder(
+            &kyc,
+            KycKayit {
+                adres: musteri,
+                onay: true,
+                kanit_hash: [1; 32],
+            }
+            .encode(),
+        );
         assert!(k.node.kyc_onayli_mi(&musteri));
         // Owner rolu geri alir: ONAY ANINDA gecersiz (bekleme yok).
         k.rol(KurumYetki::new(adres(&kyc), ROL_KYC_ONAYLAYICI, 0, false));
         assert!(!k.node.kyc_onayli_mi(&musteri));
-        k.rol(KurumYetki::new(adres(&orc), ROL_ORACLE_RAPORLAYICI, AKIS, false));
+        k.rol(KurumYetki::new(
+            adres(&orc),
+            ROL_ORACLE_RAPORLAYICI,
+            AKIS,
+            false,
+        ));
         k.gonder(&orc, k.rapor(1, 1000));
-        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::VeriYok);
+        assert_eq!(
+            k.node.oracle_son_veri(AKIS).unwrap_err(),
+            OkumaHatasi::VeriYok
+        );
         // Yeniden verilen rol yine bildirim suresi bekler.
         k.rol(KurumYetki::new(adres(&kyc), ROL_KYC_ONAYLAYICI, 0, true));
         assert!(!k.node.kyc_onayli_mi(&musteri));
         k.ilerle(BILDIRIM);
-        assert!(k.node.kyc_onayli_mi(&musteri), "eski onay rol donunce tekrar gecerli");
+        assert!(
+            k.node.kyc_onayli_mi(&musteri),
+            "eski onay rol donunce tekrar gecerli"
+        );
     }
 
     #[test]
@@ -5811,11 +6232,35 @@ mod rwa_tests {
         k.yetkili_kurum(&a, ROL_KYC_ONAYLAYICI, 0);
         k.yetkili_kurum(&b, ROL_KYC_ONAYLAYICI, 0);
         let musteri = [0xC2; 20];
-        k.gonder(&a, KycKayit { adres: musteri, onay: true, kanit_hash: [1; 32] }.encode());
+        k.gonder(
+            &a,
+            KycKayit {
+                adres: musteri,
+                onay: true,
+                kanit_hash: [1; 32],
+            }
+            .encode(),
+        );
         // B'nin "iptal"i yalniz B'nin kaydidir; A'nin onayi durur.
-        k.gonder(&b, KycKayit { adres: musteri, onay: false, kanit_hash: [2; 32] }.encode());
+        k.gonder(
+            &b,
+            KycKayit {
+                adres: musteri,
+                onay: false,
+                kanit_hash: [2; 32],
+            }
+            .encode(),
+        );
         assert!(k.node.kyc_onayli_mi(&musteri));
-        k.gonder(&a, KycKayit { adres: musteri, onay: false, kanit_hash: [3; 32] }.encode());
+        k.gonder(
+            &a,
+            KycKayit {
+                adres: musteri,
+                onay: false,
+                kanit_hash: [3; 32],
+            }
+            .encode(),
+        );
         assert!(!k.node.kyc_onayli_mi(&musteri));
         let kayitlar = k.node.kyc_kayitlari(&musteri);
         assert_eq!(kayitlar.len(), 2);
@@ -5833,8 +6278,11 @@ mod rwa_tests {
         let eski = Vertex::new_signed(
             NET,
             vec![k.gid],
-            k.islem(YonetimEylemi::Rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true)), &[0, 1])
-                .encode(),
+            k.islem(
+                YonetimEylemi::Rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true)),
+                &[0, 1],
+            )
+            .encode(),
             simdi - 10 * 86_400,
             &k.osk,
         )
@@ -5842,12 +6290,17 @@ mod rwa_tests {
         k.node.ingest_networked(&wire::encode(&eski), simdi);
         let mut ebeveyn = vec![k.son, *eski.id()];
         ebeveyn.sort();
-        let m = Vertex::new_signed(NET, ebeveyn, b"birlestir".to_vec(), simdi, &anahtar(0x5A)).unwrap();
+        let m =
+            Vertex::new_signed(NET, ebeveyn, b"birlestir".to_vec(), simdi, &anahtar(0x5A)).unwrap();
         k.node.ingest_networked(&wire::encode(&m), simdi);
         k.son = *m.id();
         let roller = k.node.kurum_rolleri(&adres(&r));
         assert_eq!(roller.len(), 1);
-        assert_eq!(roller[0].2.etkin, simdi + BILDIRIM, "etkinlik ZINCIR saatinden sayilir");
+        assert_eq!(
+            roller[0].2.etkin,
+            simdi + BILDIRIM,
+            "etkinlik ZINCIR saatinden sayilir"
+        );
         assert!(!k.node.kurum_rol_aktif_mi(&adres(&r), ROL_KYC_ONAYLAYICI, 0));
     }
 
@@ -5865,14 +6318,24 @@ mod rwa_tests {
                 k.gonder(sk, k.rapor(tur, v));
             }
         }
-        k.gonder(&ks[0], KycKayit { adres: [0xD1; 20], onay: true, kanit_hash: [1; 32] }.encode());
+        k.gonder(
+            &ks[0],
+            KycKayit {
+                adres: [0xD1; 20],
+                onay: true,
+                kanit_hash: [1; 32],
+            }
+            .encode(),
+        );
         let owner = adres(&k.osk);
         let ozet = |n: &NodeState| {
             (
                 n.oracle_son_veri(AKIS).cloned(),
                 n.oracle_akis(AKIS).cloned(),
                 n.kyc_onayli_mi(&[0xD1; 20]),
-                ks.iter().map(|sk| n.kurum_rolleri(&adres(sk))).collect::<Vec<_>>(),
+                ks.iter()
+                    .map(|sk| n.kurum_rolleri(&adres(sk)))
+                    .collect::<Vec<_>>(),
                 n.zincir_saati(),
                 n.rwa_yonetim().cloned(),
             )
@@ -5913,7 +6376,10 @@ mod rwa_tests {
         let mut k = Kurulum::yeni();
         let r = anahtar(0x81);
         k.kurum_kaydet(&r, "Banka");
-        k.yonet(YonetimEylemi::Rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true)), &[0, 2]);
+        k.yonet(
+            YonetimEylemi::Rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true)),
+            &[0, 2],
+        );
         assert!(kyc_rolu(&k, &r), "2-of-3 imza ile rol verildi");
         assert_eq!(k.nonce(), 1, "yetkilendirilen islem nonce'u tuketti");
     }
@@ -5923,7 +6389,10 @@ mod rwa_tests {
         let mut k = Kurulum::yeni();
         let r = anahtar(0x82);
         k.kurum_kaydet(&r, "Banka");
-        k.yonet(YonetimEylemi::Rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true)), &[1]);
+        k.yonet(
+            YonetimEylemi::Rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true)),
+            &[1],
+        );
         assert!(!kyc_rolu(&k, &r), "tek imza yetmez");
         assert_eq!(k.nonce(), 0, "reddedilen islem nonce tuketmez");
     }
@@ -5934,18 +6403,27 @@ mod rwa_tests {
         let r = anahtar(0x83);
         k.kurum_kaydet(&r, "Banka");
         // Ayni imzacinin gecerli imzasi IKI kez eklenir -> 1 sayilir < esik 2.
-        k.yonet(YonetimEylemi::Rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true)), &[2, 2]);
+        k.yonet(
+            YonetimEylemi::Rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true)),
+            &[2, 2],
+        );
         assert!(!kyc_rolu(&k, &r));
         assert_eq!(k.nonce(), 0);
         // Birebir imza tekrari (ayni pk+imza iki kez) da ayni sonuc.
-        let mut y = k.islem(YonetimEylemi::Rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true)), &[0]);
+        let mut y = k.islem(
+            YonetimEylemi::Rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true)),
+            &[0],
+        );
         y.imzalar.push(y.imzalar[0]);
         k.gonder(&anahtar(0x77), y.encode());
         assert!(!kyc_rolu(&k, &r));
         let yon = k.node.rwa_yonetim().unwrap();
         assert!(matches!(
             yon.yetkilendir(&y, NET, k.t),
-            Err(crate::rwa::YonetimHatasi::YetersizImza { gecerli: 1, esik: 2 })
+            Err(crate::rwa::YonetimHatasi::YetersizImza {
+                gecerli: 1,
+                esik: 2
+            })
         ));
     }
 
@@ -5954,7 +6432,10 @@ mod rwa_tests {
         let mut k = Kurulum::yeni();
         let r = anahtar(0x84);
         k.kurum_kaydet(&r, "Banka");
-        let ver = k.islem(YonetimEylemi::Rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true)), &[0, 1]);
+        let ver = k.islem(
+            YonetimEylemi::Rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, true)),
+            &[0, 1],
+        );
         k.gonder(&anahtar(0x77), ver.encode());
         assert!(kyc_rolu(&k, &r));
         k.rol(KurumYetki::new(adres(&r), ROL_KYC_ONAYLAYICI, 0, false)); // nonce 1: iptal
@@ -5962,7 +6443,11 @@ mod rwa_tests {
         assert!(iptal_sonrasi[0].2.iptal.is_some());
         // REPLAY: ayni "ver" islemi (gecerli 2 imzali) baska bir vertex'le tekrar gonderilir.
         k.gonder(&anahtar(0x78), ver.encode());
-        assert_eq!(k.node.kurum_rolleri(&adres(&r)), iptal_sonrasi, "eski imza rolu geri getiremez");
+        assert_eq!(
+            k.node.kurum_rolleri(&adres(&r)),
+            iptal_sonrasi,
+            "eski imza rolu geri getiremez"
+        );
         assert_eq!(k.nonce(), 2);
         assert!(matches!(
             k.node.rwa_yonetim().unwrap().yetkilendir(&ver, NET, k.t),
@@ -5981,7 +6466,11 @@ mod rwa_tests {
         // Bir tane daha cikarma -> 1 < esik 2: REDDEDILIR, kume degismez.
         let c1 = pk(&k, 1);
         k.yonet(YonetimEylemi::ImzaciCikar(c1), &[0, 1]);
-        assert_eq!(k.node.rwa_yonetim().unwrap().imzacilar().len(), 2, "esik altina dusurulemez");
+        assert_eq!(
+            k.node.rwa_yonetim().unwrap().imzacilar().len(),
+            2,
+            "esik altina dusurulemez"
+        );
         // Esigi imzaci sayisinin ustune cikarma (3 > 2) ve 1'e dusurme REDDEDILIR.
         k.yonet(YonetimEylemi::Esik(3), &[0, 1]);
         k.yonet(YonetimEylemi::Esik(1), &[0, 1]);
@@ -6061,9 +6550,17 @@ mod rwa_tests {
         k.gonder(&anahtar(0x77), eski.encode());
         assert!(!kyc_rolu(&k, &r));
         // Baska ag (mainnet 3474) icin imzalanmis mesaj devnet'te gecersiz.
-        let mut baska = YonetimIslemi { nonce: 0, son_gecerlilik: k.t + 60, eylem: e, imzalar: vec![] };
+        let mut baska = YonetimIslemi {
+            nonce: 0,
+            son_gecerlilik: k.t + 60,
+            eylem: e,
+            imzalar: vec![],
+        };
         let m = baska.imza_mesaji(crate::mainnet::MAINNET_NETWORK_ID);
-        baska.imzalar = k.ys[..2].iter().map(|sk| (yonetim_pk(sk), sk.sign(&m).to_bytes())).collect();
+        baska.imzalar = k.ys[..2]
+            .iter()
+            .map(|sk| (yonetim_pk(sk), sk.sign(&m).to_bytes()))
+            .collect();
         k.gonder(&anahtar(0x77), baska.encode());
         assert!(!kyc_rolu(&k, &r));
         assert_eq!(k.nonce(), 0);
@@ -6076,7 +6573,14 @@ mod rwa_tests {
         let g = Vertex::new_signed(NET, vec![], vec![1, 1], T0, &anahtar(1)).unwrap();
         n.ingest_networked(&wire::encode(&g), T0);
         let r = anahtar(0x89);
-        let kv = Vertex::new_signed(NET, vec![*g.id()], KurumKaydiTx::new(1, "B".into()).encode(), T0, &r).unwrap();
+        let kv = Vertex::new_signed(
+            NET,
+            vec![*g.id()],
+            KurumKaydiTx::new(1, "B".into()).encode(),
+            T0,
+            &r,
+        )
+        .unwrap();
         n.ingest_networked(&wire::encode(&kv), T0);
         let ys = yonetim_anahtarlari();
         let y = imzali(
@@ -6102,9 +6606,16 @@ mod rwa_tests {
         // Pinli genesis id'si ve 21M dagitim RWA/yonetim eklemesinden ETKILENMEZ.
         let mut m = NodeState::new_mainnet();
         let gid = m
-            .ingest(&crate::mainnet::genesis_wire(), crate::mainnet::ON_SATIS_BASLANGIC)
+            .ingest(
+                &crate::mainnet::genesis_wire(),
+                crate::mainnet::ON_SATIS_BASLANGIC,
+            )
             .expect("pinli genesis");
-        assert_eq!(gid, crate::mainnet::genesis_id(), "genesis id pinli degerle ayni");
+        assert_eq!(
+            gid,
+            crate::mainnet::genesis_id(),
+            "genesis id pinli degerle ayni"
+        );
         let dagitim = crate::genesis::GenesisDagitim::planla(crate::mainnet::dagitim_adresleri());
         assert!(dagitim.kapali_mi(), "dagitim 21M");
         for (adres, miktar) in dagitim.dilimler() {
@@ -6123,8 +6634,14 @@ mod rwa_tests {
         let mut ebeveyn = vec![k.son, *v.id()];
         ebeveyn.sort();
         k.dolgu += 1;
-        let m = Vertex::new_signed(NET, ebeveyn, k.dolgu.to_be_bytes().to_vec(), k.t, &anahtar(0x5A))
-            .unwrap();
+        let m = Vertex::new_signed(
+            NET,
+            ebeveyn,
+            k.dolgu.to_be_bytes().to_vec(),
+            k.t,
+            &anahtar(0x5A),
+        )
+        .unwrap();
         assert!(matches!(
             k.node.ingest_networked(&wire::encode(&m), k.t),
             NetworkIngestOutcome::Integrated(_)
@@ -6141,7 +6658,10 @@ mod rwa_tests {
         k.owner(akis_tanimi(1).encode());
         let servis = anahtar(0x4C);
         let sa = adres(&servis);
-        assert!(!k.node.rwa_yasakli_mi(&sa), "yasak listesi YOK: koruma yalniz rol/imza kapilari");
+        assert!(
+            !k.node.rwa_yasakli_mi(&sa),
+            "yasak listesi YOK: koruma yalniz rol/imza kapilari"
+        );
         // Yapabildigi tek sey (bugunku soulware-core davranisi): tip=1 belge hash'i.
         k.gonder(&servis, crate::tx::Record::new([0xAB; 32]).encode());
         assert_eq!(k.node.belge_dogrula(&[0xAB; 32]).unwrap().kaydeden, sa);
@@ -6149,26 +6669,61 @@ mod rwa_tests {
         k.kurum_kaydet(&servis, "KUBRA");
         // tip=17: kendi anahtariyla (iki kez) imzaladigi yonetim islemi.
         let e = YonetimEylemi::Rol(KurumYetki::new(sa, ROL_KYC_ONAYLAYICI, 0, true));
-        k.gonder(&servis, imzali(e.clone(), 0, k.t + 60, &[&servis, &servis]).encode());
+        k.gonder(
+            &servis,
+            imzali(e.clone(), 0, k.t + 60, &[&servis, &servis]).encode(),
+        );
         // tip=17: yonetim imzacisi eklemeye calisir (kendi anahtarini).
         let ekle = YonetimEylemi::ImzaciEkle(servis.verifying_key().to_bytes());
-        k.gonder(&servis, imzali(ekle, 0, k.t + 60, &[&servis, &k.osk.clone()]).encode());
+        k.gonder(
+            &servis,
+            imzali(ekle, 0, k.t + 60, &[&servis, &k.osk.clone()]).encode(),
+        );
         // tip=18: kendi akisini tanimlamaya calisir.
-        k.gonder(&servis, OracleAkisTanim { akis_no: 99, ..akis_tanimi(1) }.encode());
+        k.gonder(
+            &servis,
+            OracleAkisTanim {
+                akis_no: 99,
+                ..akis_tanimi(1)
+            }
+            .encode(),
+        );
         k.ilerle(BILDIRIM);
         // tip=19 ve tip=20.
         k.gonder(&servis, k.rapor(1, 1_000));
-        k.gonder(&servis, KycKayit { adres: [0xC9; 20], onay: true, kanit_hash: [0; 32] }.encode());
+        k.gonder(
+            &servis,
+            KycKayit {
+                adres: [0xC9; 20],
+                onay: true,
+                kanit_hash: [0; 32],
+            }
+            .encode(),
+        );
         // KANIT: hicbir RWA durumu degismedi.
         assert!(k.node.kurum_rolleri(&sa).is_empty(), "rol yok");
         let y = k.node.rwa_yonetim().unwrap();
-        assert_eq!((y.nonce(), y.imzacilar().len()), (0, 3), "yonetim degismedi");
+        assert_eq!(
+            (y.nonce(), y.imzacilar().len()),
+            (0, 3),
+            "yonetim degismedi"
+        );
         assert!(!y.imzaci_mi(&servis.verifying_key().to_bytes()));
         assert!(k.node.oracle_akis(99).is_none(), "akis tanimlanamadi");
-        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::VeriYok);
-        assert_eq!(k.node.oracle_akis(AKIS).unwrap().acik_raporlar.len(), 0, "rapor tura girmedi");
+        assert_eq!(
+            k.node.oracle_son_veri(AKIS).unwrap_err(),
+            OkumaHatasi::VeriYok
+        );
+        assert_eq!(
+            k.node.oracle_akis(AKIS).unwrap().acik_raporlar.len(),
+            0,
+            "rapor tura girmedi"
+        );
         assert!(!k.node.kyc_onayli_mi(&[0xC9; 20]));
-        assert!(k.node.kyc_kayitlari(&[0xC9; 20]).is_empty(), "KYC kaydi yok");
+        assert!(
+            k.node.kyc_kayitlari(&[0xC9; 20]).is_empty(),
+            "KYC kaydi yok"
+        );
     }
 
     /// GERIYE TARIHLEME: bayatlik/tur penceresi ZINCIR saatine bagli. Eski tarihli
@@ -6188,18 +6743,28 @@ mod rwa_tests {
         assert_eq!(k.node.oracle_son_veri(AKIS).unwrap().guncelleme, yayin);
         k.ilerle(3_601);
         let saat = k.node.zincir_saati();
-        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::Bayat);
+        assert_eq!(
+            k.node.oracle_son_veri(AKIS).unwrap_err(),
+            OkumaHatasi::Bayat
+        );
         // 1) Yayin anina tarihli bos vertex: zincir saati GERI GITMEZ, veri hala bayat.
         eski_tarihli_gonder(&mut k, &anahtar(0x33), b"eski".to_vec(), yayin);
         assert_eq!(k.node.zincir_saati(), saat, "zincir saati monoton");
-        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::Bayat);
+        assert_eq!(
+            k.node.oracle_son_veri(AKIS).unwrap_err(),
+            OkumaHatasi::Bayat
+        );
         // 2) Eski tarihli RAPOR: tur 2'nin ilk raporu; zamani vertex zamani DEGIL.
         let p = k.rapor(2, 1002); // olcum = su an (gecerli); vertex zamani = eski
         eski_tarihli_gonder(&mut k, &a, p, yayin);
         let acik = k.node.oracle_akis(AKIS).unwrap();
         assert_eq!(acik.acik_tur_baslangic, saat, "tur baslangici zincir saati");
         assert_eq!(acik.acik_raporlar.values().next().unwrap().zaman, saat);
-        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::Bayat, "tek rapor < M");
+        assert_eq!(
+            k.node.oracle_son_veri(AKIS).unwrap_err(),
+            OkumaHatasi::Bayat,
+            "tek rapor < M"
+        );
         // 3) Eski tarihli ikinci rapor turu kapatir; guncelleme = ZINCIR saati.
         let p = k.rapor(2, 1003);
         eski_tarihli_gonder(&mut k, &b, p, T0 + 1); // genesis sonrasi en eski an
@@ -6207,13 +6772,19 @@ mod rwa_tests {
         assert_eq!((t.tur_no, t.baslangic, t.guncelleme), (2, saat, saat));
         // 4) Bir bayat_sn sonra yine bayatlar (eski tarihli vertex sureyi uzatmaz).
         k.ilerle(3_601);
-        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::Bayat);
+        assert_eq!(
+            k.node.oracle_son_veri(AKIS).unwrap_err(),
+            OkumaHatasi::Bayat
+        );
     }
 
     // ===== KURUM DOGRULAMA (M-of-N, yalniz gosterim; geriye uyumlu) =====
 
     fn dogrula(kurum: [u8; 20], d: bool) -> YonetimEylemi {
-        YonetimEylemi::KurumDogrula { kurum, dogrulanmis: d }
+        YonetimEylemi::KurumDogrula {
+            kurum,
+            dogrulanmis: d,
+        }
     }
 
     #[test]
@@ -6222,7 +6793,10 @@ mod rwa_tests {
         let r = anahtar(0xA1);
         k.kurum_kaydet(&r, "Tapu Mudurlugu");
         k.gonder(&r, crate::tx::Record::new([0x11; 32]).encode());
-        assert!(!k.node.kurum_dogrulanmis_mi(&adres(&r)), "baslangic: dogrulanmamis");
+        assert!(
+            !k.node.kurum_dogrulanmis_mi(&adres(&r)),
+            "baslangic: dogrulanmamis"
+        );
         // Tek imza: RED.
         k.yonet(dogrula(adres(&r), true), &[0]);
         assert!(!k.node.kurum_dogrulanmis_mi(&adres(&r)));
@@ -6234,12 +6808,18 @@ mod rwa_tests {
         assert_eq!(k.node.kurum_dogrulama(&adres(&r)).unwrap().zaman, k.t);
         // Geri alma da 2-of-3; tek imza geri ALAMAZ.
         k.yonet(dogrula(adres(&r), false), &[2]);
-        assert!(k.node.kurum_dogrulanmis_mi(&adres(&r)), "tek imza geri alamaz");
+        assert!(
+            k.node.kurum_dogrulanmis_mi(&adres(&r)),
+            "tek imza geri alamaz"
+        );
         k.yonet(dogrula(adres(&r), false), &[0, 2]);
         assert!(!k.node.kurum_dogrulanmis_mi(&adres(&r)));
         // REPLAY: eski "dogrula" islemi yeniden gonderilir -> etkisiz.
         k.gonder(&anahtar(0x78), ver.encode());
-        assert!(!k.node.kurum_dogrulanmis_mi(&adres(&r)), "replay reddedildi");
+        assert!(
+            !k.node.kurum_dogrulanmis_mi(&adres(&r)),
+            "replay reddedildi"
+        );
         // Belge kaydi tum bu surecte AYNEN duruyor.
         let b = k.node.belge_dogrula(&[0x11; 32]).unwrap();
         assert_eq!(b.kaydeden, adres(&r));
@@ -6251,10 +6831,16 @@ mod rwa_tests {
         let r = anahtar(0xA2);
         k.kurum_kaydet(&r, "Kendini Dogrulayan AS");
         // Kurum kendini (kendi imzasiyla, iki kez) dogrulayamaz.
-        k.gonder(&r, imzali(dogrula(adres(&r), true), 0, k.t + 60, &[&r, &r]).encode());
+        k.gonder(
+            &r,
+            imzali(dogrula(adres(&r), true), 0, k.t + 60, &[&r, &r]).encode(),
+        );
         // Owner + bir yonetim imzacisi = 1 gecerli imza < 2.
         let osk = k.osk.clone();
-        k.gonder(&osk, imzali(dogrula(adres(&r), true), 0, k.t + 60, &[&osk, &k.ys[0]]).encode());
+        k.gonder(
+            &osk,
+            imzali(dogrula(adres(&r), true), 0, k.t + 60, &[&osk, &k.ys[0]]).encode(),
+        );
         assert!(!k.node.kurum_dogrulanmis_mi(&adres(&r)));
         assert_eq!(k.nonce(), 0);
         // Kayitsiz adres: 2-of-3 imzayla bile dogrulanmis OLMAZ (kimlik yok).
@@ -6281,8 +6867,14 @@ mod rwa_tests {
         let adresler = [adres(&a), adres(&b), adres(&bireysel)];
         let goruntu = |n: &NodeState| {
             (
-                hashler.iter().map(|h| n.belge_dogrula(h)).collect::<Vec<_>>(),
-                adresler.iter().map(|x| n.kurum_sorgula(x).cloned()).collect::<Vec<_>>(),
+                hashler
+                    .iter()
+                    .map(|h| n.belge_dogrula(h))
+                    .collect::<Vec<_>>(),
+                adresler
+                    .iter()
+                    .map(|x| n.kurum_sorgula(x).cloned())
+                    .collect::<Vec<_>>(),
                 n.belge_sayisi(),
                 n.kurum_sayisi(),
             )
@@ -6300,9 +6892,16 @@ mod rwa_tests {
         assert!(!k.node.kurum_dogrulanmis_mi(&adres(&bireysel)));
         // Dogrulanmamis kurumun YENI belgesi reddedilmez; ilk kayit kazanir kurali ayni.
         k.gonder(&b, crate::tx::Record::new([0x24; 32]).encode());
-        assert_eq!(k.node.belge_dogrula(&[0x24; 32]).unwrap().kaydeden, adres(&b));
+        assert_eq!(
+            k.node.belge_dogrula(&[0x24; 32]).unwrap().kaydeden,
+            adres(&b)
+        );
         k.gonder(&a, crate::tx::Record::new([0x22; 32]).encode());
-        assert_eq!(k.node.belge_dogrula(&[0x22; 32]).unwrap().kaydeden, adres(&b), "ilk kayit korunur");
+        assert_eq!(
+            k.node.belge_dogrula(&[0x22; 32]).unwrap().kaydeden,
+            adres(&b),
+            "ilk kayit korunur"
+        );
         // Taze dugum (replay) ayni sonucu uretir.
         let pks: Vec<[u8; 32]> = k.ys.iter().map(yonetim_pk).collect();
         let mut taze = NodeState::new_devnet(NET);
@@ -6329,14 +6928,28 @@ mod rwa_tests {
         let ys = yonetim_anahtarlari();
         let yukle = |dogrulama_denemesi: bool| {
             let mut m = NodeState::new_mainnet();
-            let gid = m.ingest(&crate::mainnet::genesis_wire(), t0).expect("pinli genesis");
+            let gid = m
+                .ingest(&crate::mainnet::genesis_wire(), t0)
+                .expect("pinli genesis");
             assert_eq!(gid, crate::mainnet::genesis_id());
             let mut son = gid;
             // (imzalayan, payload, SABIT zaman): iki dugumde ayni vertex'ler ayni zamanda.
             let mut payloadlar = vec![
-                (kurum.clone(), KurumKaydiTx::new(0, "Tapu Mudurlugu".into()).encode(), t0),
-                (kurum.clone(), crate::tx::Record::new([0x31; 32]).encode(), t0 + 1),
-                (anahtar(0xB2), crate::tx::Record::new([0x32; 32]).encode(), t0 + 2),
+                (
+                    kurum.clone(),
+                    KurumKaydiTx::new(0, "Tapu Mudurlugu".into()).encode(),
+                    t0,
+                ),
+                (
+                    kurum.clone(),
+                    crate::tx::Record::new([0x31; 32]).encode(),
+                    t0 + 1,
+                ),
+                (
+                    anahtar(0xB2),
+                    crate::tx::Record::new([0x32; 32]).encode(),
+                    t0 + 2,
+                ),
             ];
             if dogrulama_denemesi {
                 let mut y = YonetimIslemi {
@@ -6346,10 +6959,17 @@ mod rwa_tests {
                     imzalar: vec![],
                 };
                 let msg = y.imza_mesaji(net);
-                y.imzalar = ys[..2].iter().map(|sk| (yonetim_pk(sk), sk.sign(&msg).to_bytes())).collect();
+                y.imzalar = ys[..2]
+                    .iter()
+                    .map(|sk| (yonetim_pk(sk), sk.sign(&msg).to_bytes()))
+                    .collect();
                 payloadlar.push((anahtar(0x77), y.encode(), t0 + 3));
             }
-            payloadlar.push((anahtar(0xB2), crate::tx::Record::new([0x33; 32]).encode(), t0 + 4));
+            payloadlar.push((
+                anahtar(0xB2),
+                crate::tx::Record::new([0x33; 32]).encode(),
+                t0 + 4,
+            ));
             for (sk, p, zt) in payloadlar {
                 let v = Vertex::new_signed(net, vec![son], p, zt, &sk).unwrap();
                 assert!(matches!(
@@ -6366,9 +6986,15 @@ mod rwa_tests {
             assert!(denemeli.belge_dogrula(&h).is_some());
             assert_eq!(denemeli.belge_dogrula(&h), temiz.belge_dogrula(&h));
         }
-        assert_eq!(denemeli.kurum_sorgula(&adres(&kurum)), temiz.kurum_sorgula(&adres(&kurum)));
+        assert_eq!(
+            denemeli.kurum_sorgula(&adres(&kurum)),
+            temiz.kurum_sorgula(&adres(&kurum))
+        );
         assert_eq!((denemeli.belge_sayisi(), denemeli.kurum_sayisi()), (3, 1));
-        assert!(!denemeli.kurum_dogrulanmis_mi(&adres(&kurum)), "mainnet: dogrulama etkisiz");
+        assert!(
+            !denemeli.kurum_dogrulanmis_mi(&adres(&kurum)),
+            "mainnet: dogrulama etkisiz"
+        );
         assert!(denemeli.kurum_dogrulama(&adres(&kurum)).is_none());
         // Dagitim bakiyeleri de ayni.
         for a in crate::mainnet::dagitim_adresleri() {
@@ -6389,12 +7015,18 @@ mod rwa_tests {
         let simdi = k.t;
         k.gonder(&r, rapor_olcum(1, 1000, simdi + 1));
         k.gonder(&r, rapor_olcum(1, 1000, simdi - 3_601));
-        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::VeriYok);
+        assert_eq!(
+            k.node.oracle_son_veri(AKIS).unwrap_err(),
+            OkumaHatasi::VeriYok
+        );
         assert!(k.node.oracle_akis(AKIS).unwrap().acik_raporlar.is_empty());
         // Eski tarihli VERTEX + eski olcum: zincir saati ilerde -> yine red.
         k.ilerle(10_000);
         eski_tarihli_gonder(&mut k, &r, rapor_olcum(1, 1000, simdi), simdi);
-        assert_eq!(k.node.oracle_son_veri(AKIS).unwrap_err(), OkumaHatasi::VeriYok);
+        assert_eq!(
+            k.node.oracle_son_veri(AKIS).unwrap_err(),
+            OkumaHatasi::VeriYok
+        );
         // Pencere siniri (zincir saati - 3600) kabul -> tur kapanir.
         let simdi = k.node.zincir_saati();
         k.gonder(&r, rapor_olcum(1, 1000, simdi - 3_600));
@@ -6408,18 +7040,29 @@ mod rwa_tests {
     #[test]
     fn rwa_gercek_kubra_adresi_yasakli_rol_alamaz() {
         let kubra = crate::mainnet::KUBRA_IMZA_ADRESI;
-        assert_eq!(hex::encode(kubra), "1f4b6bc66533f80f76c0823d5553b1456653d747");
+        assert_eq!(
+            hex::encode(kubra),
+            "1f4b6bc66533f80f76c0823d5553b1456653d747"
+        );
         assert!(crate::mainnet::RWA_YASAKLI_ADRESLER.contains(&kubra));
         assert!(NodeState::new_mainnet().rwa_yasakli_mi(&kubra));
         let mut k = Kurulum::yeni();
         assert!(k.node.rwa_yasakli_mi(&kubra));
         k.owner(akis_tanimi(1).encode());
         // KUBRA'nin kendini kurum kaydettigi durum (kayit herkese acik).
-        k.node.kurum_registry.kaydet(kubra, "KUBRA".into(), crate::registry::KurumKategori::Ozel, k.t);
+        k.node.kurum_registry.kaydet(
+            kubra,
+            "KUBRA".into(),
+            crate::registry::KurumKategori::Ozel,
+            k.t,
+        );
         k.rol(KurumYetki::new(kubra, ROL_ORACLE_RAPORLAYICI, AKIS, true));
         k.rol(KurumYetki::new(kubra, ROL_KYC_ONAYLAYICI, 0, true));
         k.ilerle(BILDIRIM);
-        assert!(k.node.kurum_rolleri(&kubra).is_empty(), "KUBRA'ya rol verilemez");
+        assert!(
+            k.node.kurum_rolleri(&kubra).is_empty(),
+            "KUBRA'ya rol verilemez"
+        );
         assert_eq!(k.nonce(), 2, "yonetim islemleri yetkili ama eylem etkisiz");
     }
 
@@ -6427,7 +7070,9 @@ mod rwa_tests {
 
     #[test]
     fn rwa_precompile_eth_call_ile_zincir_durumunu_okur() {
-        use crate::rwa_precompile::{oracle_adresi, KYC_ADRESI, SEC_IS_APPROVED, SEC_LATEST_ROUND_DATA};
+        use crate::rwa_precompile::{
+            oracle_adresi, KYC_ADRESI, SEC_IS_APPROVED, SEC_LATEST_ROUND_DATA,
+        };
         let mut k = Kurulum::yeni();
         k.owner(akis_tanimi(1).encode());
         let r = anahtar(0xD1);
@@ -6435,31 +7080,64 @@ mod rwa_tests {
         k.yetkili_kurum(&r, ROL_KYC_ONAYLAYICI, 0);
         let p = k.rapor(1, 2_500);
         k.gonder(&r, p);
-        k.gonder(&r, KycKayit { adres: [0xC5; 20], onay: true, kanit_hash: [0; 32] }.encode());
-        let o = k.node.avm_call(&[0; 20], &oracle_adresi(AKIS), &SEC_LATEST_ROUND_DATA).expect("latestRoundData");
+        k.gonder(
+            &r,
+            KycKayit {
+                adres: [0xC5; 20],
+                onay: true,
+                kanit_hash: [0; 32],
+            }
+            .encode(),
+        );
+        let o = k
+            .node
+            .avm_call(&[0; 20], &oracle_adresi(AKIS), &SEC_LATEST_ROUND_DATA)
+            .expect("latestRoundData");
         assert_eq!(o.len(), 160);
         assert_eq!(o[31], 1, "roundId");
-        assert_eq!(u128::from_be_bytes(o[48..64].try_into().unwrap()), 2_500, "answer");
+        assert_eq!(
+            u128::from_be_bytes(o[48..64].try_into().unwrap()),
+            2_500,
+            "answer"
+        );
         let mut kyc = SEC_IS_APPROVED.to_vec();
         kyc.extend_from_slice(&[0u8; 12]);
         kyc.extend_from_slice(&[0xC5; 20]);
         assert_eq!(k.node.avm_call(&[0; 20], &KYC_ADRESI, &kyc).unwrap()[31], 1);
         // Salt okunur: cagrilar durumu degistirmez; zincir saati ilerleyince veri bayatlar.
         k.ilerle(3_601);
-        assert!(k.node.avm_call(&[0; 20], &oracle_adresi(AKIS), &SEC_LATEST_ROUND_DATA).is_err());
+        assert!(k
+            .node
+            .avm_call(&[0; 20], &oracle_adresi(AKIS), &SEC_LATEST_ROUND_DATA)
+            .is_err());
         assert_eq!(k.node.oracle_tur(AKIS, 1).unwrap().deger, 2_500);
     }
 
     #[test]
     fn rwa_precompile_mainnette_kapali() {
-        use crate::rwa_precompile::{oracle_adresi, KYC_ADRESI, SEC_DECIMALS, SEC_LATEST_ROUND_DATA};
+        use crate::rwa_precompile::{
+            oracle_adresi, KYC_ADRESI, SEC_DECIMALS, SEC_LATEST_ROUND_DATA,
+        };
         let mut m = NodeState::new_mainnet();
-        m.ingest(&crate::mainnet::genesis_wire(), crate::mainnet::ON_SATIS_BASLANGIC).unwrap();
+        m.ingest(
+            &crate::mainnet::genesis_wire(),
+            crate::mainnet::ON_SATIS_BASLANGIC,
+        )
+        .unwrap();
         assert!(!m.rwa_aktif());
         // RWA adresleri mainnet'te siradan bos hesap: veri DONMEZ (Ethereum ile ayni).
-        assert_eq!(m.avm_call(&[0; 20], &oracle_adresi(1), &SEC_LATEST_ROUND_DATA), Ok(vec![]));
-        assert_eq!(m.avm_call(&[0; 20], &oracle_adresi(1), &SEC_DECIMALS), Ok(vec![]));
-        assert_eq!(m.avm_call(&[0; 20], &KYC_ADRESI, &[0x67, 0x34, 0x48, 0xdd]), Ok(vec![]));
+        assert_eq!(
+            m.avm_call(&[0; 20], &oracle_adresi(1), &SEC_LATEST_ROUND_DATA),
+            Ok(vec![])
+        );
+        assert_eq!(
+            m.avm_call(&[0; 20], &oracle_adresi(1), &SEC_DECIMALS),
+            Ok(vec![])
+        );
+        assert_eq!(
+            m.avm_call(&[0; 20], &KYC_ADRESI, &[0x67, 0x34, 0x48, 0xdd]),
+            Ok(vec![])
+        );
         assert!(rwa_gorunum(
             m.rwa_aktif(),
             &m.oracle_registry,
@@ -6474,7 +7152,10 @@ mod rwa_tests {
     fn rwa_mainnet_aktivasyon_oncesi_kapali() {
         let mut m = NodeState::new_mainnet();
         m.zincir_saati = crate::mainnet::TGE_BELIRSIZ;
-        assert!(!m.rwa_aktif(), "mainnet: aktivasyon karari verilmeden RWA KAPALI");
+        assert!(
+            !m.rwa_aktif(),
+            "mainnet: aktivasyon karari verilmeden RWA KAPALI"
+        );
         let d = NodeState::new_devnet(NET);
         assert!(d.rwa_aktif(), "devnet/testnet: acik");
         // Mainnet'te kurucu (owner) her zaman yasakli imzalayan.

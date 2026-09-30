@@ -481,7 +481,11 @@ pub struct ComputeReward {
 
 impl ComputeReward {
     pub fn new(worker: [u8; 20], lsc: crate::registry::Tutar, reward_id: u64) -> Self {
-        ComputeReward { worker, lsc, reward_id }
+        ComputeReward {
+            worker,
+            lsc,
+            reward_id,
+        }
     }
 
     /// Kodla: `[16][worker:20][lsc:16 BE][reward_id:8 BE]` = 45 bayt.
@@ -500,7 +504,10 @@ impl ComputeReward {
             return Err(TxError::UnknownType(first));
         }
         if bytes.len() != 45 {
-            return Err(TxError::BadLength { expected: 45, got: bytes.len() });
+            return Err(TxError::BadLength {
+                expected: 45,
+                got: bytes.len(),
+            });
         }
         let mut worker = [0u8; 20];
         worker.copy_from_slice(&bytes[1..21]);
@@ -651,18 +658,18 @@ impl OnSatisDagitim {
         let mut alici = [0u8; ADDR_LEN];
         alici.copy_from_slice(&bytes[21..41]);
 
-        let mut b16 = [0u8;16];
+        let mut b16 = [0u8; 16];
         b16.copy_from_slice(&bytes[41..57]);
         let aidag = u128::from_be_bytes(b16);
 
         b16.copy_from_slice(&bytes[57..73]);
         let lsc_hediye = u128::from_be_bytes(b16);
 
-        let mut b8=[0u8;8];
+        let mut b8 = [0u8; 8];
         b8.copy_from_slice(&bytes[73..81]);
-        let odeme_ref=u64::from_be_bytes(b8);
+        let odeme_ref = u64::from_be_bytes(b8);
 
-        Ok(Self{
+        Ok(Self {
             odeme_adresi,
             alici,
             aidag,
@@ -1693,7 +1700,12 @@ pub struct KurumYetki {
 
 impl KurumYetki {
     pub fn new(kurum: [u8; ADDR_LEN], rol: u8, kapsam: u32, ver: bool) -> Self {
-        KurumYetki { kurum, rol, kapsam, ver }
+        KurumYetki {
+            kurum,
+            rol,
+            kapsam,
+            ver,
+        }
     }
 
     /// `[kurum:20][rol:1][kapsam:4 BE][islem:1]` = 26 bayt (tip bayti YOK).
@@ -1724,7 +1736,12 @@ impl KurumYetki {
             ROL_ORACLE_RAPORLAYICI | ROL_KYC_ONAYLAYICI => {}
             _ => return Err(TxError::GecersizAlan("bilinmeyen rol")),
         }
-        Ok(KurumYetki { kurum, rol, kapsam, ver })
+        Ok(KurumYetki {
+            kurum,
+            rol,
+            kapsam,
+            ver,
+        })
     }
 }
 
@@ -1753,7 +1770,10 @@ pub enum YonetimEylemi {
     Esik(u8),
     /// Kurumu "dogrulanmis" isaretle (`true`) ya da isareti kaldir (`false`).
     /// Yalniz GOSTERIM bilgisidir: mevcut belge/kurum kayitlarini silmez/reddetmez.
-    KurumDogrula { kurum: [u8; ADDR_LEN], dogrulanmis: bool },
+    KurumDogrula {
+        kurum: [u8; ADDR_LEN],
+        dogrulanmis: bool,
+    },
 }
 
 /// tip=17 cozulmus: yonetim eylemi + cevrimdisi imzalar.
@@ -1827,7 +1847,10 @@ impl YonetimIslemi {
 
     pub fn decode(bytes: &[u8]) -> Result<YonetimIslemi, TxError> {
         tip_kontrol(bytes, TX_TYPE_RWA_YONETIM)?;
-        let kisa = || TxError::BadLength { expected: 1 + 8 + 8 + 1 + 1 + 1, got: bytes.len() };
+        let kisa = || TxError::BadLength {
+            expected: 1 + 8 + 8 + 1 + 1 + 1,
+            got: bytes.len(),
+        };
         if bytes.len() < 1 + 8 + 8 + 1 {
             return Err(kisa());
         }
@@ -1836,8 +1859,13 @@ impl YonetimIslemi {
         let govde_bas = 18;
         let (eylem, govde_len) = match bytes[17] {
             YONETIM_EYLEM_ROL => {
-                let g = bytes.get(govde_bas..govde_bas + KURUM_YETKI_GOVDE_LEN).ok_or_else(kisa)?;
-                (YonetimEylemi::Rol(KurumYetki::govde_oku(g)?), KURUM_YETKI_GOVDE_LEN)
+                let g = bytes
+                    .get(govde_bas..govde_bas + KURUM_YETKI_GOVDE_LEN)
+                    .ok_or_else(kisa)?;
+                (
+                    YonetimEylemi::Rol(KurumYetki::govde_oku(g)?),
+                    KURUM_YETKI_GOVDE_LEN,
+                )
             }
             k @ (YONETIM_EYLEM_IMZACI_EKLE | YONETIM_EYLEM_IMZACI_CIKAR) => {
                 let g = bytes.get(govde_bas..govde_bas + 32).ok_or_else(kisa)?;
@@ -1850,16 +1878,24 @@ impl YonetimIslemi {
                 };
                 (e, 32)
             }
-            YONETIM_EYLEM_ESIK => (YonetimEylemi::Esik(*bytes.get(govde_bas).ok_or_else(kisa)?), 1),
+            YONETIM_EYLEM_ESIK => (
+                YonetimEylemi::Esik(*bytes.get(govde_bas).ok_or_else(kisa)?),
+                1,
+            ),
             YONETIM_EYLEM_KURUM_DOGRULA => {
-                let g = bytes.get(govde_bas..govde_bas + ADDR_LEN + 1).ok_or_else(kisa)?;
+                let g = bytes
+                    .get(govde_bas..govde_bas + ADDR_LEN + 1)
+                    .ok_or_else(kisa)?;
                 let dogrulanmis = match g[ADDR_LEN] {
                     0 => false,
                     1 => true,
                     _ => return Err(TxError::GecersizAlan("dogrulama 0/1 olmali")),
                 };
                 let kurum = oku::<ADDR_LEN>(g, 0);
-                (YonetimEylemi::KurumDogrula { kurum, dogrulanmis }, ADDR_LEN + 1)
+                (
+                    YonetimEylemi::KurumDogrula { kurum, dogrulanmis },
+                    ADDR_LEN + 1,
+                )
             }
             _ => return Err(TxError::GecersizAlan("bilinmeyen yonetim eylemi")),
         };
@@ -1875,7 +1911,12 @@ impl YonetimIslemi {
                 (oku::<32>(bytes, bas), oku::<64>(bytes, bas + 32))
             })
             .collect();
-        Ok(YonetimIslemi { nonce, son_gecerlilik, eylem, imzalar })
+        Ok(YonetimIslemi {
+            nonce,
+            son_gecerlilik,
+            eylem,
+            imzalar,
+        })
     }
 }
 
@@ -1939,7 +1980,9 @@ impl OracleAkisTanim {
             return Err(TxError::GecersizAlan("esik_m 1..=31 olmali"));
         }
         if sapma_bps == 0 || sapma_bps > BPS || kesici_bps == 0 || bayat_sn == 0 {
-            return Err(TxError::GecersizAlan("sapma/kesici/bayat sifir ya da asiri"));
+            return Err(TxError::GecersizAlan(
+                "sapma/kesici/bayat sifir ya da asiri",
+            ));
         }
         let aciklama = std::str::from_utf8(&bytes[ORACLE_AKIS_SABIT_LEN..])
             .map_err(|_| TxError::GecersizAlan("aciklama UTF-8 degil"))?
@@ -2052,11 +2095,25 @@ mod rwa_tx_tests {
     #[test]
     fn rwa_tip_numaralari_cakismaz() {
         let tipler = [
-            TX_TYPE_RECORD, TX_TYPE_TOKEN, TX_TYPE_STAKE, TX_TYPE_TRANSFER, TX_TYPE_KURUM,
-            TX_TYPE_FAUCET, TX_TYPE_LSC_TRANSFER, TX_TYPE_ESLESTIRME, TX_TYPE_AVM_CAGRI,
-            TX_TYPE_ON_SATIS, TX_TYPE_EVM_TRANSFER, TX_TYPE_HAM_ETH_TX, TX_TYPE_ON_SATIS_CLAIM,
-            TX_TYPE_EVM_ON_SATIS_CLAIM, TX_TYPE_TGE_AYARLA, TX_TYPE_COMPUTE_REWARD,
-            TX_TYPE_RWA_YONETIM, TX_TYPE_ORACLE_AKIS_TANIM, TX_TYPE_ORACLE_RAPOR,
+            TX_TYPE_RECORD,
+            TX_TYPE_TOKEN,
+            TX_TYPE_STAKE,
+            TX_TYPE_TRANSFER,
+            TX_TYPE_KURUM,
+            TX_TYPE_FAUCET,
+            TX_TYPE_LSC_TRANSFER,
+            TX_TYPE_ESLESTIRME,
+            TX_TYPE_AVM_CAGRI,
+            TX_TYPE_ON_SATIS,
+            TX_TYPE_EVM_TRANSFER,
+            TX_TYPE_HAM_ETH_TX,
+            TX_TYPE_ON_SATIS_CLAIM,
+            TX_TYPE_EVM_ON_SATIS_CLAIM,
+            TX_TYPE_TGE_AYARLA,
+            TX_TYPE_COMPUTE_REWARD,
+            TX_TYPE_RWA_YONETIM,
+            TX_TYPE_ORACLE_AKIS_TANIM,
+            TX_TYPE_ORACLE_RAPOR,
             TX_TYPE_KYC_KAYIT,
         ];
         let mut s = tipler.to_vec();
@@ -2083,8 +2140,14 @@ mod rwa_tx_tests {
             YonetimEylemi::ImzaciEkle([0xB2; 32]),
             YonetimEylemi::ImzaciCikar([0xB3; 32]),
             YonetimEylemi::Esik(2),
-            YonetimEylemi::KurumDogrula { kurum: [0xC4; 20], dogrulanmis: true },
-            YonetimEylemi::KurumDogrula { kurum: [0xC4; 20], dogrulanmis: false },
+            YonetimEylemi::KurumDogrula {
+                kurum: [0xC4; 20],
+                dogrulanmis: true,
+            },
+            YonetimEylemi::KurumDogrula {
+                kurum: [0xC4; 20],
+                dogrulanmis: false,
+            },
         ];
         for e in eylemler {
             for k in [1, 2, RWA_YONETIM_AZAMI_IMZA] {
@@ -2092,28 +2155,46 @@ mod rwa_tx_tests {
                 let b = y.encode();
                 assert_eq!(YonetimIslemi::decode(&b), Ok(y.clone()));
                 // eksik / fazla bayt
-                assert!(matches!(YonetimIslemi::decode(&b[..b.len() - 1]), Err(TxError::BadLength { .. })));
+                assert!(matches!(
+                    YonetimIslemi::decode(&b[..b.len() - 1]),
+                    Err(TxError::BadLength { .. })
+                ));
                 let mut fazla = b.clone();
                 fazla.push(0);
-                assert!(matches!(YonetimIslemi::decode(&fazla), Err(TxError::BadLength { .. })));
+                assert!(matches!(
+                    YonetimIslemi::decode(&fazla),
+                    Err(TxError::BadLength { .. })
+                ));
             }
         }
         let b = yonetim(YonetimEylemi::Esik(2), 2).encode();
         assert_eq!(YonetimIslemi::decode(&[]), Err(TxError::Empty));
         let mut yanlis = b.clone();
         yanlis[0] = TX_TYPE_KURUM;
-        assert_eq!(YonetimIslemi::decode(&yanlis), Err(TxError::UnknownType(TX_TYPE_KURUM)));
+        assert_eq!(
+            YonetimIslemi::decode(&yanlis),
+            Err(TxError::UnknownType(TX_TYPE_KURUM))
+        );
         // bilinmeyen eylem
         let mut e = b.clone();
         e[17] = 9;
-        assert!(matches!(YonetimIslemi::decode(&e), Err(TxError::GecersizAlan(_))));
+        assert!(matches!(
+            YonetimIslemi::decode(&e),
+            Err(TxError::GecersizAlan(_))
+        ));
         // imza sayisi 0 ve azami+1 reddedilir
         let mut sifir = yonetim(YonetimEylemi::Esik(2), 0).encode();
-        assert!(matches!(YonetimIslemi::decode(&sifir), Err(TxError::GecersizAlan(_))));
+        assert!(matches!(
+            YonetimIslemi::decode(&sifir),
+            Err(TxError::GecersizAlan(_))
+        ));
         sifir.truncate(18);
         assert!(YonetimIslemi::decode(&sifir).is_err());
         let fazla = yonetim(YonetimEylemi::Esik(2), RWA_YONETIM_AZAMI_IMZA + 1).encode();
-        assert!(matches!(YonetimIslemi::decode(&fazla), Err(TxError::GecersizAlan(_))));
+        assert!(matches!(
+            YonetimIslemi::decode(&fazla),
+            Err(TxError::GecersizAlan(_))
+        ));
         // rol govdesi kurallari: bilinmeyen rol, islem 0/1, rol-kapsam uyumu
         for bozuk in [
             KurumYetki::new([1; 20], 9, 0, true),
@@ -2121,22 +2202,42 @@ mod rwa_tx_tests {
             KurumYetki::new([1; 20], ROL_KYC_ONAYLAYICI, 3, true),
         ] {
             let b = yonetim(YonetimEylemi::Rol(bozuk), 2).encode();
-            assert!(matches!(YonetimIslemi::decode(&b), Err(TxError::GecersizAlan(_))));
+            assert!(matches!(
+                YonetimIslemi::decode(&b),
+                Err(TxError::GecersizAlan(_))
+            ));
         }
-        let mut islem = yonetim(YonetimEylemi::Rol(KurumYetki::new([1; 20], 2, 0, true)), 2).encode();
+        let mut islem =
+            yonetim(YonetimEylemi::Rol(KurumYetki::new([1; 20], 2, 0, true)), 2).encode();
         islem[18 + 25] = 2;
-        assert!(matches!(YonetimIslemi::decode(&islem), Err(TxError::GecersizAlan(_))));
+        assert!(matches!(
+            YonetimIslemi::decode(&islem),
+            Err(TxError::GecersizAlan(_))
+        ));
         // kurum dogrulama bayragi yalniz 0/1
-        let mut d = yonetim(YonetimEylemi::KurumDogrula { kurum: [1; 20], dogrulanmis: true }, 2).encode();
+        let mut d = yonetim(
+            YonetimEylemi::KurumDogrula {
+                kurum: [1; 20],
+                dogrulanmis: true,
+            },
+            2,
+        )
+        .encode();
         d[18 + 20] = 2;
-        assert!(matches!(YonetimIslemi::decode(&d), Err(TxError::GecersizAlan(_))));
+        assert!(matches!(
+            YonetimIslemi::decode(&d),
+            Err(TxError::GecersizAlan(_))
+        ));
     }
 
     #[test]
     fn yonetim_imza_mesaji_ag_ve_icerige_bagli() {
         let a = yonetim(YonetimEylemi::Esik(2), 2);
         // Imzalar mesaja dahil DEGIL (imzacilar ayni mesaji imzalar).
-        assert_eq!(a.imza_mesaji(1), yonetim(YonetimEylemi::Esik(2), 3).imza_mesaji(1));
+        assert_eq!(
+            a.imza_mesaji(1),
+            yonetim(YonetimEylemi::Esik(2), 3).imza_mesaji(1)
+        );
         assert!(a.imza_mesaji(1).starts_with(RWA_YONETIM_DOMAIN));
         assert_ne!(a.imza_mesaji(1), a.imza_mesaji(3474), "ag kimligi mesajda");
         let mut n = a.clone();
@@ -2145,7 +2246,10 @@ mod rwa_tx_tests {
         let mut g = a.clone();
         g.son_gecerlilik += 1;
         assert_ne!(a.imza_mesaji(1), g.imza_mesaji(1), "son gecerlilik mesajda");
-        assert_ne!(a.imza_mesaji(1), yonetim(YonetimEylemi::Esik(3), 2).imza_mesaji(1));
+        assert_ne!(
+            a.imza_mesaji(1),
+            yonetim(YonetimEylemi::Esik(3), 2).imza_mesaji(1)
+        );
     }
 
     #[test]
@@ -2160,29 +2264,65 @@ mod rwa_tx_tests {
         uzun.aciklama = "x".repeat(64);
         assert!(OracleAkisTanim::decode(&uzun.encode()).is_ok());
         uzun.aciklama.push('x');
-        assert!(matches!(OracleAkisTanim::decode(&uzun.encode()), Err(TxError::BadLength { .. })));
+        assert!(matches!(
+            OracleAkisTanim::decode(&uzun.encode()),
+            Err(TxError::BadLength { .. })
+        ));
         // gecersiz parametreler
         for bozuk in [
-            OracleAkisTanim { akis_no: 0, ..a.clone() },
-            OracleAkisTanim { esik_m: 0, ..a.clone() },
-            OracleAkisTanim { esik_m: ORACLE_AZAMI_ESIK + 1, ..a.clone() },
-            OracleAkisTanim { sapma_bps: 0, ..a.clone() },
-            OracleAkisTanim { sapma_bps: BPS + 1, ..a.clone() },
-            OracleAkisTanim { kesici_bps: 0, ..a.clone() },
-            OracleAkisTanim { bayat_sn: 0, ..a.clone() },
-            OracleAkisTanim { ondalik: ORACLE_AZAMI_ONDALIK + 1, ..a.clone() },
+            OracleAkisTanim {
+                akis_no: 0,
+                ..a.clone()
+            },
+            OracleAkisTanim {
+                esik_m: 0,
+                ..a.clone()
+            },
+            OracleAkisTanim {
+                esik_m: ORACLE_AZAMI_ESIK + 1,
+                ..a.clone()
+            },
+            OracleAkisTanim {
+                sapma_bps: 0,
+                ..a.clone()
+            },
+            OracleAkisTanim {
+                sapma_bps: BPS + 1,
+                ..a.clone()
+            },
+            OracleAkisTanim {
+                kesici_bps: 0,
+                ..a.clone()
+            },
+            OracleAkisTanim {
+                bayat_sn: 0,
+                ..a.clone()
+            },
+            OracleAkisTanim {
+                ondalik: ORACLE_AZAMI_ONDALIK + 1,
+                ..a.clone()
+            },
         ] {
             assert!(
-                matches!(OracleAkisTanim::decode(&bozuk.encode()), Err(TxError::GecersizAlan(_))),
+                matches!(
+                    OracleAkisTanim::decode(&bozuk.encode()),
+                    Err(TxError::GecersizAlan(_))
+                ),
                 "reddedilmeliydi: {bozuk:?}"
             );
         }
         // bozuk UTF-8
         let mut b = a.encode();
         b.push(0xFF);
-        assert!(matches!(OracleAkisTanim::decode(&b), Err(TxError::GecersizAlan(_))));
+        assert!(matches!(
+            OracleAkisTanim::decode(&b),
+            Err(TxError::GecersizAlan(_))
+        ));
         // kisa
-        assert!(matches!(OracleAkisTanim::decode(&a.encode()[..10]), Err(TxError::BadLength { .. })));
+        assert!(matches!(
+            OracleAkisTanim::decode(&a.encode()[..10]),
+            Err(TxError::BadLength { .. })
+        ));
     }
 
     #[test]
@@ -2199,24 +2339,52 @@ mod rwa_tx_tests {
             assert_eq!(b.len(), 69);
             assert_eq!(OracleRapor::decode(&b), Ok(r));
         }
-        let b = OracleRapor { akis_no: 1, tur_no: 1, deger: 5, olcum_zamani: 0, veri_hash: [0; 32] }.encode();
-        assert!(matches!(OracleRapor::decode(&b[..68]), Err(TxError::BadLength { .. })));
+        let b = OracleRapor {
+            akis_no: 1,
+            tur_no: 1,
+            deger: 5,
+            olcum_zamani: 0,
+            veri_hash: [0; 32],
+        }
+        .encode();
+        assert!(matches!(
+            OracleRapor::decode(&b[..68]),
+            Err(TxError::BadLength { .. })
+        ));
         let mut y = b.clone();
         y[0] = TX_TYPE_KYC_KAYIT;
-        assert_eq!(OracleRapor::decode(&y), Err(TxError::UnknownType(TX_TYPE_KYC_KAYIT)));
+        assert_eq!(
+            OracleRapor::decode(&y),
+            Err(TxError::UnknownType(TX_TYPE_KYC_KAYIT))
+        );
     }
 
     #[test]
     fn kyc_kayit_gidis_donus_ve_sertlik() {
         for onay in [true, false] {
-            let k = KycKayit { adres: [0xC3; 20], onay, kanit_hash: [0x11; 32] };
+            let k = KycKayit {
+                adres: [0xC3; 20],
+                onay,
+                kanit_hash: [0x11; 32],
+            };
             let b = k.encode();
             assert_eq!(b.len(), 54);
             assert_eq!(KycKayit::decode(&b), Ok(k));
         }
-        let mut b = KycKayit { adres: [1; 20], onay: true, kanit_hash: [0; 32] }.encode();
-        assert!(matches!(KycKayit::decode(&b[..53]), Err(TxError::BadLength { .. })));
+        let mut b = KycKayit {
+            adres: [1; 20],
+            onay: true,
+            kanit_hash: [0; 32],
+        }
+        .encode();
+        assert!(matches!(
+            KycKayit::decode(&b[..53]),
+            Err(TxError::BadLength { .. })
+        ));
         b[21] = 7;
-        assert!(matches!(KycKayit::decode(&b), Err(TxError::GecersizAlan(_))));
+        assert!(matches!(
+            KycKayit::decode(&b),
+            Err(TxError::GecersizAlan(_))
+        ));
     }
 }
