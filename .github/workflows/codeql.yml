@@ -18,12 +18,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: CodeQL init
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           # CodeQL Rust desteği (2025 GA). Runner/dil desteklemezse bu iş kırmızı verir → o durumda
           # bu workflow kaldırılır ve clippy + cargo audit/deny ile statik kapsama korunur.
           languages: rust
       - name: CodeQL autobuild
-        uses: github/codeql-action/autobuild@v3
+        uses: github/codeql-action/autobuild@v4
       - name: CodeQL analyze
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
