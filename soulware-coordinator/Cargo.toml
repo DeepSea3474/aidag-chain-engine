@@ -15,7 +15,7 @@ lsc-engine = { path = "../lsc-engine" }
 ed25519-dalek = { version = "=2.1.1", default-features = false, features = ["std"] }
 blake3 = "=1.5.5"
 hex = "=0.4.3"
-rand = "=0.8.5"
+rand = "=0.10.2"
 axum = "=0.7.9"
 # Tarayici katki sayfasi koordinatore ulasabilsin (CORS). Sifir-kurulum icin sart.
 tower-http = { version = "=0.5.2", features = ["cors"] }
