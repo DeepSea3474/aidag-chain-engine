@@ -617,6 +617,48 @@ mod tests {
         son
     }
 
+    /// GÜVENLİK: yönetim (M-of-N) imzası Chain ID'ye (network_id) bağlıdır.
+    /// Test zincirinde (farklı Chain ID) atılmış bir imza MAINNET'te GEÇERLİ SAYILMAZ (çapraz-zincir replay engeli).
+    #[test]
+    fn yonetim_imzasi_chain_id_bagli_capraz_replay_gecmez() {
+        use ed25519_dalek::{Signer, SigningKey};
+        const TEST_CHAIN: u32 = 91343;
+        const MAINNET: u32 = 3474;
+
+        let sk1 = SigningKey::from_bytes(&[7u8; 32]);
+        let pk1 = sk1.verifying_key().to_bytes();
+        let sk2 = SigningKey::from_bytes(&[8u8; 32]);
+        let pk2 = sk2.verifying_key().to_bytes();
+        let reg = YonetimRegistry::kur(&[pk1, pk2], 2).unwrap(); // 2-of-2 (asgari eşik = 2)
+
+        // İşlemi TEST zincirinin Chain ID'siyle imzala (iki imzacı).
+        let mut islem = crate::tx::YonetimIslemi {
+            nonce: 0,
+            son_gecerlilik: u64::MAX,
+            eylem: crate::tx::YonetimEylemi::Esik(2),
+            imzalar: vec![],
+        };
+        let msg_test = islem.imza_mesaji(TEST_CHAIN);
+        islem.imzalar = vec![
+            (pk1, sk1.sign(&msg_test).to_bytes()),
+            (pk2, sk2.sign(&msg_test).to_bytes()),
+        ];
+
+        // TEST zincirinde GEÇERLİ.
+        assert!(
+            reg.yetkilendir(&islem, TEST_CHAIN, 0).is_ok(),
+            "imza kendi Chain ID'sinde geçerli olmalı"
+        );
+        // MAINNET'te GEÇERSİZ: aynı imza, farklı network_id → imza_mesaji farklı → verify başarısız → eşik altı.
+        assert!(
+            matches!(
+                reg.yetkilendir(&islem, MAINNET, 0),
+                Err(YonetimHatasi::YetersizImza { .. })
+            ),
+            "test-zinciri imzası MAINNET'te geçerli SAYILMAMALI (çapraz-zincir replay engeli)"
+        );
+    }
+
     #[test]
     fn akis_ilk_tanim_kazanir() {
         let mut o = OracleRegistry::yeni();
