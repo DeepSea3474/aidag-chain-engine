@@ -19,6 +19,7 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 
 use libp2p::futures::StreamExt;
+use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
 use libp2p::{
     gossipsub, mdns, noise, ping, request_response, tcp, yamux, Multiaddr, PeerId, SwarmBuilder,
@@ -58,7 +59,7 @@ struct LscBehaviour {
     /// Otomatik peer kesfi (yerel ag, mDNS). Manuel IP girmeden node'lar
     /// birbirini bulur. NOT: sadece yerel ag (LAN); internet-olcegi kesif
     /// (bootstrap/Kademlia) ileride.
-    mdns: mdns::tokio::Behaviour,
+    mdns: Toggle<mdns::tokio::Behaviour>,
 }
 
 /// Vertex'lerin yayinlandigi gossipsub topic adi.
@@ -182,8 +183,18 @@ pub async fn run_node(
             // Otomatik peer kesfi (mDNS, yerel ag). Manuel IP girmeden node'lar
             // birbirini bulur; kesfedilen peer'a otomatik dial edilir (event
             // kolunda). NOT: sadece yerel ag (LAN); internet-olcegi kesif ileride.
-            let mdns =
-                mdns::tokio::Behaviour::new(mdns::Config::default(), key.public().to_peer_id())?;
+            // MAINNET'te mDNS (yerel ağ keşfi) KAPALI: public düğüm yerel keşif kullanmaz (bootstrap ile
+            // bağlanır). Böylece hickory-proto (RUSTSEC-2026-0118/0119, mDNS DNS-mesaj ayrıştırma DoS'u)
+            // saldırı yüzeyi mainnet'te kaldırılır. Devnet/testnet'te LAN keşfi için açık kalır.
+            let mdns_mainnet = std::env::var("LSC_MAINNET").ok().as_deref() == Some("1");
+            let mdns: Toggle<mdns::tokio::Behaviour> = if mdns_mainnet {
+                Toggle::from(None)
+            } else {
+                Toggle::from(Some(mdns::tokio::Behaviour::new(
+                    mdns::Config::default(),
+                    key.public().to_peer_id(),
+                )?))
+            };
 
             Ok(LscBehaviour {
                 gossipsub,

@@ -1,0 +1,11 @@
+# Güvenlik istisnaları — gerekçeler deny.toml'da; gözden geçirme 2026-12-29 (deploy/guvenlik-istisna-suresi.sh kontrol eder).
+[advisories]
+ignore = [
+  "RUSTSEC-2026-0118", # hickory-proto DoS — mDNS mainnet'te kapalı
+  "RUSTSEC-2026-0119", # hickory-proto DoS — mDNS mainnet'te kapalı
+  "RUSTSEC-2026-0097", # rand unsound — OsRng kullanıyoruz (uygulanmaz)
+  "RUSTSEC-2025-0055", # tracing-subscriber 0.2.25 — ark-relations transitive; direct 0.3.20
+  "RUSTSEC-2024-0388", # derivative bakımsız (bilgi)
+  "RUSTSEC-2024-0436", # paste bakımsız (bilgi)
+  "RUSTSEC-2025-0119", # number_prefix bakımsız (bilgi)
+]

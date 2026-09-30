@@ -59,10 +59,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: RUSTSEC guvenlik acigi taramasi
-        uses: rustsec/audit-check@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Güvenlik istisnası süresi kontrolü (dolduysa CI kırmızı)
+        run: bash deploy/guvenlik-istisna-suresi.sh
+      - name: cargo-audit kur
+        run: cargo install cargo-audit --locked
+      - name: cargo audit (gerekçeli istisnalarla — .cargo/audit.toml)
+        run: cargo audit
 
   deny:
     name: 5) cargo deny (lisans + kaynak + advisories)
