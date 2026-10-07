@@ -14,14 +14,14 @@ path = "src/main.rs"
 # Zincir: gercek vertex kur + imzala (aidag-lsc motoru). Tip=1 Record ile zincire yazar.
 lsc-engine = { path = "../lsc-engine" }
 ed25519-dalek = { version = "=2.1.1", default-features = false, features = ["std"] }
-blake3 = "=1.5.5"
+blake3 = "=1.8.7"
 hex = "=0.4.3"
 rand = "=0.8.5"
 # HTTP sunucu (bu servisin API'si) + istemci (Claude API + zincir /submit)
 axum = "=0.7.9"
-tokio = { version = "=1.43.1", features = ["rt-multi-thread", "macros", "signal", "net", "time"] }
+tokio = { version = "=1.53.2", features = ["rt-multi-thread", "macros", "signal", "net", "time"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "=1.0.140"
+serde_json = "=1.0.151"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 futures = "0.3"
 tokio-stream = "0.1"
