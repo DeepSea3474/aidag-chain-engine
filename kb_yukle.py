@@ -1,8 +1,8 @@
 import json, re, urllib.request, os
 KB = "http://127.0.0.1:8646/kb/ingest"
-DOSYALAR = ["README.md","ON_SATIS_PLANI.md","TOKENOMICS_TASARIM.md","GENESIS_DAGITIM.md",
-            "YOL_HARITASI.md","EKOSISTEM_VIZYONU.md","MAINNET_TEKONOMIK.md","TESTLER.md",
-            "DUGUM_CALISTIRMA.md","NOTLAR_BILINEN_SINIRLAR.md"]
+# Yalniz halka acik ve duzeltilmis kaynak (kurucu karari 12 Ekim 2026). Ic tasarim/plan
+# belgeleri (ON_SATIS_PLANI, TOKENOMICS_TASARIM vb.) KUBRA bilgi tabanina YUKLENMEZ.
+DOSYALAR = ["README.md"]
 MAX = 3000
 def bol(ad, t):
     p = re.split(r'^(##+\s+.+)$', t, flags=re.M)

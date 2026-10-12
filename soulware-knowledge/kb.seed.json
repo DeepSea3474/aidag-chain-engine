@@ -26,7 +26,7 @@
  },
  {
   "baslik": "SoulwareAI",
-  "metin": "SoulwareAI, insanların boştaki GPU'larını AIDAG/LSC ödülüyle toplayıp merkeziyetsiz bir hesaplama ağı kuran ve bu güçle bağımsız bir yapay zeka geliştirmeyi amaçlayan sistemdir. Yapay zekasının adı KUBRA'dır. Rust tabanlıdır. Kazan-harca kapalı döngüsüyle çalışır: katkıcı worker'lar LSC kazanır, tüketiciler KUBRA'yı kullanmak için LSC harcar.",
+  "metin": "SoulwareAI, insanların boştaki GPU'larını LSC hesaplama kredisi karşılığında toplayıp merkeziyetsiz bir hesaplama ağı kuran ve bu güçle bağımsız bir yapay zeka geliştirmeyi amaçlayan sistemdir. Yapay zekasının adı KUBRA'dır. Rust tabanlıdır. Kazan-harca kapalı döngüsüyle çalışır: katkıcı worker'lar LSC hesaplama kredisi alır, tüketiciler KUBRA'yı kullanmak için LSC harcar.",
   "url": null
  },
  {

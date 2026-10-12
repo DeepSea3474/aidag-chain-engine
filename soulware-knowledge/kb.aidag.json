@@ -148,7 +148,7 @@
  },
  {
   "baslik": "AIDAG ve LSC: iki varlık ve genesis dağılımı",
-  "metin": "AIDAG değer varlığıdır: arz 21.000.000 ile sabittir, genesis'te mühürlenmiştir, madencilik ve basım yoktur, 18 ondalık. LSC gaz (yakıt) varlığıdır: 2.100.000.000; her işlem LSC ile gaz öder, gaz ücreti yüzde 50 yakılır ve yüzde 50 geliştirme havuzuna gider. AIDAG genesis dağılımı: Hazine yüzde 25 (kilitsiz), Ekosistem yüzde 22 (12 ay doğrusal), Likidite yüzde 15 (2 yıl doğrusal), Kurucu yüzde 13 (6 ay bekleme + 24 ay), Topluluk yüzde 12 (6 ay doğrusal), Ön satış escrow yüzde 8 (alıcılar: TGE'de yüzde 20 + 12 ayda yüzde 80), Erken destekçi yüzde 5 (6 ay bekleme + 24 ay). AIDAG bir BSC/ERC-20 token değildir, kontrat adresi yoktur; başka zincirdeki 'AIDAG token' resmi değildir. Mainnet'te faucet yoktur.",
+  "metin": "AIDAG yerel varlıktır (stake, teminat): arz 21.000.000 ile sabittir, genesis'te mühürlenmiştir, madencilik ve basım yoktur, 18 ondalık. LSC gaz (yakıt) varlığıdır: 2.100.000.000; her işlem LSC ile gaz öder, gaz ücreti yüzde 50 yakılır ve yüzde 50 geliştirme havuzuna gider. AIDAG genesis dağılımı: Hazine yüzde 25 (kilitsiz), Ekosistem yüzde 22 (12 ay doğrusal), Likidite yüzde 15 (2 yıl doğrusal), Kurucu yüzde 13 (6 ay bekleme + 24 ay), Topluluk yüzde 12 (6 ay doğrusal), Ön satış escrow yüzde 8 (alıcılar: TGE'de yüzde 20 + 12 ayda yüzde 80), Erken destekçi yüzde 5 (6 ay bekleme + 24 ay). AIDAG bir BSC/ERC-20 token değildir, kontrat adresi yoktur; başka zincirdeki 'AIDAG token' resmi değildir. Mainnet'te faucet yoktur.",
   "url": "https://aidag-chain.com/whitepaper",
   "anahtarlar": [
    "lsc",

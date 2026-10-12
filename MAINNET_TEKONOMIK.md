@@ -5,7 +5,7 @@
 > "Geriye donup sorma yok" — burada yazili olan baglayicidir.
 
 ## SABIT ARZ (degismez)
-- AIDAG: 21.000.000 (deger/teminat). Basim YOK, enflasyon YOK.
+- AIDAG: 21.000.000 (teminat/stake). Basim YOK, enflasyon YOK.
 - LSC: 2.100.000.000 (yakit/gas).
 
 ---

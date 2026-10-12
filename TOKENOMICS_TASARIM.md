@@ -10,7 +10,7 @@ baskalarinin cikarabilecegi tokenlar (Kalkan korumali).
 
 - **Native cekirdek varliklar (resmi, zincire gomulu):**
   - **LSC**  — yakit/gas. Her islem ucreti bununla odenir. Hedef arz: 2.1 milyar.
-  - **AIDAG** — teminat/deger. Stake, Kalkan teminati. Hedef arz: 21 milyon (sabit).
+  - **AIDAG** — teminat/stake varligi. Stake, Kalkan teminati. Hedef arz: 21 milyon (sabit).
 - **Platform-ustu tokenlar (baskalarinin cikardigi):**
   - Kullanici/kurum tokenlari → Kalkan korumali token kayit sisteminde.
   - Kalkan: sahte-token reddi + stake-gated kayit (AIDAG teminatiyla). ZATEN VAR.
@@ -70,7 +70,7 @@ DURUM: HENUZ YOK. Islemler su an UCRETSIZ. Yakit, AVM asamasinda + nonce ile.
 > Asagidaki eski stake/testnet/referans dagilimi ARTIK GECERLI DEGILDIR;
 > tarihsel kayit olarak birakilmistir.
 >
-> **GECERLI DAGILIM:**
+> **TASLAK — UYGULANMADI; gecerli bir teklif DEGILDIR (kurucu karari ve hukuki gorus bekler):**
 > - Alim bonusu: 2.020.000 AIDAG
 >   - Faz 1 alicisina: 1 AIDAG basina +1,5 bonus
 >   - Rezerv turu alicisina: 1 AIDAG basina +1,0 bonus
@@ -88,7 +88,7 @@ Bu havuz testnet katilimcilarina / erken topluluga dagitilacak. Asla asilmaz.
 ### Kategoriler (en etkiliden en dusuk etkiliye)
 | # | Kategori | Oran | Miktar (AIDAG) | Gerekce |
 |---|----------|------|----------------|---------|
-| 1 | Stake | %50 | 1.260.000 | En etkili: token kilitler, ag guvenligi/istikrari. Satis baskisini azaltir. |
+| 1 | Stake | %50 | 1.260.000 | En etkili: token kilitler, ag guvenligi/istikrari. Token kilitler; ag guvenligine katki verir. |
 | 2 | Testnet aktivitesi | %30 | 756.000 | Gercek kullanim: transfer, eslestirme. Spam degil, anlamli islem. |
 | 3 | Referans | %20 | 504.000 | Buyume: yeni GERCEK aktif kullanici getirme (anti-Sybil sart). |
 | | **Toplam** | **%100** | **2.520.000** | Kapali: asla asilmaz. |
@@ -132,18 +132,18 @@ Orantisal dagitim + kisi-basi tavan sonrasi havuzda token artarsa:
 ## GAS MODELI (Kopru 3 — AVM)
 
 > DURUM: TASARIM karari verildi. Kodlama Kopru 3'te (AVM gas baglama).
-> Referans: Ethereum EIP-1559 (base fee yakimi) + BNB (gas burn) kanitli "kullanim->yakim->deger" modeli.
+> Referans: Ethereum EIP-1559 (base fee yakimi) ve BNB gas burn tasarimlari.
 
 ### Karar: Hibrit (yak + gelistirme)
-Her islemde GAS ucreti **LSC** ile odenir (AIDAG degil; AIDAG saf deger token kalir).
+Her islemde GAS ucreti **LSC** ile odenir (AIDAG gas icin kullanilmaz; stake/teminat varligi).
 Alinan LSC ikiye bolunur:
-- **%50 YAKILIR (burn)** -> LSC arzi azalir; kullanim arttikca LSC degerlenir (ETH/BNB mantigi).
+- **%50 YAKILIR (burn)** -> yakilan LSC dolasimdan kalici olarak cikar (EIP-1559 benzeri ucret yakimi). Bu bir arz mekanigidir; fiyat veya deger beklentisi dogurmaz.
 - **%50 GELISTIRME havuzuna** -> proje finansmani (altyapi, gelistirici, bakim). Surdurulebilir.
 
 ### Gerekce
-- Yakim (%50): "kullanim = arz azalmasi = deger" bagi. En degerli zincirlerin (ETH, BNB) kanitli modeli.
+- Yakim (%50): ucretin bir kismini kalici olarak dolasimdan cikarir; ETH (EIP-1559) ve BNB'de kullanilan ucret yakimi tasarimina benzer.
 - Gelistirme (%50): solo/erken asama surdurulebilirligi.
-- AIDAG korunur: gas LSC'den alinir, 21M AIDAG hic yakilmaz/harcanmaz (saf deger token).
+- AIDAG korunur: gas LSC'den alinir, 21M AIDAG hic yakilmaz/harcanmaz (stake/teminat varligi).
 - Seffaf: yakim + gelistirme havuzu zincirde kayitli/denetlenebilir.
 
 ### Gas fiyati

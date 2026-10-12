@@ -4,7 +4,7 @@
 GPU/CPU gücü KUBRA'yı çalıştırır, **AIDAG LSC kazanır**. Kurulum YOK → güven maksimum.
 
 ## Güven-önce tasarım
-- Kurulum yok · açık kaynak · dosyalara dokunmaz · non-custodial (kazanç senin cüzdanında) · izin-önce (başlamadan çalışmaz) · şeffaf canlı panel.
+- Kurulum yok · açık kaynak · dosyalara dokunmaz · non-custodial (LSC kredileri senin cüzdanında) · izin-önce (başlamadan çalışmaz) · şeffaf canlı panel.
 
 ## Test/Deploy adımları
 1. **Koordinatörü public yap** (tarayıcı ona ulaşmalı):
