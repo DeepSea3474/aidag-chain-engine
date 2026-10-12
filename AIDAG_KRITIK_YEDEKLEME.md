@@ -33,7 +33,7 @@ Bunlar kaybolursa/sızarsa **fon gider, geri gelmez.** Her birini **offline + ş
 | Chain ID | `3474` (0xD92) |
 | RPC | `https://aidag-chain.com/rpc/` |
 | Explorer | `https://aidag-chain.com/scan` |
-| Sembol | `AİDAG` (değer) · gas: `LSC` |
+| Sembol | `AİDAG` (tek native coin; gas rolü test ağında devrede, mainnet geçişi planlı) |
 
 ### Kurucu / Genesis (güven kökü — public)
 | Alan | Değer |

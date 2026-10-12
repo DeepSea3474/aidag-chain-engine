@@ -109,11 +109,11 @@ timeline
 
 ---
 
-## Two assets
+## AIDAG — the native coin
 
 ```mermaid
 pie showData
-    title AIDAG genesis distribution (21,000,000 fixed)
+    title AIDAG genesis distribution (21,000,000 supply)
     "Treasury" : 25
     "Ecosystem" : 22
     "Liquidity" : 15
@@ -125,8 +125,8 @@ pie showData
 
 *Figure 4 — The seven genesis slices are fixed in the mainnet genesis and can never exceed 21,000,000 in total.*
 
-- **AIDAG** — native asset (staking, collateral), fixed 21,000,000 (18 decimals), sealed at genesis, no mining, no mint.
-- **LSC** — gas asset (2,100,000,000); charged per transaction and split **50% burn / 50% development pool**.
+- **AIDAG** — the only native coin of AIDAG-Chain (staking, collateral); supply 21,000,000 (18 decimals), sealed at genesis, no mining, no mint.
+- **Gas** — AIDAG's gas role is active on testnet; the mainnet transition is planned. Details: [whitepaper](https://aidag-chain.com/whitepaper).
 
 ---
 

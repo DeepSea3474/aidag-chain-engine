@@ -5,8 +5,8 @@
 > "Geriye donup sorma yok" — burada yazili olan baglayicidir.
 
 ## SABIT ARZ (degismez)
-- AIDAG: 21.000.000 (teminat/stake). Basim YOK, enflasyon YOK.
-- LSC: 2.100.000.000 (yakit/gas).
+- AIDAG: 21.000.000 — AIDAG-Chain'in tek native coini (teminat/stake). Basim YOK, enflasyon YOK.
+- Gas: AIDAG gas rolu test aginda devrede, mainnet gecisi planli.
 
 ---
 

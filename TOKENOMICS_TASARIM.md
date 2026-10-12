@@ -3,37 +3,39 @@
 > DURUM: Bu bir TASARIM belgesidir. Asagidaki kararlar verilmistir ama
 > COGU HENUZ KODLANMAMISTIR. "Su an ne var / ne hedefleniyor / ne zaman"
 > her bolumde acikca belirtilmistir. (Prensip: dusunce ile gercek ortusmeli.)
+>
+> GUNCELLEME (2026-10-12): Ikinci native varlik / ayri gas varligi tasarimi bu belgeden
+> kaldirildi. AIDAG-Chain'in tek native coini AIDAG'dir (arz 21.000.000). AIDAG gas rolu:
+> test aginda devrede, mainnet gecisi planli. Guncel ozet: https://aidag-chain.com/whitepaper
 
 ## Model: Platform (karma)
 AIDAG-Chain bir PLATFORM'dur: kendi resmi varliklari (native) + uzerinde
 baskalarinin cikarabilecegi tokenlar (Kalkan korumali).
 
-- **Native cekirdek varliklar (resmi, zincire gomulu):**
-  - **LSC**  — yakit/gas. Her islem ucreti bununla odenir. Hedef arz: 2.1 milyar.
-  - **AIDAG** — teminat/stake varligi. Stake, Kalkan teminati. Hedef arz: 21 milyon (sabit).
+- **Native coin (resmi, zincire gomulu):**
+  - **AIDAG** — AIDAG-Chain'in tek native coini. Stake, Kalkan teminati; gas rolu test aginda devrede, mainnet gecisi planli. Arz: 21.000.000.
 - **Platform-ustu tokenlar (baskalarinin cikardigi):**
   - Kullanici/kurum tokenlari → Kalkan korumali token kayit sisteminde.
   - Kalkan: sahte-token reddi + stake-gated kayit (AIDAG teminatiyla). ZATEN VAR.
 
 ## Kararlar ve gerekceleri
 
-### K1 — Karma model (native ciftli + platform tokenlari)
+### K1 — Karma model (native coin + platform tokenlari)
 Dogru: Kalkan zaten "baskalari token cikarsin, sahteler engellensin" icin kuruldu.
 Bu vizyonla birebir ortusur.
 
-### K2 — Mevcut bakiye defteri = AIDAG; LSC ikinci defter olarak eklenecek
+### K2 — Bakiye defteri = AIDAG
 Gerekce: mevcut BakiyeRegistry + stake + Kalkan zaten bu defterle calisiyor.
-Onu AIDAG saymak en az degisiklik, en saglam. LSC temiz ikinci defter olur.
-DURUM: su an TEK defter var (AIDAG gibi davraniyor). LSC defteri HENUZ YOK.
+Onu AIDAG saymak en az degisiklik, en saglam.
 
 ### K3 — Arz: Genesis'te tanimli (sabit), uretimle DEGIL
-Gerekce: AIDAG 21M + LSC 2.1B = sabit/sinirli arz. En saglam yol genesis'te
+Gerekce: AIDAG arzi 21.000.000. En saglam yol genesis'te
 toplam arzi baslangicta tanimlamak (Bitcoin-vari netlik, denetlenebilir).
 Uretimle olusma (madencilik) enflasyon+karmasiklik getirir; sabit-arza uymaz.
 DURUM: HENUZ uygulanmadi. Su an arz siniri/genesis-dagitimi kodda YOK.
 
 ### K4 — Yakit mekanizmasi: tasarim var, kodlama AVM asamasinda
-Her islemde LSC harcama = zincirin en hassas parcasi. Nonce (replay koruma,
+Her islemde gas harcama = zincirin en hassas parcasi. Nonce (replay koruma,
 zaten "AVM'de baglanacak" denmisti) ile BIRLIKTE uygulanmali. Yanlis yapilirsa
 calisan transfer/kaliciligi bozar.
 DURUM: HENUZ YOK. Islemler su an UCRETSIZ. Yakit, AVM asamasinda + nonce ile.
@@ -45,8 +47,7 @@ DURUM: HENUZ YOK. Islemler su an UCRETSIZ. Yakit, AVM asamasinda + nonce ile.
 - Kalicilik (reboot'ta zincir geri yuklenir — 14 Haz dogrulandi)
 
 ## Henuz HEDEF (kodlanmadi)
-- AIDAG/LSC iki ayri native defter
-- Sabit arz (21M / 2.1B) + genesis dagitimi
+- Arz (21.000.000) + genesis dagitimi
 - Yakit (gas) mekanizmasi
 - Token SATISI / on satis — EN SON, sadece: olgun mainnet + bagimsiz denetim
   + gercek hukuki danismanlik + yasal yapi sonrasi. (Securities riski; aceleci
@@ -54,7 +55,7 @@ DURUM: HENUZ YOK. Islemler su an UCRETSIZ. Yakit, AVM asamasinda + nonce ile.
 
 ## Sira (sequential)
 1. State modeli olgunlasmasi
-2. AVM asamasi: token ekonomisi (iki defter, arz) + nonce + yakit BIRLIKTE
+2. AVM asamasi: token ekonomisi (arz) + nonce + yakit BIRLIKTE
 3. Mainnet
 4. Bagimsiz denetim
 5. Avukat + yasal yapi
@@ -131,25 +132,15 @@ Orantisal dagitim + kisi-basi tavan sonrasi havuzda token artarsa:
 
 ## GAS MODELI (Kopru 3 — AVM)
 
-> DURUM: TASARIM karari verildi. Kodlama Kopru 3'te (AVM gas baglama).
-> Referans: Ethereum EIP-1559 (base fee yakimi) ve BNB gas burn tasarimlari.
-
-### Karar: Hibrit (yak + gelistirme)
-Her islemde GAS ucreti **LSC** ile odenir (AIDAG gas icin kullanilmaz; stake/teminat varligi).
-Alinan LSC ikiye bolunur:
-- **%50 YAKILIR (burn)** -> yakilan LSC dolasimdan kalici olarak cikar (EIP-1559 benzeri ucret yakimi). Bu bir arz mekanigidir; fiyat veya deger beklentisi dogurmaz.
-- **%50 GELISTIRME havuzuna** -> proje finansmani (altyapi, gelistirici, bakim). Surdurulebilir.
-
-### Gerekce
-- Yakim (%50): ucretin bir kismini kalici olarak dolasimdan cikarir; ETH (EIP-1559) ve BNB'de kullanilan ucret yakimi tasarimina benzer.
-- Gelistirme (%50): solo/erken asama surdurulebilirligi.
-- AIDAG korunur: gas LSC'den alinir, 21M AIDAG hic yakilmaz/harcanmaz (stake/teminat varligi).
-- Seffaf: yakim + gelistirme havuzu zincirde kayitli/denetlenebilir.
+> DURUM (2026-10-12): Gas birimi AIDAG'dir. AIDAG gas rolu test aginda devrede,
+> mainnet gecisi planli. Onceki tasarimdaki ayri gas varligi ve ucret bolusumu
+> (yakim / gelistirme havuzu) bu belgeden kaldirildi. Ucretin nereye gidecegi
+> mainnet gecisi oncesi ayrica belgelenecek.
 
 ### Gas fiyati
 - SU AN: SABIT fiyat (basit, ongorulebilir).
 - MAINNET: dinamik (ag yogunluguna gore, EIP-1559 base fee tarzi) -> sonra.
 
 ### Su an ne var / ne hedef
-- VAR: LSC defteri, AVM Kopru 1 (adres) + Kopru 2 (state/revm) calisiyor (6 test yesil).
-- HEDEF (kodlanacak): Kopru 3 = revm gas ciktisi -> LSC kes -> %50 yak + %50 gelistirme havuzu.
+- VAR: AVM Kopru 1 (adres) + Kopru 2 (state/revm) calisiyor.
+- HEDEF: AIDAG ile gas kesiminin mainnet'e alinmasi (test aginda devrede).

@@ -6,8 +6,8 @@
 
 ## Kopruler (SIRALI)
 1. ADRES: ed25519 adres (20 bayt) <-> revm Address (20 bayt). UYUMLU. En kolay.
-2. STATE/DATABASE: revm Database trait'ini AIDAG/LSC defterleriyle uygula. EN ZOR.
-3. GAS: EVM gas <-> LSC. Gelir EKOSISTEME (kisisel degil).
+2. STATE/DATABASE: revm Database trait'ini zincir defterleriyle uygula. EN ZOR.
+3. GAS: EVM gas <-> AIDAG (test aginda devrede, mainnet gecisi planli). Ucretler EKOSISTEME (kisisel degil).
 4. ISLEM: yeni tip=8 (AVM cagrisi). Nonce burada baglanir. Tip 1-7 korunur.
 5. KALKAN: AVM guvenligi (teminat/yetki + revm sandbox/gas). Sonra AUDIT.
 
@@ -16,7 +16,7 @@
 ## Prensipler
 - Sifirdan VM YAZILMADI: revm cekirdek, kopruler bizim. Ozgunluk butunde.
 - Mevcut sistem (tip 1-7) bozulmaz; 245+ test hep gecmeli.
-- Gas geliri ekosisteme (saygin durus).
+- Gas ucretleri ekosisteme (saygin durus).
 - Olgunlasinca BAGIMSIZ AUDIT (token/mainnet oncesi).
 
 

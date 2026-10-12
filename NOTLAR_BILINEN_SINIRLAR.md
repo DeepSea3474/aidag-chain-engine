@@ -1,4 +1,4 @@
-# AIDAG-Chain / LSC — Bilinen Sınırlamalar ve Gelecek İşler
+# AIDAG-Chain (lsc-engine) — Bilinen Sınırlamalar ve Gelecek İşler
 
 Bu dosya, bilinçli olarak "şimdilik basit" bırakılan ve ileride
 sağlamlaştırılması GEREKEN konuları kaydeder. Her madde, teknik borç

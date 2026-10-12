@@ -1,10 +1,10 @@
 # KUBRA — Tarayıcı Katkı Sayfası (sıfır-kurulum)
 
 `katil.html` — insanlar bir **web sayfası açar, "Katkı Ver" der**, tarayıcılarının
-GPU/CPU gücü KUBRA'yı çalıştırır, **AIDAG LSC kazanır**. Kurulum YOK → güven maksimum.
+GPU/CPU gücü KUBRA'yı çalıştırır, katkıcı **hesaplama kredisi** alır. Kurulum YOK.
 
 ## Güven-önce tasarım
-- Kurulum yok · açık kaynak · dosyalara dokunmaz · non-custodial (LSC kredileri senin cüzdanında) · izin-önce (başlamadan çalışmaz) · şeffaf canlı panel.
+- Kurulum yok · açık kaynak · dosyalara dokunmaz · non-custodial (hesaplama kredileri senin cüzdan adresine) · izin-önce (başlamadan çalışmaz) · şeffaf canlı panel.
 
 ## Test/Deploy adımları
 1. **Koordinatörü public yap** (tarayıcı ona ulaşmalı):
@@ -19,11 +19,11 @@ GPU/CPU gücü KUBRA'yı çalıştırır, **AIDAG LSC kazanır**. Kurulum YOK �
    <script>window.KUBRA_COORD = "https://api.aidag-chain.com";</script>
    ```
 4. **Sayfayı yayınla:** `katil.html`'i siteye koy (örn. `aidag-chain.com/katil.html`).
-5. **Tarayıcıda test:** WebGPU destekli tarayıcı (Chrome/Edge/Firefox güncel) + aç → adres gir → "Katkı Ver" → model iner (birkaç yüz MB, bir kez) → iş çeker → kazanır.
+5. **Tarayıcıda test:** WebGPU destekli tarayıcı (Chrome/Edge/Firefox güncel) + aç → adres gir → "Katkı Ver" → model iner (birkaç yüz MB, bir kez) → iş çeker → kredi alır.
 
 ## Doğrulama notu (bilinen mühendislik düğümü)
 Ağ, güvenliği "aynı işi ≥2 worker yapsın, çıktı eşleşsin" ile sağlar. İki tarayıcı-worker
-aynı modeli (Qwen2.5-1.5B, greedy) çalıştırırsa eşleşir → doğrulanır → ödül. Farklı
+aynı modeli (Qwen2.5-1.5B, greedy) çalıştırırsa eşleşir → doğrulanır → kredi. Farklı
 model/donanım karışımında birebir eşleşme için ileride tolerans/hesap-izi doğrulaması gerekir.
 
 ## Sonraki (Faz 2)

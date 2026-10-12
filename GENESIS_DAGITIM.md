@@ -4,7 +4,7 @@
 > Asagidaki dagitim, genesis blokta sabit olarak yazilir. Uretim/enflasyon yok.
 > Kurucu/ekip paylari 2 YIL vesting ile kademeli acilir (ani satis/dump engellenir).
 
-### AIDAG — 21.000.000 (teminat / deger)
+### AIDAG — 21.000.000 (native coin)
 
 | Havuz | Oran | Miktar | Kilit / Not |
 |---|---|---|---|
@@ -15,16 +15,8 @@
 | Likidite | %15 | 3.150.000 | Ileride borsa/DEX likiditesi |
 | Topluluk & Dagitim | %12 | 2.520.000 | Erken katilimci, odul, airdrop |
 
-### LSC — 2.100.000.000 (yakit / gas)
-
-| Havuz | Oran | Miktar | Kilit / Not |
-|---|---|---|---|
-| Ag kullanimi / dolasim | %50 | 1.050.000.000 | Islem yakiti icin dolasima |
-| Ekosistem | %20 | 420.000.000 | Gelistirici tesvik, faucet |
-| Hazine | %15 | 315.000.000 | Proje yonetiminde (su an kurucu) |
-| Kurucu (sen) | %7 | 147.000.000 | **2 yil vesting** |
-| Erken destekciler (3 kisi) | %3 | 63.000.000 | Her birine ~21.000.000 · 2 yil vesting · YAZILI anlasma sart |
-| Likidite | %5 | 105.000.000 | Borsa/DEX |
+> Not (2026-10-12): AIDAG-Chain'in tek native coini AIDAG'dir; ikinci varlik dagitim tablosu bu belgeden kaldirildi.
+> AIDAG gas rolu: test aginda devrede, mainnet gecisi planli. Guncel mainnet genesis dilimleri: https://aidag-chain.com/whitepaper
 
 ### Vesting (kademeli acilim) — 2 YIL
 - Kurucu & ekip paylari, genesis'te DEGIL, 2 yil boyunca kademeli acilir.
@@ -37,22 +29,21 @@
 - Teknik/is ekibi DEGILler; "erken destekci" kategorisindeler.
 - Paylari kurucunun comertligiyle ayrildi (kurucu kendi agirligini korudu, onlar makul pay aldi).
 - KRITIK: Bu paylasim MUTLAKA yazili + imzali anlasmaya donusmelidir.
-  Sebep: vesting 2 yil, gercek deger ileride. Sozlu kalirsa, yillar sonra
+  Sebep: vesting 2 yil surer. Sozlu kalirsa, yillar sonra
   "ben soyle anlamistim" anlasmazligi cikar, dostluk zarar gorur.
   Yazili anlasma hem destekcileri hem kurucuyu korur.
 
 ### Yonetim (DURUM)
 - Su an proje KURUCU tarafindan yonetilir. DAO (merkeziyetsiz yonetim) SIMDILIK YOK.
-- Kurucu payi (%13 AIDAG / %7 LSC) tamamen kurucuya aittir; baska hicbir yapi (DAO dahil) bu pay uzerinde soz sahibi degildir. Erken destekci payi (%5 AIDAG / %3 LSC) ayridir.
+- Kurucu payi (%13 AIDAG) tamamen kurucuya aittir; baska hicbir yapi (DAO dahil) bu pay uzerinde soz sahibi degildir. Erken destekci payi (%5 AIDAG) ayridir.
 - Hazine = projenin ortak kasasi (kurucu payindan AYRI); su an kurucu yonetir.
 - Merkeziyetsiz yonetim (DAO vb.) ileride, proje olgunlasinca DEGERLENDIRILEBILIR — su an kapsamda degil ama kapi kapali da degil.
 
 ### Onemli prensipler
-- Kurucu payi makul (%13 AIDAG / %7 LSC) — hak edis var ama asiri degil (saygin durus). Erken destekciler ayrica %5 / %3.
-- LSC'nin cogu dolasimda — cunku yakit; insanlar islem yapabilmeli.
+- Kurucu payi makul (%13 AIDAG) — hak edis var ama asiri degil (saygin durus). Erken destekciler ayrica %5.
 - Tum dagitim genesis'te SABIT ve denetlenebilir (gizli mint yok, sonradan basim yok).
 
 ### DURUM
 - Bu bir TASARIM/PLAN'dir. Genesis dagitimi HENUZ KODLANMADI.
-- Kodlama: AIDAG/LSC iki defter + genesis sabit arz adiminda yapilacak.
+- Kodlama: AIDAG defteri + genesis sabit arz adiminda yapilacak.
 - Vesting mantigi: kodlama asamasinda, dikkatli + test edilerek eklenecek.

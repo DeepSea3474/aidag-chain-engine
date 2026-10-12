@@ -43,4 +43,4 @@ SOULWARE_MAX_TOKENS=512 \
 
 ## DePIN bağlantısı
 GPU worker'lar (katkıcılar) büyük modeli koşar → yüksek tier → koordinatör zor işleri
-onlara yönlendirir → katkıcılar LSC kazanır → ağ zekâsı GPU'larla büyür. Kod hazır.
+onlara yönlendirir → katkıcılar hesaplama kredisi alır → ağın işlem kapasitesi GPU'larla artar. Kod hazır.

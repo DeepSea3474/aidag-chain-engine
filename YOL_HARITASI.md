@@ -15,8 +15,8 @@
   / Mainnet live since 26 Jul 2026 (Chain ID 3474), 2 nodes on one server.
 - **Cekirdek DAG + GHOSTDAG** — lsc-engine 339 test yesil; O(n^2) darbogazi cozuldu.
   Mainnet'te PoA komite agirligi (blue-work sisirme engeli).
-- **Iki-varlik ekonomisi** — AIDAG (21M sabit, genesis'te muhurlu 7 dilim + vesting)
-  ve LSC (gaz; %50 yakim / %50 gelistirme havuzu) mainnet'te calisiyor.
+- **Native coin** — AIDAG (arz 21.000.000, genesis'te muhurlu 7 dilim + vesting) mainnet'te.
+  AIDAG gas rolu test aginda devrede, mainnet gecisi planli.
 - **AVM (EVM uyumlu, revm)** — MetaMask, eth_* RPC, ERC-20, secp256k1/ecrecover.
 - **Transfer, Kalkan (token kimlik korumasi), belge dogrulama, kurum kimligi** — mainnet'te.
 - **On satis** — Faz 1 (630k) CANLI; dolunca Faz 2 Rezerv (1,05M) OTOMATIK devam;
@@ -71,8 +71,8 @@ oncesi kabul edilmelidir. / Not done yet; treat everything as pre-audit.
 ## SIRADAKİ ADIMLAR (sıralı — atlanmaz)
 
 9. **Token ekonomisi** [ÇALIŞIYOR]
-   - AIDAG (değer, 21M sabit, genesis'te mühürlü) + LSC (gaz, 2.1B) iki ayrı native defter — mainnet'te.
-   - LSC tam dağıtım tablosunun kodla uyumlanması BEKLİYOR (ON_SATIS_PLANI.md bölüm 3).
+   - AIDAG (tek native coin, arz 21.000.000, genesis'te mühürlü) — mainnet'te.
+   - AIDAG gas rolü: test ağında devrede, mainnet geçişi planlı.
 
 10. **AVM — Akıllı Kontrat Motoru** [ÇALIŞIYOR] — revm tabanlı, EVM uyumlu (MetaMask, ERC-20).
     - Hazır motor entegre (revm / wasm — sıfırdan değil).
@@ -87,7 +87,7 @@ oncesi kabul edilmelidir. / Not done yet; treat everything as pre-audit.
 
 13. **Kendi DEX'i** [HEDEF]
     - AVM üstüne kurulur (akıllı kontrat gerektirir).
-    - Kendi varlıkları (AIDAG/LSC) + Kalkan'lı tokenlar + (köprüyle) dış varlıklar takas edilir.
+    - Kendi native coini (AIDAG) + Kalkan'lı tokenlar + (köprüyle) dış varlıklar takas edilir.
     - Kalkan entegrasyonu: sahte/taklit token DEX'e giremez.
     - AI bilgi/analiz katmanı: anomali tespiti → kullanıcıya UYARI sunar; şüpheli token işaretlenir.
       ÖNEMLİ SINIR: AI ÖNERİR/UYARIR, tek başına kontrol etmez (manipülasyon/merkezileşme riski).

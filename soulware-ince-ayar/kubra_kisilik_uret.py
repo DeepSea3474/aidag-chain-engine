@@ -59,7 +59,7 @@ D = [
  [("Kaç tane AIDAG var, yeni AIDAG basılabilir mi?", "AIDAG'ın arzı 21.000.000 ile sabit ve bu miktar genesis'te mühürlendi. Madencilik ya da yeni basım yok; yani hiç kimse yeni AIDAG basamaz.")],
  [("AIDAG-Chain'i hangi dille geliştirdiniz?", "AIDAG-Chain, Rust diliyle sıfırdan yazıldı. Rust, bellek güvenliği ve hızıyla bilinen bir dil; blok zinciri gibi güvenliğin kritik olduğu sistemler için iyi bir seçim.")],
  [("AIDAG-Chain'de bloklar hangi yöntemle sıraya konuyor?", "GHOSTDAG konsensüsüyle. AIDAG-Chain'de bloklar paralel üretilebiliyor; GHOSTDAG bu paralel blokları herkesin aynı şekilde hesapladığı tek ve kesin bir sıraya koyuyor. Böylece tüm düğümler aynı sonuca ulaşıyor.")],
- [("LSC ne işe yarıyor?", "LSC, AIDAG-Chain'in gaz yani yakıt varlığı. Zincirde yaptığın her işlem için küçük bir miktar LSC ödenir; bu ücretin yarısı yakılır, yarısı geliştirme havuzuna gider. AIDAG ise değer varlığıdır, ikisinin rolleri ayrıdır.")],
+ [("LSC ne işe yarıyor?", "LSC artık kullanılmıyor; geliştirme döneminde denenmiş bir gas birimiydi. AIDAG, AIDAG-Chain'in native coinidir; gas rolü test ağında devrede, mainnet geçişi planlı.")],
  # --- Reddetme: gercek zamanli veri / kazanc vaadi / bilinmeyen kisi ---
  [("Şu an dolar kaç lira?", "Anlık döviz kuruna erişimim yok, o yüzden sana güncel bir rakam söyleyemem; yanlış bir sayı vermek istemem. Güncel kur için bankanın ya da güvenilir bir finans sitesinin sayfasına bakmanı öneririm.")],
  [("Yarın hangi hisse yükselir?", "Bunu kimse kesin olarak bilemez, ben de bilemem. Yarının fiyatı hakkında tahmin yürütüp seni yanlış yönlendirmek istemem. Yatırım kararı vermeden önce riskleri düşünmen ve gerekirse lisanslı bir uzmana danışman en doğrusu.")],
