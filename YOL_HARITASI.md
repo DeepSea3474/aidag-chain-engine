@@ -11,9 +11,9 @@
 
 ### Tamamlanan ve kanitli / Completed & proven
 - **MAINNET CANLI** — 26 Temmuz 2026'dan beri; network/Chain ID 3474, pinli genesis
-  `b82345008ae109d8`, 2 dugum (lsc-node :8645, aidag-mainnet :8655, ayni sunucu).
+  `b82345008ae109d8`, 2 dugum (:8645 ve :8655, ayni sunucu).
   / Mainnet live since 26 Jul 2026 (Chain ID 3474), 2 nodes on one server.
-- **Cekirdek DAG + GHOSTDAG** — lsc-engine 339 test yesil; O(n^2) darbogazi cozuldu.
+- **Cekirdek DAG + GHOSTDAG** — cekirdek motor 339 test yesil; O(n^2) darbogazi cozuldu.
   Mainnet'te PoA komite agirligi (blue-work sisirme engeli).
 - **Native coin** — AIDAG (arz 21.000.000, genesis'te muhurlu 7 dilim + vesting) mainnet'te.
   AIDAG gas rolu test aginda devrede, mainnet gecisi planli.
@@ -66,7 +66,7 @@ oncesi kabul edilmelidir. / Not done yet; treat everything as pre-audit.
 5. **Kurum kimliği** [ÇALIŞIYOR] — Devlet/Özel kategori altyapısı.
 6. **Kalıcılık** [ÇALIŞIYOR] — reboot sonrası zincir geri yüklenir (kanıtlandı).
 7. **Sıfır-kurulum web cüzdanı** [ÇALIŞIYOR] — tarayıcıda, ed25519, gerçek transfer.
-8. **Site ↔ gerçek zincir köprüsü** [ÇALIŞIYOR] — /api/lsc/real, canlı veri.
+8. **Site ↔ gerçek zincir köprüsü** [ÇALIŞIYOR] — site canlı veriyi zincir RPC'sinden okur (/scan, /tahsislerim).
 
 ## SIRADAKİ ADIMLAR (sıralı — atlanmaz)
 
@@ -94,7 +94,7 @@ oncesi kabul edilmelidir. / Not done yet; treat everything as pre-audit.
     - Amaç: DEX'lerdeki güven sorununu (rug pull, sahte token) Kalkan + AI uyarısı ile azaltmak.
 
 14. **Köprü (bridge)** [HEDEF] — EN SON, EN DİKKATLİ.
-    - Dış zincirlerle varlık taşıma (dış değer/likidite getirir).
+    - Dış zincirlerle varlık taşıma.
     - UYARI: köprüler kripto tarihinin en çok hacklenen parçaları (Ronin 600M$, Wormhole 320M$).
     - Denetimsiz ASLA canlıya alınmaz. Audit zorunlu.
     - Köprü-Kalkan: köprü işlemleri için ek koruma katmanı (fikir — köprüyle birlikte tasarlanır).
@@ -141,11 +141,11 @@ Gizli/kritik belgelerin uzun vadeli, değişmez ve kuantuma dayanıklı sakland�
 - Belge cihazdan çıkmaz; kapalı kurumda kopyalama/görüntü alma kısıtlanabilir. Uygulama internete kapalı, kurumun kendi cihazlarına kurulur (web tabanlı değil).
 - KUBRA belge bulma, arama ve özetlemede yardım eder ama erişim iznini kendisi vermez (önerir, insan açar).
 
-## Borsa / değer notu (dürüst)
+## Borsa notu (dürüst)
 - CEX listeleme: pahalı (30-50K$+), mainnet + audit + hacim ister — çok ileri.
 - DEX: AVM sonrası, kendi zincirinde.
 - Token SATIŞI: ön satış CANLI (Faz 1 → Faz 2 otomatik; yalnız aidag-chain.com/on-satis). Karar bilinçli olarak denetimden önceye alındı; listeleme fiyatı garanti edilmez.
-- Değer, spekülasyondan değil GERÇEK KULLANIMDAN gelir.
+- Bu belge yatırım tavsiyesi değildir; fiyat veya getiri beklentisi içermez.
 
 ## Genel mimari ilkesi: zincir + depo eşli saklama (tüm iş kolları için ortak)
 - Zincire yalnızca hash, zaman ve işleyen kaydedilir (kanıt, değişmez).
