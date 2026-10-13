@@ -1,0 +1,10 @@
+# CodeQL kapsami: yalniz test ve benchmark kodu disarida.
+# Uretim kodu (lsc-engine/src, lsc-net/src, soulware-*) taranmaya devam eder.
+# Kaynak icindeki #[cfg(test)] modulleri yol ile ayrilamadigi icin onlarin
+# uyarilari "used in tests" gerekcesiyle tek tek kapatilir.
+name: aidag-codeql
+paths-ignore:
+  - "**/tests/**"
+  - "**/benches/**"
+  - lsc-engine/src/denetim_testleri.rs
+  - lsc-net/src/bin/tps_bench.rs

@@ -23,6 +23,7 @@ jobs:
           # CodeQL Rust desteği (2025 GA). Runner/dil desteklemezse bu iş kırmızı verir → o durumda
           # bu workflow kaldırılır ve clippy + cargo audit/deny ile statik kapsama korunur.
           languages: rust
+          config-file: ./.github/codeql/codeql-config.yml
       - name: CodeQL autobuild
         uses: github/codeql-action/autobuild@v4
       - name: CodeQL analyze
