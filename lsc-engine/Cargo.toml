@@ -10,7 +10,7 @@ license = "BUSL-1.1"
 blake3 = "=1.5.5"
 ed25519-dalek = { version = "=2.1.1", default-features = false, features = ["std", "zeroize"] }
 revm = "41.0.0"
-thiserror = "=1.0.69"
+thiserror = "=2.0.20"
 # secp256k1 (Ethereum/EVM cuzdan uyumu): imza dogrulama. revm zaten k256 kullaniyor.
 k256 = { version = "=0.13.4", features = ["ecdsa"] }
 # keccak256: Ethereum tarzi 0x adres turetme. alloy zaten sha3 0.11 kullaniyor.
