@@ -1810,3 +1810,64 @@ mod rwa_rpc_testleri {
         assert_eq!(v["imzacilar"].as_array().unwrap().len(), 3);
     }
 }
+
+/// Router kurulum testi: parametreli rotalar (`/bakiye/:adres` vb.) gercek bir
+/// HTTP sunucusunda eslesmeli. axum 0.8'deki gibi bir rota sozdizimi kirilimi
+/// router kurulurken panikler ya da rotalari 404'e dusurur; ikisi de burada yakalanir.
+#[cfg(test)]
+mod router_kurulum_testleri {
+    use super::*;
+
+    #[tokio::test]
+    async fn parametreli_rotalar_gercek_sunucuda_eslesir() {
+        let node = lsc_engine::NodeState::new_devnet(1);
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let app = router(
+            Arc::new(RwLock::new(node)),
+            tx,
+            ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await
+            .unwrap();
+        });
+
+        let adres = "0000000000000000000000000000000000000001";
+        let hash = "00".repeat(32);
+        // Yalniz okuma uclari: hicbiri durum yazmaz.
+        let yollar = [
+            "/health".to_string(),
+            format!("/bakiye/{adres}"),
+            format!("/lsc-bakiye/{adres}"),
+            format!("/nonce/{adres}"),
+            format!("/belge/{hash}"),
+            format!("/kurum/{adres}"),
+            "/oracle/1".to_string(),
+            format!("/kyc/{adres}"),
+            format!("/testnet-durum/{adres}"),
+            format!("/eslesme/{adres}"),
+            format!("/on-satis-adres/{adres}"),
+            format!("/on-satis-tahsis/{adres}"),
+        ];
+        let istemci = reqwest::Client::new();
+        for yol in yollar {
+            let cevap = istemci
+                .get(format!("http://{addr}{yol}"))
+                .send()
+                .await
+                .unwrap_or_else(|e| panic!("{yol}: istek basarisiz: {e}"));
+            let kod = cevap.status();
+            assert!(
+                kod != reqwest::StatusCode::NOT_FOUND
+                    && kod != reqwest::StatusCode::METHOD_NOT_ALLOWED,
+                "{yol}: rota eslesmedi ({kod})"
+            );
+        }
+    }
+}
