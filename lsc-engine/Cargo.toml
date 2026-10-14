@@ -7,7 +7,7 @@ description = "LSC (Light Soulware Chain) - AI destekli, DAG tabanli L1 konsensu
 license = "BUSL-1.1"
 
 [dependencies]
-blake3 = "=1.5.5"
+blake3 = "=1.8.7"
 ed25519-dalek = { version = "=2.1.1", default-features = false, features = ["std", "zeroize"] }
 revm = "41.0.0"
 thiserror = "=1.0.69"
@@ -20,7 +20,7 @@ alloy-consensus = { version = "2.1.0", features = ["k256"] }
 alloy-eips = "2.1.0"
 
 [dev-dependencies]
-rayon = "=1.10.0"
+rayon = "=1.12.0"
 rand = "=0.8.5"
 hex = "=0.4.3"
 # Sadece small-order guard izolasyon testi icin (identity pk + R=[s]B forgery).
